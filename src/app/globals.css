@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * ADX Control Ledger, design tokens
+ * Source: Figma "ADX / DR 10 - Admin Panel" variable definitions.
+ * Accent #8D0B0C, zinc neutrals, soft status tints, 8px card radius.
+ */
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 240 10% 3.9%;
+
+        /* App canvas behind cards (#f5f5f5) */
+        --canvas: 0 0% 96.1%;
+
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 10% 3.9%;
+
+        /* Brand accent (#8d0b0c) */
+        --primary: 359.5 85.5% 29.8%;
+        --primary-foreground: 355.7 100% 97.3%;
+
+        --secondary: 240 4.8% 95.9%;
+        --secondary-foreground: 240 5.9% 10%;
+        --muted: 240 4.8% 95.9%;
+        --muted-foreground: 240 3.8% 46.1%;
+        --accent: 240 4.8% 95.9%;
+        --accent-foreground: 240 5.9% 10%;
+
+        /* Destructive actions (#b42318), distinct from the brand red */
+        --destructive: 4 76% 40%;
+        --destructive-foreground: 0 0% 98%;
+
+        /* Status tints (#137a4c/#e7f3ed, #9a5800/#fff4de, …) */
+        --success: 153 73% 28%;
+        --success-soft: 150 33% 93%;
+        --warning: 34 100% 30%;
+        --warning-soft: 40 100% 94%;
+        --danger: 4 76% 40%;
+        --danger-soft: 4 86% 97%;
+        --info: 217 80% 42%;
+        --info-soft: 214 95% 96%;
+
+        --border: 240 5.9% 90%;
+        --input: 240 5.9% 90%;
+        --ring: 359.5 85.5% 29.8%;
+        --radius: 0.5rem;
+    }
+
+    * {
+        @apply border-border;
+    }
+
+    html {
+        @apply antialiased;
+    }
+
+    body {
+        @apply bg-canvas text-foreground text-sm;
+    }
+}
+
+@layer utilities {
+    /* Large numerals, IBM Plex Sans Condensed per the Control Ledger spec */
+    .text-metric {
+        @apply font-metric text-[32px] font-semibold leading-9 tracking-[-0.6px];
+    }
+
+    .scrollbar-thin {
+        scrollbar-width: thin;
+    }
+}
