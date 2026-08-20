@@ -7,7 +7,7 @@ import { typography } from "@/lib/typography"
 const buttonVariants = cva(
   cn(
     typography["button-base"],
-    "inline-flex items-center justify-center whitespace-nowrap rounded-md ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+    "inline-flex items-center justify-center whitespace-nowrap rounded-md ring-offset-background transition-colors active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:translate-y-0 disabled:opacity-50"
   ),
   {
     variants: {

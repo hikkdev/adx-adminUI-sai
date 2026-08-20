@@ -4,6 +4,7 @@
  * Every page reads through these functions rather than importing mock data
  * directly, so swapping in a real API later is a change to this module only.
  */
+import { mergeVariables, notificationTemplates } from "@/data/comms";
 import {
     advertisers,
     agents,
@@ -226,5 +227,8 @@ export const api = {
         get: (key: string) => simulate(onboardingFlows.find((flow) => flow.key === key) ?? null),
         templates: () => simulate(fulfilmentTemplates),
         plans: () => simulate(fulfilmentPlans),
+    },
+    comms: {
+        templates: () => simulate({ templates: notificationTemplates, variables: mergeVariables }),
     },
 };

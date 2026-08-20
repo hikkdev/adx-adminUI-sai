@@ -57,10 +57,12 @@
 
     html {
         @apply antialiased;
+        overflow-x: clip;
     }
 
     body {
         @apply bg-canvas text-foreground text-sm;
+        overflow-x: clip;
     }
 }
 

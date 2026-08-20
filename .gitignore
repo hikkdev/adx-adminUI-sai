@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev server logs
+dev-server.stdout.log
+dev-server.stderr.log
+
+# scratch output
+/artifacts

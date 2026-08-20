@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans_Condensed, Inter } from "next/font/google";
 import { Toaster } from "sonner";
+import { AuthProvider } from "@/lib/auth";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,7 +29,7 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body className={`${inter.variable} ${plexCondensed.variable} font-sans`}>
-                {children}
+                <AuthProvider>{children}</AuthProvider>
                 <Toaster position="bottom-right" richColors closeButton />
             </body>
         </html>

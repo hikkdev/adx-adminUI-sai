@@ -1,20 +1,42 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AtSign } from "lucide-react";
+import { AtSign, Eye, EyeOff, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GoogleMark } from "@/components/adx/google-mark";
+import { ApiError } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
     const router = useRouter();
+    const { signIn } = useAuth();
 
-    const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    const [email, setEmail] = React.useState("");
+    const [password, setPassword] = React.useState("");
+    const [reveal, setReveal] = React.useState(false);
+    const [submitting, setSubmitting] = React.useState(false);
+    const [error, setError] = React.useState<string | null>(null);
+
+    const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        router.push("/verify");
+        setSubmitting(true);
+        setError(null);
+        try {
+            await signIn(email, password);
+            router.replace("/dashboard");
+        } catch (caught) {
+            setError(
+                caught instanceof ApiError
+                    ? caught.message
+                    : "Could not sign you in. Try again."
+            );
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -26,7 +48,7 @@ export default function LoginPage() {
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">Use your @adx.co work email</p>
 
-            <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
                 <div className="space-y-1.5">
                     <Label htmlFor="email">Work email</Label>
                     <div className="relative">
@@ -34,6 +56,8 @@ export default function LoginPage() {
                         <Input
                             id="email"
                             type="email"
+                            value={email}
+                            onChange={(event) => setEmail(event.target.value)}
                             required
                             placeholder="name@adx.co"
                             className="h-11 pl-9"
@@ -41,8 +65,39 @@ export default function LoginPage() {
                         />
                     </div>
                 </div>
-                <Button type="submit" className="h-11 w-full">
-                    Continue with email
+
+                <div className="space-y-1.5">
+                    <Label htmlFor="password">Password</Label>
+                    <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            id="password"
+                            type={reveal ? "text" : "password"}
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                            required
+                            className="h-11 px-9"
+                            autoComplete="current-password"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setReveal((value) => !value)}
+                            aria-label={reveal ? "Hide password" : "Show password"}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                        </button>
+                    </div>
+                </div>
+
+                {error && (
+                    <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+                        {error}
+                    </p>
+                )}
+
+                <Button type="submit" className="h-11 w-full" disabled={submitting}>
+                    {submitting ? "Signing in…" : "Sign in"}
                 </Button>
             </form>
 
