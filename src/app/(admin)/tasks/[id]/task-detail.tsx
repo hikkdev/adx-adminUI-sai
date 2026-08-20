@@ -6,13 +6,20 @@ import * as React from "react";
 import Link from "next/link";
 import {
     AlertTriangle,
+    ArrowDown,
+    ArrowUp,
+    Check,
     CheckCircle2,
     ChevronLeft,
     ChevronDown,
     Circle,
     CircleAlert,
     Link2,
+    Pencil,
+    Plus,
+    Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -26,6 +33,23 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { KpiCard } from "@/components/adx/kpi-card";
 import { SectionCard } from "@/components/adx/section-card";
@@ -39,6 +63,7 @@ import {
     TASK_ISSUE_STATUS_META,
     WORK_TASK_PRIORITY_META,
     WORK_TASK_STATUS_META,
+    type SubTask,
     type TaskIssue,
     type TaskTimeLog,
     type TaskTracking,
@@ -206,8 +231,202 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
     /* Local-only until the tasks service exposes a mutation. */
     const [status, setStatus] = React.useState<WorkTaskStatus>(task.status);
     const [comments, setComments] = React.useState<TaskComment[]>([]);
+    const [subTasks, setSubTasks] = React.useState<SubTask[]>(tracking.subTasks);
+    const [timeLogs, setTimeLogs] = React.useState<TaskTimeLog[]>(tracking.timeLogs);
+    const [dates, setDates] = React.useState(tracking.dates);
+    const [statusHistory, setStatusHistory] = React.useState(tracking.statusHistory);
 
-    const completedSubTasks = tracking.subTasks.filter((subTask) => subTask.completed).length;
+    /* A status change requires a written reason, recorded in the history. */
+    const [pendingStatus, setPendingStatus] = React.useState<WorkTaskStatus | null>(null);
+    const [statusReason, setStatusReason] = React.useState("");
+
+    const [editingSubTaskId, setEditingSubTaskId] = React.useState<string | null>(null);
+    const [subTaskDraft, setSubTaskDraft] = React.useState({ title: "", window: "", progress: 0 });
+
+    const [logOpen, setLogOpen] = React.useState(false);
+    const [logEditingId, setLogEditingId] = React.useState<string | null>(null);
+    const [logDraft, setLogDraft] = React.useState({
+        member: currentAdmin.name,
+        date: "2026-08-10",
+        hours: 1,
+        minutes: 0,
+        kind: "billable" as TaskTimeLog["kind"],
+        note: "",
+    });
+
+    const [datesEditing, setDatesEditing] = React.useState(false);
+    const [datesDraft, setDatesDraft] = React.useState({
+        plannedStart: tracking.dates.plannedStart,
+        plannedEnd: tracking.dates.plannedEnd,
+        actualStart: tracking.dates.actualStart,
+        revisedEnd: tracking.dates.revisedEnd,
+    });
+
+    const withUndo = (message: string, undo: () => void) =>
+        toast.success(message, { action: { label: "Undo", onClick: undo } });
+
+    const applyStatus = () => {
+        if (!pendingStatus || !statusReason.trim()) return;
+        const previousStatus = status;
+        const previousHistory = statusHistory;
+        const next = pendingStatus;
+        setStatus(next);
+        setStatusHistory((history) => [
+            {
+                id: `sc-${Date.now()}`,
+                actor: currentAdmin.name,
+                from: WORK_TASK_STATUS_META[previousStatus].label,
+                to: WORK_TASK_STATUS_META[next].label,
+                at: new Date().toISOString(),
+                reason: statusReason.trim(),
+            },
+            ...history,
+        ]);
+        setPendingStatus(null);
+        setStatusReason("");
+        withUndo(`Status changed to ${WORK_TASK_STATUS_META[next].label}`, () => {
+            setStatus(previousStatus);
+            setStatusHistory(previousHistory);
+        });
+    };
+
+    const moveSubTask = (id: string, direction: -1 | 1) => {
+        setSubTasks((current) => {
+            const index = current.findIndex((item) => item.id === id);
+            const target = index + direction;
+            if (index < 0 || target < 0 || target >= current.length) return current;
+            const next = [...current];
+            [next[index], next[target]] = [next[target], next[index]];
+            return next;
+        });
+    };
+
+    const toggleSubTask = (id: string) =>
+        setSubTasks((current) =>
+            current.map((item) =>
+                item.id === id
+                    ? {
+                          ...item,
+                          completed: !item.completed,
+                          progress: item.completed ? item.progress : 100,
+                      }
+                    : item
+            )
+        );
+
+    const startSubTaskEdit = (subTask: SubTask) => {
+        setEditingSubTaskId(subTask.id);
+        setSubTaskDraft({
+            title: subTask.title,
+            window: subTask.window,
+            progress: subTask.progress,
+        });
+    };
+
+    const saveSubTaskEdit = () => {
+        if (!editingSubTaskId || !subTaskDraft.title.trim()) return;
+        const previous = subTasks;
+        setSubTasks((current) =>
+            current.map((item) =>
+                item.id === editingSubTaskId
+                    ? {
+                          ...item,
+                          title: subTaskDraft.title.trim(),
+                          window: subTaskDraft.window.trim(),
+                          progress: Math.max(0, Math.min(100, subTaskDraft.progress)),
+                          completed: subTaskDraft.progress >= 100,
+                      }
+                    : item
+            )
+        );
+        setEditingSubTaskId(null);
+        withUndo("Work item updated", () => setSubTasks(previous));
+    };
+
+    const addSubTask = () => {
+        const previous = subTasks;
+        const item: SubTask = {
+            id: `st-${Date.now()}`,
+            title: "New work item",
+            status: "todo",
+            completed: false,
+            window: "",
+            progress: 0,
+        };
+        setSubTasks((current) => [...current, item]);
+        startSubTaskEdit(item);
+        withUndo("Work item added", () => setSubTasks(previous));
+    };
+
+    const openLogDialog = (row: TaskTimeLog | null) => {
+        setLogEditingId(row?.id ?? null);
+        setLogDraft(
+            row
+                ? {
+                      member: row.member,
+                      date: row.date,
+                      hours: row.hours,
+                      minutes: row.minutes,
+                      kind: row.kind,
+                      note: row.note,
+                  }
+                : {
+                      member: currentAdmin.name,
+                      date: "2026-08-10",
+                      hours: 1,
+                      minutes: 0,
+                      kind: "billable",
+                      note: "",
+                  }
+        );
+        setLogOpen(true);
+    };
+
+    const saveLog = () => {
+        if (!logDraft.note.trim()) {
+            toast.error("Add a note describing the work.");
+            return;
+        }
+        const previous = timeLogs;
+        if (logEditingId) {
+            setTimeLogs((current) =>
+                current.map((row) =>
+                    row.id === logEditingId
+                        ? { ...row, ...logDraft, note: logDraft.note.trim(), state: "pending" }
+                        : row
+                )
+            );
+            withUndo("Time entry updated", () => setTimeLogs(previous));
+        } else {
+            setTimeLogs((current) => [
+                {
+                    id: `tl-${Date.now()}`,
+                    ...logDraft,
+                    note: logDraft.note.trim(),
+                    state: "pending",
+                    overtime: false,
+                },
+                ...current,
+            ]);
+            withUndo("Time logged", () => setTimeLogs(previous));
+        }
+        setLogOpen(false);
+    };
+
+    const deleteLog = (id: string) => {
+        const previous = timeLogs;
+        setTimeLogs((current) => current.filter((row) => row.id !== id));
+        withUndo("Time entry deleted", () => setTimeLogs(previous));
+    };
+
+    const saveDates = () => {
+        const previous = dates;
+        setDates((current) => ({ ...current, ...datesDraft }));
+        setDatesEditing(false);
+        withUndo("Dates updated", () => setDates(previous));
+    };
+
+    const completedSubTasks = subTasks.filter((subTask) => subTask.completed).length;
     const approvedCount = task.approvers.filter((approver) => approver.approved).length;
     const linkedOpenIssues = issues.filter(
         (issue) => issue.status === "open" || issue.status === "in_progress"
@@ -263,6 +482,9 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                         <Button variant="outline" className="bg-card" asChild>
+                            <Link href={`/tasks/${task.id}/edit`}>Edit task</Link>
+                        </Button>
+                        <Button variant="outline" className="bg-card" asChild>
                             <Link href="/tasks/issues">View issues</Link>
                         </Button>
                         <Button variant="outline" className="bg-card" asChild>
@@ -279,7 +501,7 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                         id: "progress",
                         label: "Task progress",
                         value: `${task.progress}%`,
-                        hint: `${completedSubTasks} of ${tracking.subTasks.length} work items complete`,
+                        hint: `${completedSubTasks} of ${subTasks.length} work items complete`,
                     }}
                 />
                 <KpiCard
@@ -432,47 +654,150 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
 
                     <SectionCard
                         title="Work plan"
-                        description={`${completedSubTasks} of ${tracking.subTasks.length} complete`}
+                        description={`${completedSubTasks} of ${subTasks.length} complete`}
+                        actions={
+                            <Button variant="outline" size="sm" className="bg-card" onClick={addSubTask}>
+                                <Plus className="size-3.5" />
+                                Add item
+                            </Button>
+                        }
                         contentClassName="p-0"
                     >
                         <ol className="divide-y">
-                            {tracking.subTasks.map((subTask) => (
+                            {subTasks.map((subTask, index) => (
                                 <li
                                     key={subTask.id}
-                                    className="grid gap-3 px-5 py-3.5 sm:grid-cols-[minmax(0,1fr)_11rem] sm:items-center sm:gap-6"
+                                    className="grid gap-3 px-5 py-3.5 sm:grid-cols-[minmax(0,1fr)_16rem] sm:items-center sm:gap-6"
                                 >
-                                    <div className="flex min-w-0 items-start gap-3">
-                                        <span className="mt-0.5 shrink-0" aria-hidden>
-                                            {subTask.completed ? (
-                                                <CheckCircle2 className="size-4 text-success" />
-                                            ) : (
-                                                <Circle className="size-4 text-muted-foreground/50" />
-                                            )}
-                                        </span>
-                                        <div className="min-w-0">
-                                            <p
-                                                className={cn(
-                                                    "text-sm font-medium text-foreground",
-                                                    subTask.completed && "text-muted-foreground"
-                                                )}
+                                    {editingSubTaskId === subTask.id ? (
+                                        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2">
+                                            <Input
+                                                value={subTaskDraft.title}
+                                                onChange={(event) =>
+                                                    setSubTaskDraft((d) => ({ ...d, title: event.target.value }))
+                                                }
+                                                aria-label="Work item title"
+                                                className="h-8 min-w-[12rem] flex-1"
+                                            />
+                                            <Input
+                                                value={subTaskDraft.window}
+                                                onChange={(event) =>
+                                                    setSubTaskDraft((d) => ({ ...d, window: event.target.value }))
+                                                }
+                                                aria-label="Work item window"
+                                                placeholder="e.g. Week 2"
+                                                className="h-8 w-32"
+                                            />
+                                            <div className="relative">
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    value={subTaskDraft.progress}
+                                                    onChange={(event) =>
+                                                        setSubTaskDraft((d) => ({
+                                                            ...d,
+                                                            progress: Number(event.target.value),
+                                                        }))
+                                                    }
+                                                    aria-label="Progress percent"
+                                                    className="h-8 w-20 pr-6 text-right tabular-nums"
+                                                />
+                                                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                    %
+                                                </span>
+                                            </div>
+                                            <Button size="sm" className="h-8" onClick={saveSubTaskEdit}>
+                                                <Check className="size-3.5" />
+                                                Save
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8"
+                                                onClick={() => setEditingSubTaskId(null)}
                                             >
-                                                {subTask.title}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                {subTask.window}
-                                            </p>
+                                                Cancel
+                                            </Button>
                                         </div>
-                                    </div>
-                                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 pl-7 sm:pl-0">
-                                        <Progress
-                                            value={subTask.progress}
-                                            className="h-1.5 bg-muted"
-                                            aria-label={`${subTask.title} progress`}
-                                        />
-                                        <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
-                                            {subTask.progress}%
-                                        </span>
-                                    </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex min-w-0 items-start gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleSubTask(subTask.id)}
+                                                    aria-label={
+                                                        subTask.completed
+                                                            ? `Reopen ${subTask.title}`
+                                                            : `Complete ${subTask.title}`
+                                                    }
+                                                    className="mt-0.5 shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                >
+                                                    {subTask.completed ? (
+                                                        <CheckCircle2 className="size-4 text-success" />
+                                                    ) : (
+                                                        <Circle className="size-4 text-muted-foreground/50" />
+                                                    )}
+                                                </button>
+                                                <div className="min-w-0">
+                                                    <p
+                                                        className={cn(
+                                                            "text-sm font-medium text-foreground",
+                                                            subTask.completed && "text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        {subTask.title}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {subTask.window}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 pl-7 sm:pl-0">
+                                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                                                    <Progress
+                                                        value={subTask.progress}
+                                                        className="h-1.5 bg-muted"
+                                                        aria-label={`${subTask.title} progress`}
+                                                    />
+                                                    <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+                                                        {subTask.progress}%
+                                                    </span>
+                                                </div>
+                                                <div className="flex">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="size-7"
+                                                        aria-label={`Move ${subTask.title} up`}
+                                                        disabled={index === 0}
+                                                        onClick={() => moveSubTask(subTask.id, -1)}
+                                                    >
+                                                        <ArrowUp className="size-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="size-7"
+                                                        aria-label={`Move ${subTask.title} down`}
+                                                        disabled={index === subTasks.length - 1}
+                                                        onClick={() => moveSubTask(subTask.id, 1)}
+                                                    >
+                                                        <ArrowDown className="size-3.5" />
+                                                    </Button>
+                                                </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="size-7"
+                                                    aria-label={`Edit ${subTask.title}`}
+                                                    onClick={() => startSubTaskEdit(subTask)}
+                                                >
+                                                    <Pencil className="size-3.5" />
+                                                </Button>
+                                            </div>
+                                        </>
+                                    )}
                                 </li>
                             ))}
                         </ol>
@@ -534,10 +859,21 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                                 )}
                             </TabsContent>
 
-                            <TabsContent value="worklog" className="mt-4">
-                                {tracking.timeLogs.length ? (
+                            <TabsContent value="worklog" className="mt-4 space-y-3">
+                                <div className="flex justify-end">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="bg-card"
+                                        onClick={() => openLogDialog(null)}
+                                    >
+                                        <Plus className="size-3.5" />
+                                        Log time
+                                    </Button>
+                                </div>
+                                {timeLogs.length ? (
                                     <div className="overflow-x-auto rounded-lg border">
-                                        <table className="w-full min-w-[560px] text-sm">
+                                        <table className="w-full min-w-[640px] text-sm">
                                             <thead>
                                                 <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
                                                     <th className="px-4 py-2.5 font-medium">Member</th>
@@ -546,10 +882,13 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                                                     <th className="px-4 py-2.5 font-medium">Type</th>
                                                     <th className="px-4 py-2.5 font-medium">Note</th>
                                                     <th className="px-4 py-2.5 font-medium">State</th>
+                                                    <th className="px-2 py-2.5">
+                                                        <span className="sr-only">Actions</span>
+                                                    </th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {tracking.timeLogs.map((row: TaskTimeLog) => (
+                                                {timeLogs.map((row: TaskTimeLog) => (
                                                     <tr key={row.id} className="border-b last:border-0">
                                                         <td className="px-4 py-3 font-medium text-foreground">
                                                             {row.member}
@@ -575,6 +914,28 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                                                                 }
                                                             />
                                                         </td>
+                                                        <td className="px-2 py-3">
+                                                            <div className="flex justify-end">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="size-7"
+                                                                    aria-label={`Edit entry by ${row.member}`}
+                                                                    onClick={() => openLogDialog(row)}
+                                                                >
+                                                                    <Pencil className="size-3.5" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="size-7"
+                                                                    aria-label={`Delete entry by ${row.member}`}
+                                                                    onClick={() => deleteLog(row.id)}
+                                                                >
+                                                                    <Trash2 className="size-3.5" />
+                                                                </Button>
+                                                            </div>
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -589,7 +950,7 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
 
                             <TabsContent value="history" className="mt-4 space-y-6">
                                 <ol className="space-y-4">
-                                    {tracking.statusHistory.map((change) => (
+                                    {statusHistory.map((change) => (
                                         <li
                                             key={change.id}
                                             className="grid gap-1 border-b pb-4 last:border-0 last:pb-0 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4"
@@ -615,13 +976,13 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                                     ))}
                                 </ol>
 
-                                {tracking.dates.history.length > 0 && (
+                                {dates.history.length > 0 && (
                                     <div>
                                         <h4 className="text-sm font-semibold text-foreground">
                                             Date revisions
                                         </h4>
                                         <ol className="mt-2 space-y-3">
-                                            {tracking.dates.history.map((change) => (
+                                            {dates.history.map((change) => (
                                                 <li
                                                     key={change.id}
                                                     className="grid gap-1 rounded-lg border px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-4"
@@ -658,7 +1019,7 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                             items={[
                                 [
                                     "Status",
-                                    <StatusPicker key="s" status={status} onChange={setStatus} />,
+                                    <StatusPicker key="s" status={status} onChange={(next) => next !== status && setPendingStatus(next)} />,
                                 ],
                                 ["Priority", <StatusBadge key="p" status={WORK_TASK_PRIORITY_META[task.priority]} />],
                                 ["Project", `${task.project} · ${task.projectType}`],
@@ -687,29 +1048,101 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                         </div>
                     </SectionCard>
 
-                    <SectionCard title="Dates">
-                        <FieldList
-                            items={[
-                                ["Planned start", formatDate(tracking.dates.plannedStart)],
-                                [
-                                    "Due",
-                                    <span key="due" className="block text-right">
-                                        {formatDate(task.deadline)}
-                                        <span
-                                            className={cn(
-                                                "block text-xs font-normal",
-                                                schedule.late ? "text-danger" : "text-muted-foreground"
-                                            )}
+                    <SectionCard
+                        title="Dates"
+                        actions={
+                            datesEditing ? (
+                                <div className="flex items-center gap-1.5">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7"
+                                        onClick={() => setDatesEditing(false)}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button size="sm" className="h-7" onClick={saveDates}>
+                                        Save
+                                    </Button>
+                                </div>
+                            ) : (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-7"
+                                    aria-label="Edit dates"
+                                    onClick={() => {
+                                        setDatesDraft({
+                                            plannedStart: dates.plannedStart,
+                                            plannedEnd: dates.plannedEnd,
+                                            actualStart: dates.actualStart,
+                                            revisedEnd: dates.revisedEnd,
+                                        });
+                                        setDatesEditing(true);
+                                    }}
+                                >
+                                    <Pencil className="size-3.5" />
+                                </Button>
+                            )
+                        }
+                    >
+                        {datesEditing ? (
+                            <div className="grid gap-3">
+                                {(
+                                    [
+                                        ["plannedStart", "Planned start"],
+                                        ["plannedEnd", "Planned end"],
+                                        ["actualStart", "Actual start"],
+                                        ["revisedEnd", "Revised end"],
+                                    ] as const
+                                ).map(([key, label]) => (
+                                    <div
+                                        key={key}
+                                        className="grid grid-cols-[minmax(0,1fr)_10rem] items-center gap-3"
+                                    >
+                                        <Label
+                                            htmlFor={`date-${key}`}
+                                            className="text-sm font-normal text-muted-foreground"
                                         >
-                                            {schedule.text}
-                                        </span>
-                                    </span>,
-                                ],
-                                ["Actual start", formatDate(tracking.dates.actualStart)],
-                                ["Revised end", formatDate(tracking.dates.revisedEnd)],
-                                ["Duration", `${tracking.dates.durationDays} days`],
-                            ]}
-                        />
+                                            {label}
+                                        </Label>
+                                        <Input
+                                            id={`date-${key}`}
+                                            type="date"
+                                            value={datesDraft[key]}
+                                            onChange={(event) =>
+                                                setDatesDraft((d) => ({ ...d, [key]: event.target.value }))
+                                            }
+                                            className="h-8 tabular-nums"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <FieldList
+                                items={[
+                                    ["Planned start", formatDate(dates.plannedStart)],
+                                    ["Planned end", formatDate(dates.plannedEnd)],
+                                    [
+                                        "Due",
+                                        <span key="due" className="block text-right">
+                                            {formatDate(task.deadline)}
+                                            <span
+                                                className={cn(
+                                                    "block text-xs font-normal",
+                                                    schedule.late ? "text-danger" : "text-muted-foreground"
+                                                )}
+                                            >
+                                                {schedule.text}
+                                            </span>
+                                        </span>,
+                                    ],
+                                    ["Actual start", formatDate(dates.actualStart)],
+                                    ["Revised end", formatDate(dates.revisedEnd)],
+                                    ["Duration", `${dates.durationDays} days`],
+                                ]}
+                            />
+                        )}
                     </SectionCard>
 
                     <SectionCard title="Time tracking">
@@ -798,6 +1231,176 @@ export function TaskDetail({ task, tracking, issues }: TaskDetailProps) {
                     </SectionCard>
                 </div>
             </div>
+
+            {/* Status change reason ------------------------------------- */}
+            <Dialog
+                open={pendingStatus !== null}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPendingStatus(null);
+                        setStatusReason("");
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Move to {pendingStatus ? WORK_TASK_STATUS_META[pendingStatus].label : ""}
+                        </DialogTitle>
+                        <DialogDescription>
+                            The reason is recorded in the status history.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-1.5 py-1">
+                        <Label htmlFor="status-reason">Reason</Label>
+                        <Textarea
+                            id="status-reason"
+                            rows={3}
+                            value={statusReason}
+                            onChange={(event) => setStatusReason(event.target.value)}
+                            placeholder="Why is the status changing?"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            className="bg-card"
+                            onClick={() => {
+                                setPendingStatus(null);
+                                setStatusReason("");
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={applyStatus} disabled={!statusReason.trim()}>
+                            Change status
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Time log editor ------------------------------------------ */}
+            <Dialog open={logOpen} onOpenChange={setLogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{logEditingId ? "Edit time entry" : "Log time"}</DialogTitle>
+                        <DialogDescription>
+                            {logEditingId
+                                ? "Edited entries go back to pending approval."
+                                : "New entries start as pending approval."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-1">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="log-member">Member</Label>
+                                <Select
+                                    value={logDraft.member}
+                                    onValueChange={(value) =>
+                                        setLogDraft((d) => ({ ...d, member: value }))
+                                    }
+                                >
+                                    <SelectTrigger id="log-member">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {[currentAdmin.name, ...task.team.map((member) => member.name)]
+                                            .filter((name, index, all) => all.indexOf(name) === index)
+                                            .map((name) => (
+                                                <SelectItem key={name} value={name}>
+                                                    {name}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="log-date">Date</Label>
+                                <Input
+                                    id="log-date"
+                                    type="date"
+                                    value={logDraft.date}
+                                    onChange={(event) =>
+                                        setLogDraft((d) => ({ ...d, date: event.target.value }))
+                                    }
+                                    className="tabular-nums"
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="log-hours">Hours</Label>
+                                <Input
+                                    id="log-hours"
+                                    type="number"
+                                    min="0"
+                                    max="24"
+                                    value={logDraft.hours}
+                                    onChange={(event) =>
+                                        setLogDraft((d) => ({ ...d, hours: Number(event.target.value) }))
+                                    }
+                                    className="tabular-nums"
+                                />
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="log-minutes">Minutes</Label>
+                                <Input
+                                    id="log-minutes"
+                                    type="number"
+                                    min="0"
+                                    max="59"
+                                    step="15"
+                                    value={logDraft.minutes}
+                                    onChange={(event) =>
+                                        setLogDraft((d) => ({ ...d, minutes: Number(event.target.value) }))
+                                    }
+                                    className="tabular-nums"
+                                />
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="log-kind">Type</Label>
+                                <Select
+                                    value={logDraft.kind}
+                                    onValueChange={(value) =>
+                                        setLogDraft((d) => ({
+                                            ...d,
+                                            kind: value as TaskTimeLog["kind"],
+                                        }))
+                                    }
+                                >
+                                    <SelectTrigger id="log-kind">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="billable">Billable</SelectItem>
+                                        <SelectItem value="non_billable">Non billable</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="log-note">Note</Label>
+                            <Textarea
+                                id="log-note"
+                                rows={2}
+                                value={logDraft.note}
+                                onChange={(event) =>
+                                    setLogDraft((d) => ({ ...d, note: event.target.value }))
+                                }
+                                placeholder="What was the time spent on?"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" className="bg-card" onClick={() => setLogOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={saveLog}>
+                            {logEditingId ? "Save entry" : "Log time"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { api } from "@/services";
-import { RolesMatrix } from "./roles-matrix";
+import { RoleBuilder } from "./role-builder";
 
 export const metadata: Metadata = { title: "Roles & Permissions" };
 
@@ -9,5 +9,7 @@ export default async function RolesPage() {
         api.roles.capabilityGroups(),
         api.roles.roleColumns(),
     ]);
-    return <RolesMatrix groups={groups} roles={roles} />;
+    return <RoleBuilder groups={groups} roles={roles} />;
 }
+
+

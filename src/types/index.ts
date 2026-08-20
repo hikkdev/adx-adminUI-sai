@@ -9,3 +9,5 @@ export * from "./workspace";
 export * from "./hr";
 export * from "./flows";
 export * from "./comms";
+export * from "./accounts";
+export * from "./fraud";

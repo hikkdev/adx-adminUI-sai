@@ -46,3 +46,6 @@ dev-server.stderr.log
 
 # scratch output
 /artifacts
+
+# Parked copies kept for webpack dev cache
+**/_removed/

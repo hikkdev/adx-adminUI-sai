@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, Plus, Search } from "lucide-react";
+import { ArrowUpRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,6 +27,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { KpiCard } from "@/components/adx/kpi-card";
 import { FieldList } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { ConfirmDialog } from "@/components/adx/confirm-dialog";
+import {
+    ActiveFilters,
+    FilterPanel,
+    type Facet,
+    type FilterSelection,
+} from "@/components/adx/filter-panel";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
 import {
@@ -60,28 +67,24 @@ const STATUS_RANK: Record<TaskIssue["status"], number> = {
     closed: 3,
 };
 
-type QueueFilter = "triage" | "working" | "settled" | "all";
-
-const FILTERS: { id: QueueFilter; label: string; match: (issue: TaskIssue) => boolean }[] = [
-    { id: "triage", label: "Open", match: (i) => i.status === "open" },
-    { id: "working", label: "In progress", match: (i) => i.status === "in_progress" },
-    {
-        id: "settled",
-        label: "Settled",
-        match: (i) => i.status === "resolved" || i.status === "closed",
-    },
-    { id: "all", label: "All", match: () => true },
-];
-
 const isLive = (issue: TaskIssue) =>
     issue.status === "open" || issue.status === "in_progress";
 
 export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewProps) {
     const [issues, setIssues] = React.useState(initialIssues);
-    const [filter, setFilter] = React.useState<QueueFilter>("triage");
+    const [selection, setSelection] = React.useState<FilterSelection>({ status: ["open"] });
     const [query, setQuery] = React.useState("");
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [raiseOpen, setRaiseOpen] = React.useState(false);
+    const [editOpen, setEditOpen] = React.useState(false);
+    const [deleteOpen, setDeleteOpen] = React.useState(false);
+    const [editDraft, setEditDraft] = React.useState({
+        topic: "",
+        description: "",
+        type: "bug" as TaskIssueType,
+        severity: "medium" as TaskIssueSeverity,
+        assignedTo: "",
+    });
 
     const [draft, setDraft] = React.useState({
         taskId: tasks[0]?.id ?? "",
@@ -104,11 +107,56 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
     const heldTasks = new Set(issues.filter(isLive).map((issue) => issue.taskId));
     const oldestUrgent = urgent[0];
 
+    const facets: Facet[] = React.useMemo(
+        () => [
+            {
+                id: "status",
+                label: "Status",
+                options: (
+                    Object.keys(TASK_ISSUE_STATUS_META) as (keyof typeof TASK_ISSUE_STATUS_META)[]
+                ).map((value) => ({
+                    value,
+                    label: TASK_ISSUE_STATUS_META[value].label,
+                    count: issues.filter((issue) => issue.status === value).length,
+                })),
+            },
+            {
+                id: "severity",
+                label: "Severity",
+                options: (
+                    Object.keys(
+                        TASK_ISSUE_SEVERITY_META
+                    ) as (keyof typeof TASK_ISSUE_SEVERITY_META)[]
+                ).map((value) => ({
+                    value,
+                    label: TASK_ISSUE_SEVERITY_META[value].label,
+                    count: issues.filter((issue) => issue.severity === value).length,
+                })),
+            },
+            {
+                id: "assignee",
+                label: "Assigned to",
+                options: Array.from(new Set(issues.map((issue) => issue.assignedTo)))
+                    .sort()
+                    .map((name) => ({
+                        value: name,
+                        label: name,
+                        count: issues.filter((issue) => issue.assignedTo === name).length,
+                    })),
+            },
+        ],
+        [issues]
+    );
+
     const queue = React.useMemo(() => {
-        const activeFilter = FILTERS.find((f) => f.id === filter) ?? FILTERS[3];
+        const statuses = selection.status ?? [];
+        const severities = selection.severity ?? [];
+        const assignees = selection.assignee ?? [];
         const needle = query.trim().toLowerCase();
         return issues
-            .filter(activeFilter.match)
+            .filter((issue) => (statuses.length ? statuses.includes(issue.status) : true))
+            .filter((issue) => (severities.length ? severities.includes(issue.severity) : true))
+            .filter((issue) => (assignees.length ? assignees.includes(issue.assignedTo) : true))
             .filter((issue) =>
                 needle
                     ? [issue.id, issue.topic, issue.description, issue.taskTitle, issue.assignedTo]
@@ -123,7 +171,7 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
                     SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
                     a.id.localeCompare(b.id)
             );
-    }, [issues, filter, query]);
+    }, [issues, selection, query]);
 
     /* Keep a row selected so the detail pane is never a dead placeholder. */
     const selected =
@@ -159,7 +207,6 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
         setIssues((current) => [created, ...current]);
         setRaiseOpen(false);
         setDraft((current) => ({ ...current, topic: "", description: "" }));
-        setFilter("triage");
         setSelectedId(created.id);
         toast.success(`${created.id} raised`, { description: created.topic });
     };
@@ -184,6 +231,57 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
             )
         );
         toast.success(`${id} marked ${TASK_ISSUE_STATUS_META[status].label.toLowerCase()}`);
+    };
+
+    const openEdit = () => {
+        if (!selected) return;
+        setEditDraft({
+            topic: selected.topic,
+            description: selected.description,
+            type: selected.type,
+            severity: selected.severity,
+            assignedTo: selected.assignedTo,
+        });
+        setEditOpen(true);
+    };
+
+    const saveEdit = () => {
+        if (!selected) return;
+        if (!editDraft.topic.trim() || !editDraft.description.trim()) {
+            toast.error("Topic and description are required.");
+            return;
+        }
+        const previous = issues;
+        setIssues((current) =>
+            current.map((issue) =>
+                issue.id === selected.id
+                    ? {
+                          ...issue,
+                          topic: editDraft.topic.trim(),
+                          description: editDraft.description.trim(),
+                          type: editDraft.type,
+                          severity: editDraft.severity,
+                          assignedTo: editDraft.assignedTo,
+                      }
+                    : issue
+            )
+        );
+        setEditOpen(false);
+        toast.success(`${selected.id} updated`, {
+            action: { label: "Undo", onClick: () => setIssues(previous) },
+        });
+    };
+
+    const deleteIssue = () => {
+        if (!selected) return;
+        const previous = issues;
+        const id = selected.id;
+        setIssues((current) => current.filter((issue) => issue.id !== id));
+        setDeleteOpen(false);
+        setSelectedId(null);
+        toast.success(`${id} deleted`, {
+            action: { label: "Undo", onClick: () => setIssues(previous) },
+        });
     };
 
     return (
@@ -223,40 +321,24 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
             {/* Queue + evidence ----------------------------------------- */}
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,23rem)_minmax(0,1fr)]">
                 <Card className="rounded-lg border-border shadow-none">
-                    <div className="space-y-3 border-b px-4 py-3">
-                        <div className="relative">
-                            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                                value={query}
-                                onChange={(event) => setQuery(event.target.value)}
-                                placeholder="Search issues"
-                                className="h-9 pl-8"
-                                aria-label="Search issues"
-                            />
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                            {FILTERS.map((option) => {
-                                const count = issues.filter(option.match).length;
-                                const active = option.id === filter;
-                                return (
-                                    <button
-                                        key={option.id}
-                                        type="button"
-                                        onClick={() => setFilter(option.id)}
-                                        aria-pressed={active}
-                                        className={cn(
-                                            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                                            active
-                                                ? "bg-foreground text-background"
-                                                : "bg-muted text-muted-foreground hover:text-foreground"
-                                        )}
-                                    >
-                                        {option.label}
-                                        <span className="tabular-nums opacity-70">{count}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
+                    <div className="space-y-2.5 border-b px-4 py-3">
+                        <FilterPanel
+                            facets={facets}
+                            selection={selection}
+                            onChange={setSelection}
+                            resultCount={queue.length}
+                            search={{
+                                value: query,
+                                onChange: setQuery,
+                                placeholder: "Issue, topic or task",
+                            }}
+                        />
+                        <ActiveFilters
+                            facets={facets}
+                            selection={selection}
+                            onChange={setSelection}
+                            resultCount={queue.length}
+                        />
                     </div>
 
                     {queue.length ? (
@@ -341,6 +423,22 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
                                 </p>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={`Edit ${selected.id}`}
+                                    onClick={openEdit}
+                                >
+                                    <Pencil className="size-4" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={`Delete ${selected.id}`}
+                                    onClick={() => setDeleteOpen(true)}
+                                >
+                                    <Trash2 className="size-4" />
+                                </Button>
                                 {selected.status === "open" && (
                                     <Button
                                         variant="outline"
@@ -426,6 +524,127 @@ export function IssuesView({ issues: initialIssues, tasks, people }: IssuesViewP
                     </Card>
                 )}
             </div>
+
+            {/* Edit issue dialog ---------------------------------------- */}
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Edit {selected?.id}</DialogTitle>
+                        <DialogDescription>
+                            Status is changed from the detail pane, everything else here.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-1">
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="edit-topic">Topic</Label>
+                            <Input
+                                id="edit-topic"
+                                value={editDraft.topic}
+                                onChange={(event) =>
+                                    setEditDraft((d) => ({ ...d, topic: event.target.value }))
+                                }
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="edit-description">Description</Label>
+                            <Textarea
+                                id="edit-description"
+                                rows={3}
+                                value={editDraft.description}
+                                onChange={(event) =>
+                                    setEditDraft((d) => ({ ...d, description: event.target.value }))
+                                }
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="edit-type">Type</Label>
+                                <Select
+                                    value={editDraft.type}
+                                    onValueChange={(value) =>
+                                        setEditDraft((d) => ({
+                                            ...d,
+                                            type: value as TaskIssueType,
+                                        }))
+                                    }
+                                >
+                                    <SelectTrigger id="edit-type">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {Object.entries(TASK_ISSUE_TYPE_META).map(([value, meta]) => (
+                                            <SelectItem key={value} value={value}>
+                                                {meta.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="edit-severity">Severity</Label>
+                                <Select
+                                    value={editDraft.severity}
+                                    onValueChange={(value) =>
+                                        setEditDraft((d) => ({
+                                            ...d,
+                                            severity: value as TaskIssueSeverity,
+                                        }))
+                                    }
+                                >
+                                    <SelectTrigger id="edit-severity">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {Object.entries(TASK_ISSUE_SEVERITY_META).map(
+                                            ([value, meta]) => (
+                                                <SelectItem key={value} value={value}>
+                                                    {meta.label}
+                                                </SelectItem>
+                                            )
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="edit-assignee">Assigned to</Label>
+                            <Select
+                                value={editDraft.assignedTo}
+                                onValueChange={(value) =>
+                                    setEditDraft((d) => ({ ...d, assignedTo: value }))
+                                }
+                            >
+                                <SelectTrigger id="edit-assignee">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {people.map((person) => (
+                                        <SelectItem key={person.id} value={person.name}>
+                                            {person.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" className="bg-card" onClick={() => setEditOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={saveEdit}>Save changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <ConfirmDialog
+                open={deleteOpen}
+                onOpenChange={setDeleteOpen}
+                title={`Delete ${selected?.id ?? "issue"}?`}
+                description="The record is removed from the risk log. Undo is available straight after."
+                confirmLabel="Delete issue"
+                destructive
+                onConfirm={deleteIssue}
+            />
 
             {/* Raise issue dialog --------------------------------------- */}
             <Dialog open={raiseOpen} onOpenChange={setRaiseOpen}>

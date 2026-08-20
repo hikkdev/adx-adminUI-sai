@@ -82,6 +82,10 @@ export interface Agent {
     email: string;
     status: AgentStatus;
     tier: AgentTier;
+    /** Operating zone, e.g. "South Bengaluru". */
+    zone: string;
+    /** Where the agent is based day to day. */
+    worksFrom: string;
     publishersOnboarded: number;
     ordersCompleted: number;
     monthlyEarnings: number;

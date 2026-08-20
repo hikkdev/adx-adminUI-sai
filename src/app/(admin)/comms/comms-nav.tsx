@@ -5,8 +5,7 @@ export function CommsNav() {
     return (
         <SubNav
             items={[
-                { label: "Announcements", href: "/comms", exact: true },
-                { label: "Templates", href: "/comms/templates" },
+                { label: "Templates", href: "/comms", exact: true },
                 { label: "Delivery logs", href: "/comms/delivery-logs" },
             ]}
         />

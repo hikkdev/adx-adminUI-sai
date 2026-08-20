@@ -26,9 +26,9 @@ interface Cluster {
     name: string;
     count: number;
     booked: number;
-    /** Position on the mock map canvas, percent. */
-    x: number;
-    y: number;
+    /** Real coordinates for the map embed. */
+    lat: number;
+    lng: number;
     sites: ClusterSite[];
 }
 
@@ -49,8 +49,8 @@ const clusters: Cluster[] = [
         name: "Koramangala",
         count: 24,
         booked: 18,
-        x: 50,
-        y: 44,
+        lat: 12.9352,
+        lng: 77.6245,
         sites: [
             { title: "MG Road Billboard", spec: "Static · 6×3 m", status: { label: "Live", tone: "success" }, rate: 45000 },
             { title: "Phoenix Atrium 3F", spec: "Video · 8×12 m", status: { label: "Live", tone: "success" }, rate: 180000 },
@@ -64,8 +64,8 @@ const clusters: Cluster[] = [
         name: "Indiranagar",
         count: 12,
         booked: 9,
-        x: 32,
-        y: 22,
+        lat: 12.9784,
+        lng: 77.6408,
         sites: [
             { title: "100ft Road LED", spec: "Digital · 6×9 m", status: { label: "Live", tone: "success" }, rate: 295000 },
             { title: "CMH Road Wrap", spec: "Static · 9×6 m", status: { label: "Vacant", tone: "neutral" }, rate: 64000 },
@@ -76,8 +76,8 @@ const clusters: Cluster[] = [
         name: "Whitefield",
         count: 31,
         booked: 22,
-        x: 44,
-        y: 72,
+        lat: 12.9698,
+        lng: 77.7500,
         sites: [
             { title: "Whitefield Lot", spec: "Static · 8×6 m", status: { label: "Live", tone: "success" }, rate: 125000 },
             { title: "ITPL Approach Gantry", spec: "Gantry · 14×4 m", status: { label: "Live", tone: "success" }, rate: 210000 },
@@ -88,8 +88,8 @@ const clusters: Cluster[] = [
         name: "Hebbal",
         count: 8,
         booked: 6,
-        x: 66,
-        y: 18,
+        lat: 13.0358,
+        lng: 77.5970,
         sites: [
             { title: "Hebbal Flyover Facade", spec: "Static · 12×8 m", status: { label: "Live", tone: "success" }, rate: 260000 },
         ],
@@ -99,8 +99,8 @@ const clusters: Cluster[] = [
         name: "Jayanagar",
         count: 9,
         booked: 4,
-        x: 22,
-        y: 56,
+        lat: 12.9308,
+        lng: 77.5838,
         sites: [
             { title: "4th Block Arch", spec: "Static · 6×3 m", status: { label: "Vacant", tone: "neutral" }, rate: 42000 },
         ],
@@ -110,8 +110,8 @@ const clusters: Cluster[] = [
         name: "Airport Road",
         count: 17,
         booked: 15,
-        x: 74,
-        y: 78,
+        lat: 13.1986,
+        lng: 77.7066,
         sites: [
             { title: "Trumpet Flyover Unipole", spec: "Static · 12×6 m", status: { label: "Live", tone: "success" }, rate: 340000 },
         ],
@@ -121,8 +121,8 @@ const clusters: Cluster[] = [
         name: "MG Road",
         count: 5,
         booked: 5,
-        x: 84,
-        y: 40,
+        lat: 12.9757,
+        lng: 77.6011,
         sites: [
             { title: "Metro Pillar Series", spec: "Transit · 12 pillars", status: { label: "Live", tone: "success" }, rate: 96000 },
         ],
@@ -234,46 +234,59 @@ export function InventoryMap() {
                     </button>
                 </Card>
 
-                {/* Map canvas */}
+                {/* Map ------------------------------------------------- */}
                 <Card className="relative min-h-[540px] overflow-hidden rounded-lg border-border shadow-none">
-                    <div
-                        aria-hidden
-                        className="absolute inset-0 bg-[linear-gradient(hsl(240_5.9%_90%)_1px,transparent_1px),linear-gradient(90deg,hsl(240_5.9%_90%)_1px,transparent_1px)] opacity-60"
-                        style={{ backgroundSize: `${72 * zoom}px ${72 * zoom}px` }}
+                    <iframe
+                        key={`${selected.id}-${zoom}`}
+                        title={`Map of ${selected.name}`}
+                        className="absolute inset-0 size-full border-0"
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        src={`https://www.openstreetmap.org/export/embed.html?bbox=${
+                            selected.lng - 0.045 / zoom
+                        }%2C${selected.lat - 0.03 / zoom}%2C${selected.lng + 0.045 / zoom}%2C${
+                            selected.lat + 0.03 / zoom
+                        }&layer=mapnik&marker=${selected.lat}%2C${selected.lng}`}
                     />
-                    {/* Roads */}
-                    <div aria-hidden className="absolute inset-x-0 top-1/2 h-1 bg-muted" />
-                    <div aria-hidden className="absolute inset-y-0 left-1/3 w-1 bg-muted" />
-                    <div aria-hidden className="absolute inset-y-0 right-1/4 w-1 bg-muted" />
 
-                    {clusters.map((cluster) => {
-                        const active = cluster.id === selected.id;
-                        return (
-                            <button
-                                key={cluster.id}
-                                type="button"
-                                onClick={() => setSelected(cluster)}
-                                style={{ left: `${cluster.x}%`, top: `${cluster.y}%` }}
-                                className={cn(
-                                    "absolute -translate-x-1/2 -translate-y-1/2 rounded-full border font-semibold shadow-sm transition-all",
-                                    active
-                                        ? "z-10 size-11 border-primary bg-primary text-sm text-primary-foreground"
-                                        : "size-9 border-border bg-card text-xs text-foreground hover:border-foreground"
-                                )}
-                                aria-label={`${cluster.name}: ${cluster.count} listings`}
-                            >
-                                {cluster.count}
-                            </button>
-                        );
-                    })}
+                    {/* Cluster switcher */}
+                    <div className="absolute inset-x-4 top-4 z-10 flex flex-wrap gap-1.5">
+                        {clusters.map((cluster) => {
+                            const active = cluster.id === selected.id;
+                            return (
+                                <button
+                                    key={cluster.id}
+                                    type="button"
+                                    onClick={() => setSelected(cluster)}
+                                    aria-pressed={active}
+                                    className={cn(
+                                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors",
+                                        active
+                                            ? "border-primary bg-primary text-primary-foreground"
+                                            : "border-border bg-card text-foreground hover:border-foreground"
+                                    )}
+                                >
+                                    {cluster.name}
+                                    <span
+                                        className={cn(
+                                            "rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                                            active ? "bg-background/20" : "bg-muted"
+                                        )}
+                                    >
+                                        {cluster.count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
 
                     {/* Map controls */}
-                    <div className="absolute right-4 top-4 flex flex-col overflow-hidden rounded-md border bg-card shadow-sm">
+                    <div className="absolute right-4 top-16 z-10 flex flex-col overflow-hidden rounded-md border bg-card shadow-sm">
                         <button
                             type="button"
                             aria-label="Zoom in"
                             className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted"
-                            onClick={() => setZoom((value) => Math.min(1.6, value + 0.2))}
+                            onClick={() => setZoom((value) => Math.min(4, value * 1.5))}
                         >
                             <Plus className="size-4" />
                         </button>
@@ -281,26 +294,28 @@ export function InventoryMap() {
                             type="button"
                             aria-label="Zoom out"
                             className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted"
-                            onClick={() => setZoom((value) => Math.max(0.6, value - 0.2))}
+                            onClick={() => setZoom((value) => Math.max(0.5, value / 1.5))}
                         >
                             <Minus className="size-4" />
                         </button>
                         <button
                             type="button"
-                            aria-label="Locate"
+                            aria-label="Reset view"
                             className="flex size-8 items-center justify-center transition-colors hover:bg-muted"
-                            onClick={() => toast.info("Centred on Bengaluru")}
+                            onClick={() => setZoom(1)}
                         >
                             <LocateFixed className="size-4" />
                         </button>
                     </div>
 
-                    <span className="absolute bottom-4 left-4 rounded-full border bg-card px-3 py-1 text-xs font-medium shadow-sm">
-                        Bengaluru · 412 listings
-                    </span>
-                    <span className="absolute bottom-4 right-4 text-[10px] text-muted-foreground">
-                        Map data plugs into Google Maps in production
-                    </span>
+                    <a
+                        href={`https://www.openstreetmap.org/?mlat=${selected.lat}&mlon=${selected.lng}#map=14/${selected.lat}/${selected.lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="absolute bottom-3 right-4 z-10 rounded bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm"
+                    >
+                        © OpenStreetMap contributors
+                    </a>
                 </Card>
 
                 {/* Cluster rail */}

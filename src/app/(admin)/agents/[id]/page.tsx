@@ -90,6 +90,8 @@ export default async function AgentDetailPage({
                                         ["Phone", agent.phone],
                                         ["Email", agent.email],
                                         ["Territory", `${agent.area}, ${agent.city}`],
+                                        ["Zone", agent.zone],
+                                        ["Works from", agent.worksFrom],
                                         ["Tier", tierLabel[agent.tier]],
                                         ["Rating", `★ ${agent.rating.toFixed(1)}`],
                                         ["Joined", formatDate(agent.joinedAt)],

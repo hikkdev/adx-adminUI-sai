@@ -4,6 +4,8 @@
  * Every page reads through these functions rather than importing mock data
  * directly, so swapping in a real API later is a change to this module only.
  */
+import { fraudCases, getFraudCase } from "@/data/fraud";
+import { advertiserKycCases, getAdvertiserKycCase, getPlatformUser, platformUsers } from "@/data/accounts";
 import { mergeVariables, notificationTemplates } from "@/data/comms";
 import {
     advertisers,
@@ -44,6 +46,7 @@ import {
     milestones,
     pendingInvites,
     roleColumns,
+    seedNotifications,
     tickets,
 } from "@/data/platform";
 import {
@@ -139,6 +142,8 @@ export const api = {
         invoices: () => simulate(invoices),
     },
     disputes: {
+        fraudCases: () => simulate(fraudCases),
+        fraudCase: (id: string) => simulate(getFraudCase(id) ?? null),
         list: () => simulate(disputes),
         get: (id: string) => simulate(getDispute(id)),
         summary: () => simulate(disputeSummary),
@@ -230,5 +235,16 @@ export const api = {
     },
     comms: {
         templates: () => simulate({ templates: notificationTemplates, variables: mergeVariables }),
+    },
+    notifications: {
+        list: () => simulate(seedNotifications),
+    },
+    users: {
+        list: () => simulate(platformUsers),
+        get: (id: string) => simulate(getPlatformUser(id) ?? null),
+    },
+    advertiserKyc: {
+        list: () => simulate(advertiserKycCases),
+        get: (id: string) => simulate(getAdvertiserKycCase(id) ?? null),
     },
 };

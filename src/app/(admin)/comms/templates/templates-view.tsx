@@ -10,6 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
+import {
+    ActiveFilters,
+    FilterPanel,
+    type Facet,
+    type FilterSelection,
+} from "@/components/adx/filter-panel";
 import { cn } from "@/lib/utils";
 import { formatDate, formatNumber } from "@/lib/format";
 import {
@@ -47,7 +53,6 @@ interface TemplatesViewProps {
 }
 
 const CHANNEL_ORDER: TemplateChannel[] = ["email", "sms", "push"];
-const STATUS_FILTERS: (TemplateStatus | "all")[] = ["all", "live", "draft", "archived"];
 
 /** Replace merge tokens with their sample values for the preview. */
 function render(text: string, variables: MergeVariable[]) {
@@ -78,26 +83,60 @@ function Library({
     onOpen: (template: NotificationTemplate) => void;
 }) {
     const [query, setQuery] = React.useState("");
-    const [status, setStatus] = React.useState<TemplateStatus | "all">("all");
-    const [category, setCategory] = React.useState<TemplateCategory | "all">("all");
+    const [selection, setSelection] = React.useState<FilterSelection>({});
 
-    const categories = React.useMemo(
-        () => Array.from(new Set(templates.map((t) => t.category))),
+    const facets: Facet[] = React.useMemo(
+        () => [
+            {
+                id: "status",
+                label: "Status",
+                options: (
+                    Object.keys(TEMPLATE_STATUS_META) as TemplateStatus[]
+                ).map((value) => ({
+                    value,
+                    label: TEMPLATE_STATUS_META[value].label,
+                    count: templates.filter((t) => t.status === value).length,
+                })),
+            },
+            {
+                id: "category",
+                label: "Area",
+                options: Array.from(new Set(templates.map((t) => t.category))).map((value) => ({
+                    value,
+                    label: value,
+                    count: templates.filter((t) => t.category === value).length,
+                })),
+            },
+            {
+                id: "channel",
+                label: "Channel",
+                options: CHANNEL_ORDER.map((channel) => ({
+                    value: channel,
+                    label: TEMPLATE_CHANNEL_META[channel].label,
+                    count: templates.filter((t) => Boolean(t.content[channel])).length,
+                })),
+            },
+        ],
         [templates]
     );
 
     const visible = React.useMemo(() => {
         const needle = query.trim().toLowerCase();
+        const statuses = selection.status ?? [];
+        const categories = selection.category ?? [];
+        const channels = selection.channel ?? [];
         return templates.filter((template) => {
-            if (status !== "all" && template.status !== status) return false;
-            if (category !== "all" && template.category !== category) return false;
+            if (statuses.length && !statuses.includes(template.status)) return false;
+            if (categories.length && !categories.includes(template.category)) return false;
+            if (channels.length && !channels.some((c) => template.content[c as TemplateChannel]))
+                return false;
             if (!needle) return true;
             return [template.name, template.trigger, template.category]
                 .join(" ")
                 .toLowerCase()
                 .includes(needle);
         });
-    }, [templates, query, status, category]);
+    }, [templates, query, selection]);
 
     const live = templates.filter((t) => t.status === "live");
     const sent = templates.reduce((sum, t) => sum + t.sent30d, 0);
@@ -115,73 +154,24 @@ function Library({
                 }
             />
 
-            <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-[16rem] flex-1">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search templates"
-                        className="h-9 bg-card pl-8"
-                        aria-label="Search templates"
-                    />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                    {STATUS_FILTERS.map((option) => {
-                        const count =
-                            option === "all"
-                                ? templates.length
-                                : templates.filter((t) => t.status === option).length;
-                        return (
-                            <button
-                                key={option}
-                                type="button"
-                                onClick={() => setStatus(option)}
-                                aria-pressed={status === option}
-                                className={cn(
-                                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                                    status === option
-                                        ? "bg-foreground text-background"
-                                        : "bg-muted text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                {option === "all" ? "All" : TEMPLATE_STATUS_META[option].label}
-                                <span className="tabular-nums opacity-70">{count}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                    <button
-                        type="button"
-                        onClick={() => setCategory("all")}
-                        aria-pressed={category === "all"}
-                        className={cn(
-                            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                            category === "all"
-                                ? "bg-foreground text-background"
-                                : "bg-muted text-muted-foreground hover:text-foreground"
-                        )}
-                    >
-                        Every area
-                    </button>
-                    {categories.map((option) => (
-                        <button
-                            key={option}
-                            type="button"
-                            onClick={() => setCategory(option)}
-                            aria-pressed={category === option}
-                            className={cn(
-                                "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                                category === option
-                                    ? "bg-foreground text-background"
-                                    : "bg-muted text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            {option}
-                        </button>
-                    ))}
-                </div>
+            <div className="space-y-3">
+                <FilterPanel
+                    facets={facets}
+                    selection={selection}
+                    onChange={setSelection}
+                    resultCount={visible.length}
+                    search={{
+                        value: query,
+                        onChange: setQuery,
+                        placeholder: "Template name or trigger",
+                    }}
+                />
+                <ActiveFilters
+                    facets={facets}
+                    selection={selection}
+                    onChange={setSelection}
+                    resultCount={visible.length}
+                />
             </div>
 
             {visible.length ? (

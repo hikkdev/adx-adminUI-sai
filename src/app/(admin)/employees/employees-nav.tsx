@@ -9,7 +9,8 @@ export function EmployeesNav() {
                 { label: "Directory", href: "/employees/directory" },
                 { label: "Departments", href: "/employees/departments" },
                 { label: "Attendance", href: "/employees/attendance" },
-                { label: "Leave & holidays", href: "/employees/leave" },
+                { label: "Leave", href: "/employees/leave" },
+                { label: "Holidays", href: "/employees/holidays" },
                 { label: "Payroll", href: "/employees/payroll" },
                 { label: "Hiring", href: "/employees/hiring" },
             ]}

@@ -9,16 +9,14 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDate } from "@/lib/format";
 import {
     LEAVE_STATUS_META,
-    type Holiday,
     type LeaveRequest,
 } from "@/types";
 
 interface LeaveViewProps {
     leave: LeaveRequest[];
-    holidays: Holiday[];
 }
 
-export function LeaveView({ leave: initialLeave, holidays }: LeaveViewProps) {
+export function LeaveView({ leave: initialLeave }: LeaveViewProps) {
     const [leave, setLeave] = React.useState(initialLeave);
 
     const decide = (id: string, status: "approved" | "rejected") => {
@@ -27,9 +25,6 @@ export function LeaveView({ leave: initialLeave, holidays }: LeaveViewProps) {
         );
         toast.success(`Leave ${id} ${status}`);
     };
-
-    const upcoming = holidays.filter((holiday) => holiday.date >= "2026-08-10");
-    const past = holidays.filter((holiday) => holiday.date < "2026-08-10");
 
     return (
         <div className="space-y-6">
@@ -99,75 +94,7 @@ export function LeaveView({ leave: initialLeave, holidays }: LeaveViewProps) {
                 />
             </section>
 
-            <section className="space-y-3">
-                <PageHeader
-                    size="section"
-                    title="Holiday calendar 2026"
-                    subtitle="Gazetted holidays and optional festival days."
-                />
-                <div className="grid gap-4 xl:grid-cols-2">
-                    <SimpleTable
-                        columns={[
-                            {
-                                key: "date",
-                                label: "Upcoming",
-                                render: (row: Holiday) => (
-                                    <span className="font-medium text-foreground">
-                                        {formatDate(row.date)}
-                                    </span>
-                                ),
-                            },
-                            { key: "day", label: "Day", render: (row) => row.day },
-                            { key: "name", label: "Holiday", render: (row) => row.name },
-                            {
-                                key: "kind",
-                                label: "Type",
-                                render: (row) => (
-                                    <StatusBadge
-                                        status={
-                                            row.kind === "public"
-                                                ? { label: "Public", tone: "success" }
-                                                : { label: "Optional", tone: "neutral" }
-                                        }
-                                    />
-                                ),
-                            },
-                        ]}
-                        rows={upcoming}
-                        rowKey={(row) => row.date}
-                    />
-                    <SimpleTable
-                        columns={[
-                            {
-                                key: "date",
-                                label: "Earlier this year",
-                                render: (row: Holiday) => (
-                                    <span className="text-muted-foreground">
-                                        {formatDate(row.date)}
-                                    </span>
-                                ),
-                            },
-                            { key: "day", label: "Day", render: (row) => row.day },
-                            { key: "name", label: "Holiday", render: (row) => row.name },
-                            {
-                                key: "kind",
-                                label: "Type",
-                                render: (row) => (
-                                    <StatusBadge
-                                        status={
-                                            row.kind === "public"
-                                                ? { label: "Public", tone: "success" }
-                                                : { label: "Optional", tone: "neutral" }
-                                        }
-                                    />
-                                ),
-                            },
-                        ]}
-                        rows={past}
-                        rowKey={(row) => row.date}
-                    />
-                </div>
-            </section>
+
         </div>
     );
 }
