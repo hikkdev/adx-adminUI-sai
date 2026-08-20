@@ -22,14 +22,19 @@ interface AddEmployeeWizardProps {
     departments: string[];
 }
 
-const STEPS = ["Personal", "Professional", "Documents", "Account", "Review"];
+const STEPS = ["Personal", "Professional", "Documents & BGV", "Payroll", "Account", "Review"];
 
 const DOCUMENT_SLOTS = [
+    "Aadhaar card",
+    "PAN card",
     "Appointment letter",
     "Salary slips",
     "Relieving letter",
     "Experience letter",
+    "BGV report",
 ];
+
+const BGV_STATUSES = ["Not started", "In progress", "Clear", "Discrepancy found"];
 
 export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
     const router = useRouter();
@@ -54,6 +59,15 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
         officialEmail: "",
         slackId: "",
         githubId: "",
+        aadhaar: "",
+        bgvStatus: "Not started",
+        bgvAgency: "",
+        bgvNotes: "",
+        monthlyCtc: "",
+        bankAccount: "",
+        ifsc: "",
+        pan: "",
+        uan: "",
     });
 
     const patch = (partial: Partial<typeof form>) =>
@@ -67,6 +81,14 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                 form.mobile.trim().length >= 10
             );
         if (step === 1) return form.designation.trim().length > 1;
+        if (step === 2)
+            return form.aadhaar.trim() === "" || /^\d{12}$/.test(form.aadhaar.trim());
+        if (step === 3)
+            return (
+                Number(form.monthlyCtc) > 0 &&
+                form.bankAccount.trim().length >= 9 &&
+                form.ifsc.trim().length === 11
+            );
         return true;
     };
 
@@ -75,7 +97,11 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
             toast.error(
                 step === 0
                     ? "Name and a valid mobile number are needed."
-                    : "Add the designation for this role."
+                    : step === 1
+                      ? "Add the designation for this role."
+                      : step === 2
+                        ? "Aadhaar must be exactly 12 digits."
+                        : "Monthly CTC, a bank account and an 11 character IFSC are needed."
             );
             return;
         }
@@ -315,7 +341,128 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                     </div>
                 )}
 
+                {step === 2 && (
+                    <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-aadhaar">Aadhaar number</Label>
+                            <Input
+                                id="emp-aadhaar"
+                                inputMode="numeric"
+                                maxLength={12}
+                                value={form.aadhaar}
+                                onChange={(event) =>
+                                    patch({ aadhaar: event.target.value.replace(/\D/g, "") })
+                                }
+                                placeholder="12 digits"
+                                className="tabular-nums"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-bgv-status">BGV status</Label>
+                            <Select
+                                value={form.bgvStatus}
+                                onValueChange={(value) => patch({ bgvStatus: value })}
+                            >
+                                <SelectTrigger id="emp-bgv-status">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {BGV_STATUSES.map((option) => (
+                                        <SelectItem key={option} value={option}>
+                                            {option}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-bgv-agency">BGV agency</Label>
+                            <Input
+                                id="emp-bgv-agency"
+                                value={form.bgvAgency}
+                                onChange={(event) => patch({ bgvAgency: event.target.value })}
+                                placeholder="e.g. AuthBridge"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-bgv-notes">BGV notes</Label>
+                            <Input
+                                id="emp-bgv-notes"
+                                value={form.bgvNotes}
+                                onChange={(event) => patch({ bgvNotes: event.target.value })}
+                                placeholder="Findings, reference numbers"
+                            />
+                        </div>
+                    </div>
+                )}
+
                 {step === 3 && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-ctc">Monthly CTC (₹)</Label>
+                            <Input
+                                id="emp-ctc"
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value={form.monthlyCtc}
+                                onChange={(event) => patch({ monthlyCtc: event.target.value })}
+                                className="tabular-nums"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-pan">PAN</Label>
+                            <Input
+                                id="emp-pan"
+                                maxLength={10}
+                                value={form.pan}
+                                onChange={(event) => patch({ pan: event.target.value.toUpperCase() })}
+                                placeholder="ABCDE1234F"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-bank">Bank account number</Label>
+                            <Input
+                                id="emp-bank"
+                                inputMode="numeric"
+                                value={form.bankAccount}
+                                onChange={(event) =>
+                                    patch({ bankAccount: event.target.value.replace(/\D/g, "") })
+                                }
+                                className="tabular-nums"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-ifsc">IFSC</Label>
+                            <Input
+                                id="emp-ifsc"
+                                maxLength={11}
+                                value={form.ifsc}
+                                onChange={(event) => patch({ ifsc: event.target.value.toUpperCase() })}
+                                placeholder="HDFC0001234"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="emp-uan">PF UAN (optional)</Label>
+                            <Input
+                                id="emp-uan"
+                                inputMode="numeric"
+                                maxLength={12}
+                                value={form.uan}
+                                onChange={(event) =>
+                                    patch({ uan: event.target.value.replace(/\D/g, "") })
+                                }
+                                className="tabular-nums"
+                            />
+                        </div>
+                        <p className="self-end text-xs text-muted-foreground sm:col-span-2">
+                            Payroll starts on the first full month after joining. It can be paused
+                            any time from the Payroll register.
+                        </p>
+                    </div>
+                )}
+
+                {step === 4 && (
                     <div className="grid gap-4 sm:grid-cols-2">
                         <div className="grid gap-1.5">
                             <Label htmlFor="emp-official">Official email</Label>
@@ -345,7 +492,7 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                     </div>
                 )}
 
-                {step === 4 && (
+                {step === 5 && (
                     <FieldList
                         items={[
                             ["Name", `${form.firstName} ${form.lastName}`.trim() || "Not set"],
@@ -367,6 +514,23 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                                     : "None attached yet",
                             ],
                             ["Official email", form.officialEmail || "Will be provisioned"],
+                            [
+                                "Aadhaar",
+                                form.aadhaar ? `•••• •••• ${form.aadhaar.slice(-4)}` : "Not captured",
+                            ],
+                            ["BGV", form.bgvStatus],
+                            [
+                                "Monthly CTC",
+                                form.monthlyCtc
+                                    ? `₹${Number(form.monthlyCtc).toLocaleString("en-IN")}`
+                                    : "Not set",
+                            ],
+                            [
+                                "Salary account",
+                                form.bankAccount
+                                    ? `••••${form.bankAccount.slice(-4)} · ${form.ifsc}`
+                                    : "Not set",
+                            ],
                         ]}
                     />
                 )}

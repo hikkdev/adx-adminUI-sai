@@ -1,14 +1,6 @@
-import type { Metadata } from "next";
-import { CommsNav } from "../comms-nav";
-import { TemplatesView } from "./templates-view";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Notification Templates" };
-
+/** Templates now live at the Comms root. */
 export default function TemplatesPage() {
-    return (
-        <div className="space-y-5">
-            <CommsNav />
-            <TemplatesView />
-        </div>
-    );
+    redirect("/comms");
 }

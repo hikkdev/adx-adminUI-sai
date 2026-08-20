@@ -4,19 +4,19 @@ import { api } from "@/services";
 import { EmployeesNav } from "../employees-nav";
 import { LeaveView } from "./leave-view";
 
-export const metadata: Metadata = { title: "Leave & Holidays" };
+export const metadata: Metadata = { title: "Leave" };
 
 export default async function LeavePage() {
-    const [leave, holidays] = await Promise.all([api.hr.leave(), api.hr.holidays()]);
+    const leave = await api.hr.leave();
 
     return (
         <div className="space-y-5">
             <PageHeader
-                title="Leave & holidays"
-                subtitle="Leave requests waiting on HR, plus the 2026 holiday calendar."
+                title="Leave"
+                subtitle="Leave requests waiting on HR approval."
             />
             <EmployeesNav />
-            <LeaveView leave={leave} holidays={holidays} />
+            <LeaveView leave={leave} />
         </div>
     );
 }

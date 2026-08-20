@@ -76,8 +76,16 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
         () => ["All", ...Array.from(new Set(tasks.map((task) => task.project)))],
         [tasks]
     );
-    const filtered = project === "All" ? tasks : tasks.filter((task) => task.project === project);
-    const active = filtered.filter((task) => task.status !== "archived");
+    /*
+     * Every array handed to Recharts must keep a stable identity between
+     * renders. A fresh array on each render restarts the chart's mount
+     * animation before it can finish, so the series never paints.
+     */
+    const active = React.useMemo(() => {
+        const filtered =
+            project === "All" ? tasks : tasks.filter((task) => task.project === project);
+        return filtered.filter((task) => task.status !== "archived");
+    }, [tasks, project]);
 
     const completionPct = active.length
         ? Math.round(
@@ -90,11 +98,17 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
 
     const trend = React.useMemo(() => buildTrend(active), [active]);
 
-    const donutData = DONUT_SEGMENTS.map((segment) => ({
-        name: WORK_TASK_STATUS_META[segment.status].label,
-        value: active.filter((task) => task.status === segment.status).length,
-        color: segment.color,
-    })).filter((segment) => segment.value > 0);
+    const gaugeData = React.useMemo(() => [{ value: completionPct }], [completionPct]);
+
+    const donutData = React.useMemo(
+        () =>
+            DONUT_SEGMENTS.map((segment) => ({
+                name: WORK_TASK_STATUS_META[segment.status].label,
+                value: active.filter((task) => task.status === segment.status).length,
+                color: segment.color,
+            })).filter((segment) => segment.value > 0),
+        [active]
+    );
 
     const byProject = React.useMemo(() => {
         const groups = new Map<string, WorkTask[]>();
@@ -161,9 +175,13 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                         Average progress across {active.length} active tasks
                     </p>
                     <div className="relative mx-auto mt-2 h-[190px] w-full max-w-[240px]">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer
+                            width="100%"
+                            height="100%"
+                            initialDimension={{ width: 240, height: 190 }}
+                        >
                             <RadialBarChart
-                                data={[{ value: completionPct }]}
+                                data={gaugeData}
                                 startAngle={210}
                                 endAngle={-30}
                                 innerRadius="72%"
@@ -175,6 +193,7 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                                     cornerRadius={6}
                                     fill="hsl(359.5 85.5% 29.8%)"
                                     background={{ fill: "hsl(240 4.8% 95.9%)" }}
+                                    isAnimationActive={false}
                                 />
                             </RadialBarChart>
                         </ResponsiveContainer>
@@ -194,7 +213,11 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                         Cumulative verified tasks against everything planned
                     </p>
                     <div className="mt-3">
-                        <ResponsiveContainer width="100%" height={220}>
+                        <ResponsiveContainer
+                            width="100%"
+                            height={220}
+                            initialDimension={{ width: 880, height: 220 }}
+                        >
                             <AreaChart data={trend} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
                                 <defs>
                                     <linearGradient id="tasksTrendFill" x1="0" y1="0" x2="0" y2="1">
@@ -235,6 +258,7 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                                     strokeWidth={1.5}
                                     strokeDasharray="4 4"
                                     fill="none"
+                                    isAnimationActive={false}
                                 />
                                 <Area
                                     type="monotone"
@@ -242,6 +266,7 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                                     stroke="hsl(359.5 85.5% 29.8%)"
                                     strokeWidth={1.75}
                                     fill="url(#tasksTrendFill)"
+                                    isAnimationActive={false}
                                 />
                             </AreaChart>
                         </ResponsiveContainer>
@@ -254,7 +279,11 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                 <Card className="rounded-lg border-border p-5 shadow-none">
                     <h2 className="text-sm font-semibold text-foreground">Status split</h2>
                     <div className="mx-auto mt-2 h-[180px] w-full max-w-[220px]">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer
+                            width="100%"
+                            height="100%"
+                            initialDimension={{ width: 220, height: 180 }}
+                        >
                             <PieChart>
                                 <Pie
                                     data={donutData}
@@ -264,6 +293,7 @@ export function TasksOverview({ tasks, issues }: TasksOverviewProps) {
                                     outerRadius={78}
                                     paddingAngle={2}
                                     strokeWidth={0}
+                                    isAnimationActive={false}
                                 >
                                     {donutData.map((segment) => (
                                         <Cell key={segment.name} fill={segment.color} />

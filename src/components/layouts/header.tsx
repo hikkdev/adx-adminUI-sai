@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { currentAdmin } from "@/data/platform";
+import { useAuth } from "@/lib/auth";
 
 interface HeaderProps {
     onToggleSidebar: () => void;
@@ -30,6 +31,8 @@ export function Header({
     unreadCount,
 }: HeaderProps) {
     const router = useRouter();
+    const { user, signOut } = useAuth();
+    const account = user ?? currentAdmin;
 
     return (
         <header className="fixed inset-x-0 top-0 z-40 flex h-[57px] items-center gap-3 border-b bg-card px-4">
@@ -80,15 +83,15 @@ export function Header({
                             className="flex items-center gap-1 rounded-full border py-0.5 pl-0.5 pr-2 transition-colors hover:bg-muted/50"
                             aria-label="Account menu"
                         >
-                            <InitialsAvatar name={currentAdmin.name} size="md" />
+                            <InitialsAvatar name={account.name} size="md" />
                             <ChevronDown className="size-4 text-muted-foreground" />
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56">
                         <DropdownMenuLabel>
-                            <p className="text-sm font-medium">{currentAdmin.name}</p>
+                            <p className="text-sm font-medium">{account.name}</p>
                             <p className="text-xs font-normal text-muted-foreground">
-                                {currentAdmin.email}
+                                {account.email}
                             </p>
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />
@@ -99,7 +102,7 @@ export function Header({
                             Settings
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => router.push("/login")}>
+                        <DropdownMenuItem onSelect={() => void signOut()}>
                             Log out
                         </DropdownMenuItem>
                     </DropdownMenuContent>
