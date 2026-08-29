@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TurnstileWidget } from "@/components/adx/turnstile-widget";
 import { ApiError, api } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
 
@@ -15,6 +16,7 @@ export default function ForgotPasswordPage() {
     const [submitting, setSubmitting] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [sent, setSent] = React.useState(false);
+    const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -22,7 +24,11 @@ export default function ForgotPasswordPage() {
         setError(null);
         try {
             if (apiConfig.live) {
-                await api.post("/auth/forgot-password", { email }, { anonymous: true });
+                await api.post(
+                    "/auth/forgot-password",
+                    { email, ...(captchaToken ? { captchaToken } : {}) },
+                    { anonymous: true }
+                );
             }
             setSent(true);
         } catch (caught) {
@@ -96,13 +102,21 @@ export default function ForgotPasswordPage() {
                     </div>
                 </div>
 
+                {apiConfig.turnstileSiteKey && (
+                    <TurnstileWidget siteKey={apiConfig.turnstileSiteKey} onVerify={setCaptchaToken} />
+                )}
+
                 {error && (
                     <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
                         {error}
                     </p>
                 )}
 
-                <Button type="submit" className="h-11 w-full" disabled={submitting}>
+                <Button
+                    type="submit"
+                    className="h-11 w-full"
+                    disabled={submitting || (!!apiConfig.turnstileSiteKey && !captchaToken)}
+                >
                     {submitting ? "Sending…" : "Send reset link"}
                 </Button>
             </form>

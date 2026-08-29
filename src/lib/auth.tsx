@@ -18,7 +18,7 @@ interface AuthContextValue {
     user: SessionUser | null;
     /** True until the stored session has been checked on first load. */
     loading: boolean;
-    signIn: (email: string, password: string) => Promise<void>;
+    signIn: (email: string, password: string, captchaToken?: string | null) => Promise<void>;
     signOut: () => Promise<void>;
 }
 
@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         [router]
     );
 
-    const signIn = React.useCallback(async (email: string, password: string) => {
+    const signIn = React.useCallback(async (email: string, password: string, captchaToken?: string | null) => {
         if (!apiConfig.live) {
             setUser(fixtureUser);
             return;
@@ -83,7 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             accessToken: string;
             refreshToken: string;
             user: SessionUser;
-        }>("/auth/login-password", { email, password }, { anonymous: true });
+        }>(
+            "/auth/login-password",
+            { email, password, ...(captchaToken ? { captchaToken } : {}) },
+            { anonymous: true }
+        );
 
         tokens.set(result);
         setUser(result.user);

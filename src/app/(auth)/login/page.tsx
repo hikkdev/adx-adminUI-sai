@@ -9,7 +9,9 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GoogleMark } from "@/components/adx/google-mark";
+import { TurnstileWidget } from "@/components/adx/turnstile-widget";
 import { ApiError } from "@/lib/api-client";
+import { apiConfig } from "@/lib/api-config";
 import { useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
@@ -21,13 +23,14 @@ export default function LoginPage() {
     const [reveal, setReveal] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
+    const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setSubmitting(true);
         setError(null);
         try {
-            await signIn(email, password);
+            await signIn(email, password, captchaToken);
             router.replace("/dashboard");
         } catch (caught) {
             setError(
@@ -90,13 +93,21 @@ export default function LoginPage() {
                     </div>
                 </div>
 
+                {apiConfig.turnstileSiteKey && (
+                    <TurnstileWidget siteKey={apiConfig.turnstileSiteKey} onVerify={setCaptchaToken} />
+                )}
+
                 {error && (
                     <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
                         {error}
                     </p>
                 )}
 
-                <Button type="submit" className="h-11 w-full" disabled={submitting}>
+                <Button
+                    type="submit"
+                    className="h-11 w-full"
+                    disabled={submitting || (!!apiConfig.turnstileSiteKey && !captchaToken)}
+                >
                     {submitting ? "Signing in…" : "Sign in"}
                 </Button>
             </form>
