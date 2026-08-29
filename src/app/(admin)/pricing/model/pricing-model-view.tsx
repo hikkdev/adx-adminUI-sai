@@ -101,7 +101,7 @@ export function PricingModelView({
 }: PricingModelViewProps) {
     const [dirty, setDirty] = React.useState<Set<string>>(new Set());
 
-    const [size, setSize] = React.useState(() =>
+    const [size, setSize] = React.useState<Knob[]>(() =>
         sizeBands.map((band) => ({
             key: `size-${band.band}`,
             label: band.band,
@@ -109,7 +109,7 @@ export function PricingModelView({
             value: toNumber(band.multiplier),
         }))
     );
-    const [light, setLight] = React.useState(() =>
+    const [light, setLight] = React.useState<Knob[]>(() =>
         illumination.map((row) => ({
             key: `light-${row.factor}`,
             label: row.factor,

@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/adx/page-header";
 import { SectionCard } from "@/components/adx/section-card";
 import { FieldList } from "@/components/adx/simple-table";
 import { api } from "@/services";
-import { PricingNav } from "../pricing-nav";
+import { PricingNav } from "../../pricing-nav";
 
 export const metadata: Metadata = { title: "Revenue Share" };
 
