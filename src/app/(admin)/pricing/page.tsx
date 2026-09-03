@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { KpiCard } from "@/components/adx/kpi-card";
 import { PageHeader } from "@/components/adx/page-header";
-import { RateRealisationChart } from "@/components/charts/rate-realisation-chart";
 import { cn } from "@/lib/utils";
 import { api } from "@/services";
 import type { NamedStatRow } from "@/types";
+import { RateRealisationChart } from "@/components/charts/lazy";
 import { PricingNav } from "./pricing-nav";
 
 export const metadata: Metadata = { title: "Pricing" };

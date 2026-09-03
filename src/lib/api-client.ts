@@ -67,6 +67,21 @@ export const tokens = {
 /* Request                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Hard ceiling on a single API request.
+ *
+ * `fetch` has no default timeout, so before this a request to an unreachable or
+ * cold-starting backend simply never settled — the UI sat on its spinner for
+ * however long the browser felt like waiting (minutes), with no error and no
+ * way for the user to tell a slow server from a broken one. A bounded failure
+ * that says what happened is strictly better.
+ *
+ * Generous on purpose: a free-tier host cold-starting its container plus a
+ * serverless database waking from suspend can legitimately take ~30s on the
+ * first request of the day. Anything past this is not "slow", it is broken.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
 interface RequestOptions extends Omit<RequestInit, "body"> {
     body?: unknown;
     /** Skip the Authorization header (login, forgot password, reset password). */
@@ -139,6 +154,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     try {
         response = await fetch(`${apiConfig.baseUrl}${path}`, {
             ...rest,
+            /* A caller-supplied signal still wins; this only supplies the
+               default ceiling when nobody asked for their own. */
+            signal: rest.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             headers: requestHeaders,
             body:
                 body === undefined
@@ -147,7 +165,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
                       ? body
                       : JSON.stringify(body),
         });
-    } catch {
+    } catch (error) {
+        /* Distinguish "took too long" from "could not connect" — they point at
+           very different problems and the user can act on the difference. */
+        if (error instanceof DOMException && error.name === "TimeoutError") {
+            throw new ApiError(
+                0,
+                "TIMEOUT",
+                "The server took too long to respond. It may be starting up — try again in a moment."
+            );
+        }
         throw new ApiError(0, "NETWORK", "Could not reach the ADX backend.");
     }
 

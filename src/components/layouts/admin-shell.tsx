@@ -1,13 +1,27 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 import { Header } from "./header";
 import { Sidebar } from "./sidebar";
-import { CommandPalette } from "@/components/adx/command-palette";
-import { NotificationsDrawer } from "@/components/adx/notifications-drawer";
 import { seedNotifications } from "@/data/platform";
 import type { AppNotification } from "@/types";
+
+/**
+ * Two overlays that are closed on arrival but were being bundled into every
+ * admin route and evaluated on every page load. Loaded on first open instead,
+ * then kept mounted so the close animation and internal state behave exactly
+ * as before.
+ */
+const CommandPalette = dynamic(
+    () => import("@/components/adx/command-palette").then((m) => m.CommandPalette),
+    { ssr: false },
+);
+const NotificationsDrawer = dynamic(
+    () => import("@/components/adx/notifications-drawer").then((m) => m.NotificationsDrawer),
+    { ssr: false },
+);
 
 /**
  * Admin application frame: fixed header, responsive sidebar,
@@ -18,6 +32,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     const [mobileOpen, setMobileOpen] = React.useState(false);
     const [searchOpen, setSearchOpen] = React.useState(false);
     const [notificationsOpen, setNotificationsOpen] = React.useState(false);
+    /* Latch: once an overlay has been opened it stays mounted, so its chunk is
+       fetched on first use rather than on every page load. */
+    const [searchUsed, setSearchUsed] = React.useState(false);
+    const [notificationsUsed, setNotificationsUsed] = React.useState(false);
+
+    React.useEffect(() => {
+        if (searchOpen) setSearchUsed(true);
+    }, [searchOpen]);
+    React.useEffect(() => {
+        if (notificationsOpen) setNotificationsUsed(true);
+    }, [notificationsOpen]);
     const [notifications, setNotifications] =
         React.useState<AppNotification[]>(seedNotifications);
 
@@ -63,17 +88,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <div className="mx-auto max-w-[1680px] p-4 sm:p-6">{children}</div>
             </main>
 
-            <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-            <NotificationsDrawer
-                open={notificationsOpen}
-                onOpenChange={setNotificationsOpen}
-                notifications={notifications}
-                onMarkAllRead={() =>
-                    setNotifications((items) =>
-                        items.map((item) => ({ ...item, read: true }))
-                    )
-                }
-            />
+            {searchUsed && <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />}
+            {notificationsUsed && (
+                <NotificationsDrawer
+                    open={notificationsOpen}
+                    onOpenChange={setNotificationsOpen}
+                    notifications={notifications}
+                    onMarkAllRead={() =>
+                        setNotifications((items) =>
+                            items.map((item) => ({ ...item, read: true }))
+                        )
+                    }
+                />
+            )}
         </div>
     );
 }

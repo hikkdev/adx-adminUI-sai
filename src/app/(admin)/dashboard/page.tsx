@@ -3,8 +3,6 @@ import { Card } from "@/components/ui/card";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { InsightBanner } from "@/components/adx/insight-banner";
 import { KpiCard } from "@/components/adx/kpi-card";
-import { MonthlyGmvChart } from "@/components/charts/monthly-gmv-chart";
-import { PublisherGrowthChart } from "@/components/charts/publisher-growth-chart";
 import { AddPublisherCard } from "@/components/dashboard/add-publisher-card";
 import { AssignOrderCard } from "@/components/dashboard/assign-order-card";
 import { PayoutRunsCard } from "@/components/dashboard/payout-runs-card";
@@ -17,6 +15,7 @@ import {
     recentBookings,
     smartInsight,
 } from "@/data/analytics";
+import { MonthlyGmvChart, PublisherGrowthChart } from "@/components/charts/lazy";
 import { api } from "@/services";
 
 export const metadata: Metadata = { title: "Dashboard" };

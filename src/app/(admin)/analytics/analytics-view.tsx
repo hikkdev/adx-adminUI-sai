@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { KpiCard } from "@/components/adx/kpi-card";
 import { PageHeader } from "@/components/adx/page-header";
-import { DailyGmvChart } from "@/components/charts/daily-gmv-chart";
 import { formatCompactINR } from "@/lib/format";
+import { DailyGmvChart } from "@/components/charts/lazy";
 import type { CategorySlice, DayPoint, KpiStat, TopPublisherRow } from "@/types";
 
 interface AnalyticsViewProps {

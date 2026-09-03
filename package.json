@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/with-env.js dev",
+    "dev": "node scripts/with-env.js dev --turbopack",
+    "dev:webpack": "node scripts/with-env.js dev",
     "build": "next build",
     "start": "node scripts/with-env.js start",
     "lint": "next lint"

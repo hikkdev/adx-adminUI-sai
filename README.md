@@ -16,10 +16,15 @@ Built from the ADX admin wireframes (Figma · "DR 10 – Admin Panel") on the **
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000 → redirects to /dashboard
+npm run dev         # Turbopack on http://localhost:5173 → /dashboard
+npm run dev:webpack # webpack fallback for troubleshooting only
 npm run build      # production build
 npm run lint
 ```
+
+Development uses the fixed port from `.env` so the backend's `FRONTEND_URL`
+stays valid. Startup exits with a clear error when that port is occupied; stop
+the earlier server with Ctrl+C before launching another copy.
 
 ## Project structure
 

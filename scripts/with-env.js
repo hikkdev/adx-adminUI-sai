@@ -1,34 +1,97 @@
-// Loads .env / .env.local into process.env, then delegates to the Next.js CLI.
-//
-// Next only reads .env files once its own dev/prod server starts — by then the
-// CLI has already picked a port (via commander's `-p/--port` option, which
-// falls back to whatever PORT happens to already be in process.env). So PORT
-// set in .env has no effect unless something loads it before `next` runs.
-// This script is that something, letting PORT be controlled from .env like
-// every other var here instead of hardcoded in package.json.
+// Reads only PORT before delegating to Next.js. Next itself remains responsible
+// for loading every other environment variable with its normal precedence and
+// expansion rules.
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 
-function loadEnvFile(file) {
-  if (!fs.existsSync(file)) return;
+function readPort(file) {
+  if (!fs.existsSync(file)) return undefined;
   for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    const match = line.match(/^([\w.-]+)\s*=\s*(.*)$/);
+    const match = line.match(/^PORT\s*=\s*(.*)$/);
     if (!match) continue;
-    const key = match[1];
-    let value = match[2].trim();
+    let value = match[1].trim();
     if (/^".*"$/.test(value) || /^'.*'$/.test(value)) value = value.slice(1, -1);
-    if (process.env[key] === undefined) process.env[key] = value;
+    return value;
   }
+  return undefined;
 }
 
 const root = path.join(__dirname, '..');
-loadEnvFile(path.join(root, '.env'));
-loadEnvFile(path.join(root, '.env.local'));
+const args = process.argv.slice(2);
 
-const nextBin = require.resolve('next/dist/bin/next');
-const result = spawnSync(process.execPath, [nextBin, ...process.argv.slice(2)], {
-  stdio: 'inherit',
-  env: process.env,
+function cliPort(commandArgs) {
+  for (let index = 0; index < commandArgs.length; index += 1) {
+    const arg = commandArgs[index];
+    if (arg === '--port' || arg === '-p') return commandArgs[index + 1];
+    if (arg.startsWith('--port=')) return arg.slice('--port='.length);
+  }
+  return undefined;
+}
+
+const portValue =
+  cliPort(args) ??
+  process.env.PORT ??
+  readPort(path.join(root, '.env.local')) ??
+  readPort(path.join(root, '.env')) ??
+  '5173';
+const port = Number(portValue);
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error(`[frontend] Invalid PORT value: ${JSON.stringify(portValue)}`);
+  process.exit(1);
+}
+
+process.env.PORT = String(port);
+
+// Supplying an explicit port makes Next fail instead of silently choosing a
+// different one, which otherwise leaves the browser pointed at a stale server.
+if ((args[0] === 'dev' || args[0] === 'start') && cliPort(args) === undefined) {
+  args.push('--port', String(port));
+}
+
+function assertPortAvailable() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.once('error', reject);
+    probe.listen(port, () => probe.close(resolve));
+  });
+}
+
+async function main() {
+  if (args[0] === 'dev' || args[0] === 'start') {
+    try {
+      await assertPortAvailable();
+    } catch (error) {
+      if (error && error.code === 'EADDRINUSE') {
+        console.error(
+          `[frontend] Port ${port} is already in use. Stop the existing frontend ` +
+            `with Ctrl+C, or run "npm run dev -- --port ${port + 1}".`,
+        );
+        process.exit(1);
+      }
+      throw error;
+    }
+  }
+
+  const nextBin = require.resolve('next/dist/bin/next');
+  const child = spawn(process.execPath, [nextBin, ...args], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+
+  child.once('error', (error) => {
+    console.error('[frontend] Failed to launch Next.js:', error);
+    process.exitCode = 1;
+  });
+  child.once('exit', (code) => {
+    process.exitCode = code ?? 1;
+  });
+}
+
+main().catch((error) => {
+  console.error('[frontend] Startup check failed:', error);
+  process.exit(1);
 });
-process.exit(result.status ?? 1);

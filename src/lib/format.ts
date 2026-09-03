@@ -70,9 +70,17 @@ export function formatDateTime(iso: string): string {
     }).format(new Date(iso));
 }
 
-/** Initials for avatar chips: "Sharma Hoardings" → "SH" */
-export function getInitials(name: string): string {
+/**
+ * Initials for avatar chips: "Sharma Hoardings" → "SH"
+ *
+ * Tolerates null/empty because some of these names come from the API, where
+ * `User.name` is nullable — an avatar rendering blank is a far better outcome
+ * than a `.split of null` taking down the page it sits in.
+ */
+export function getInitials(name: string | null | undefined): string {
+    if (!name) return "";
     return name
+        .trim()
         .split(/\s+/)
         .slice(0, 2)
         .map((part) => part[0] ?? "")

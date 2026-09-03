@@ -15,4 +15,10 @@ export const apiConfig = {
     /** Cloudflare Turnstile site key. Unset means the widget doesn't render — the
      *  backend's captcha check no-ops the same way when its secret key is unset. */
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || null,
+    /** Google OAuth client ID. Unset hides the "Continue with Google" button.
+     *  Must be the same value as the backend's GOOGLE_CLIENT_ID: that is the
+     *  `aud` claim it pins, so a mismatch rejects every token. Unlike Turnstile
+     *  the backend does *not* degrade to a no-op here — POST /auth/google
+     *  answers 503 while its own copy is unset. */
+    googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || null,
 } as const;

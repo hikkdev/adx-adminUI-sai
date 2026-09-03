@@ -19,10 +19,30 @@ interface AuthContextValue {
     /** True until the stored session has been checked on first load. */
     loading: boolean;
     signIn: (email: string, password: string, captchaToken?: string | null) => Promise<void>;
+    /** Exchanges a Google ID token for an ADX session. */
+    signInWithGoogle: (idToken: string) => Promise<void>;
     signOut: () => Promise<void>;
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
+
+/**
+ * The backend's `User.name` is nullable — an invited account that has not been
+ * filled in yet has none, and Google sign-in is invite-only, so those accounts
+ * are exactly the ones that reach here first. `SessionUser.name` is declared
+ * non-null and `api.post<...>` is an unchecked cast, so nothing would catch it
+ * before the header tried to render initials from null.
+ *
+ * Normalising once, here, keeps every consumer's assumption true.
+ */
+function normalizeSessionUser(user: SessionUser): SessionUser {
+    const name = user.name?.trim();
+    if (name) return { ...user, name };
+
+    // The local part of the work email is the best stand-in we have.
+    const fallback = user.email?.split("@")[0]?.trim();
+    return { ...user, name: fallback || "ADX user" };
+}
 
 /** The seeded admin, used whenever NEXT_PUBLIC_USE_API is not "true". */
 const fixtureUser: SessionUser = {
@@ -51,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             try {
                 const me = await api.get<SessionUser>("/users/me");
-                if (!cancelled) setUser(me);
+                if (!cancelled) setUser(normalizeSessionUser(me));
             } catch {
                 if (!cancelled) setUser(null);
             } finally {
@@ -90,7 +110,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
 
         tokens.set(result);
-        setUser(result.user);
+        setUser(normalizeSessionUser(result.user));
+    }, []);
+
+    /* The ID token is the whole credential, so this mirrors signIn exactly:
+       one anonymous POST, same token pair back, same SessionUser shape. */
+    const signInWithGoogle = React.useCallback(async (idToken: string) => {
+        if (!apiConfig.live) {
+            setUser(fixtureUser);
+            return;
+        }
+        const result = await api.post<{
+            accessToken: string;
+            refreshToken: string;
+            user: SessionUser;
+        }>("/auth/google", { idToken }, { anonymous: true });
+
+        tokens.set(result);
+        setUser(normalizeSessionUser(result.user));
     }, []);
 
     const signOut = React.useCallback(async () => {
@@ -108,8 +145,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [router]);
 
     const value = React.useMemo(
-        () => ({ user, loading, signIn, signOut }),
-        [user, loading, signIn, signOut]
+        () => ({ user, loading, signIn, signInWithGoogle, signOut }),
+        [user, loading, signIn, signInWithGoogle, signOut]
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -126,9 +163,24 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     const { user, loading } = useAuth();
     const router = useRouter();
 
+    /* Read once, at mount: is there even a stored session to validate? Doing
+       this synchronously separates "probably signed in, verifying" from
+       "definitely signed out", which the `loading` flag alone cannot express. */
+    const [hadStoredSession] = React.useState(
+        () => !apiConfig.live || !!tokens.access || !!tokens.refresh
+    );
+
     React.useEffect(() => {
+        /* No stored session means there is nothing to verify — go straight to
+           sign-in rather than waiting out a /users/me call that cannot succeed. */
+        if (!hadStoredSession) {
+            router.replace("/login");
+            return;
+        }
         if (!loading && !user) router.replace("/login");
-    }, [loading, user, router]);
+    }, [loading, user, router, hadStoredSession]);
+
+    if (!hadStoredSession) return null;
 
     if (loading) {
         return (

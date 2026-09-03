@@ -2,7 +2,8 @@ import { cn } from "@/lib/utils";
 import { getInitials } from "@/lib/format";
 
 interface InitialsAvatarProps {
-    name: string;
+    /** Nullable: API-sourced names (`User.name`) are optional in the backend. */
+    name: string | null | undefined;
     size?: "sm" | "md" | "lg";
     className?: string;
 }
