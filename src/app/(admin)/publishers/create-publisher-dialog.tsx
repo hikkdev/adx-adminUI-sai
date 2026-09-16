@@ -1,183 +1,62 @@
 "use client";
 
 import * as React from "react";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { ImagePlus } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { PlugZap } from "lucide-react";
 import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    Form,
-    FormControl,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-
-const createPublisherSchema = z.object({
-    businessName: z.string().min(2, "Enter the registered business name."),
-    ownerEmail: z.string().email("Enter a valid email address."),
-    businessType: z.enum(["individual", "company"]),
-    note: z.string().max(200, "Keep the note under 200 characters.").optional(),
-});
-
-type CreatePublisherValues = z.infer<typeof createPublisherSchema>;
+import { AddPublisherForm, CreatedState } from "@/components/adx/add-publisher-form";
+import { isLive } from "@/lib/api-config";
+import type { CreatedPublisher } from "@/services/publishers";
 
 interface CreatePublisherDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-/** "Add publisher" modal per the Figma create wireframe. */
+/**
+ * "Add publisher" — the Figma create wireframe's modal, over the honest
+ * form the dashboard card already had (Lot A): `POST /publishers`, the
+ * number required, no activation link promised because none is sent. The
+ * owner claims the account by signing in with their number; the publisher
+ * lands on the roster the moment the API answers.
+ */
 export function CreatePublisherDialog({ open, onOpenChange }: CreatePublisherDialogProps) {
-    const form = useForm<CreatePublisherValues>({
-        resolver: zodResolver(createPublisherSchema),
-        defaultValues: {
-            businessName: "",
-            ownerEmail: "",
-            businessType: "individual",
-            note: "",
-        },
-    });
-
-    const onSubmit = (values: CreatePublisherValues) => {
-        toast.success(`Activation link sent to ${values.ownerEmail}`, {
-            description: `${values.businessName} has been registered with the KYC checklist.`,
-        });
-        onOpenChange(false);
-        form.reset();
-    };
+    const live = isLive("supply");
+    const [created, setCreated] = React.useState<CreatedPublisher | null>(null);
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog
+            open={open}
+            onOpenChange={(next) => {
+                onOpenChange(next);
+                if (!next) setCreated(null);
+            }}
+        >
             <DialogContent className="max-w-md">
                 <DialogHeader>
                     <DialogTitle>Add publisher</DialogTitle>
                     <DialogDescription>
-                        Register a publisher directly. They&apos;ll get an activation link +
-                        KYC checklist by email.
+                        Opens the account now; the owner claims it by signing in with their number.
                     </DialogDescription>
                 </DialogHeader>
-
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        <button
-                            type="button"
-                            className="flex w-full items-center gap-3 rounded-lg border border-dashed p-3 text-left transition-colors hover:bg-muted/50"
-                            onClick={() =>
-                                toast.info("Logo upload is wired to storage in production.")
-                            }
-                        >
-                            <span className="flex size-10 items-center justify-center rounded-md bg-muted">
-                                <ImagePlus className="size-4 text-muted-foreground" />
-                            </span>
-                            <span>
-                                <span className="block text-sm font-medium text-foreground">
-                                    Upload logo
-                                </span>
-                                <span className="block text-xs text-muted-foreground">
-                                    PNG or JPG, up to 2 MB
-                                </span>
-                            </span>
-                        </button>
-
-                        <FormField
-                            control={form.control}
-                            name="businessName"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Business name</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="e.g. Sharma Hoardings" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="ownerEmail"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Owner email</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="owner@business.in" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="businessType"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Business type</FormLabel>
-                                    <Select value={field.value} onValueChange={field.onChange}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            <SelectItem value="individual">Individual</SelectItem>
-                                            <SelectItem value="company">Company</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="note"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Note</FormLabel>
-                                    <FormControl>
-                                        <Input
-                                            placeholder="Optional note for the activation email"
-                                            {...field}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <DialogFooter className="pt-2">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => onOpenChange(false)}
-                            >
-                                Cancel
-                            </Button>
-                            <Button type="submit">Add publisher</Button>
-                        </DialogFooter>
-                    </form>
-                </Form>
+                {!live ? (
+                    <div className="flex items-start gap-3 rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        <PlugZap className="mt-0.5 size-4 shrink-0" aria-hidden />
+                        <p>
+                            Publishers are opened on the API. Set <code className="font-mono text-xs">NEXT_PUBLIC_USE_API=true</code> and
+                            point the console at the ADX backend to use this dialog.
+                        </p>
+                    </div>
+                ) : created ? (
+                    <CreatedState publisher={created} onAnother={() => setCreated(null)} />
+                ) : (
+                    <AddPublisherForm onCreated={setCreated} />
+                )}
             </DialogContent>
         </Dialog>
     );

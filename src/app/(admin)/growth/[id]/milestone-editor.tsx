@@ -8,46 +8,123 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { formatINR, formatNumber } from "@/lib/format";
+import { ApiError } from "@/lib/api-client";
+import { formatDate, formatMoney } from "@/lib/format";
 import {
-    MILESTONE_STATUS_META,
-    type Milestone,
-    type MilestoneAudience,
-} from "@/types";
+    MILESTONE_TYPE_META,
+    growthService,
+    milestoneTypeLabel,
+    targetLabel,
+    templatePatch,
+    windowLabel,
+    type TemplateRow,
+} from "@/services/growth";
+import type { StatusMeta } from "@/types";
+import { Field, draftProblems, fromTemplate, toDraft, type TemplateFormValues } from "../template-fields";
 
 interface MilestoneEditorProps {
-    milestones: Milestone[];
-    activeId: string;
+    template: TemplateRow;
+    /** Every template, for the rail. */
+    templates: TemplateRow[];
+    /** Refetches after a save actually lands. */
+    onSaved: () => void;
 }
 
-const audiences: MilestoneAudience[] = ["Publisher agents", "Advertiser agents", "Both"];
+/** The rail's badge: the one switch a template has. */
+const ACTIVE_META: Record<"on" | "off", StatusMeta> = {
+    on: { label: "Active", tone: "success" },
+    off: { label: "Off", tone: "neutral" },
+};
 
-export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) {
-    const source = milestones.find((milestone) => milestone.id === activeId) ?? milestones[0];
-    const [draft, setDraft] = React.useState<Milestone>(source);
-    const [dirty, setDirty] = React.useState(false);
+/** The frame's duration options, plus whatever this template already holds. */
+const WINDOW_CHOICES = [30, 45, 60, 90];
+const ALL_TIME = "ALL";
 
-    const update = <K extends keyof Milestone>(key: K, value: Milestone[K]) => {
-        setDraft((current) => ({ ...current, [key]: value }));
-        setDirty(true);
-    };
+/**
+ * The DR 10 frame's editor — rail, form, preview — over `GET` and `PATCH
+ * /milestones/templates/:id`.
+ *
+ * The frame's controls that describe things the backend does not have are
+ * gone rather than left inert: the audience (every agent climbs one ladder),
+ * the target event (progress is derived on read), auto-enrol (every active
+ * template is on every board) and push on unlock (not wired). In their place
+ * are the three the contract does have — the start, the lock and the order —
+ * and the one switch that folds live / paused / draft into a fact: Active.
+ *
+ * "Publish changes" is "Save changes": there is no publish step, the Active
+ * switch is the publish. Only what changed goes on the wire (`templatePatch`),
+ * so the server's "Nothing to change" cannot fire by accident and the
+ * activity log says what ops did.
+ */
+export function MilestoneEditor({ template, templates, onSaved }: MilestoneEditorProps) {
+    const [values, setValues] = React.useState<TemplateFormValues>(() => fromTemplate(template));
+    const [fieldErrors, setFieldErrors] = React.useState<Record<string, string[]>>({});
+    const [formError, setFormError] = React.useState<string | null>(null);
+    const [busy, setBusy] = React.useState(false);
 
-    const progressPreview = Math.min(
-        100,
-        Math.round((draft.completed / Math.max(draft.enrolled, 1)) * 100) || 40
-    );
+    const problems = draftProblems(values);
+    const valid = Object.keys(problems).length === 0;
+    const patch = valid ? templatePatch(template, toDraft(values)) : {};
+    /** Something to send. */
+    const dirty = Object.keys(patch).length > 0;
+    /** Something typed, valid or not — what Discard throws away. */
+    const stored = fromTemplate(template);
+    const edited = (Object.keys(stored) as (keyof TemplateFormValues)[]).some((key) => values[key] !== stored[key]);
+    const meta = MILESTONE_TYPE_META[template.type as keyof typeof MILESTONE_TYPE_META];
+
+    const set =
+        (key: keyof TemplateFormValues) =>
+        (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+            const value = event.target.value;
+            setValues((current) => ({ ...current, [key]: value }));
+        };
+
+    const errorFor = (key: keyof TemplateFormValues): string | undefined => fieldErrors[key]?.[0] ?? problems[key];
+
+    function discard() {
+        setValues(fromTemplate(template));
+        setFieldErrors({});
+        setFormError(null);
+    }
+
+    async function save() {
+        if (!dirty || busy) return;
+        setBusy(true);
+        setFieldErrors({});
+        setFormError(null);
+        try {
+            const saved = await growthService.patchTemplate(template.id, patch);
+            toast.success(`${saved.title} saved`, {
+                description: saved.isActive
+                    ? "Live on every agent's board from their next read."
+                    : "Saved, and switched off — on nobody's board until it is turned on.",
+            });
+            onSaved();
+        } catch (cause) {
+            if (cause instanceof ApiError) {
+                setFieldErrors(cause.fieldErrors);
+                setFormError(cause.message);
+            } else {
+                setFormError(cause instanceof Error ? cause.message : "Could not save the milestone.");
+            }
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    const windowValue = values.windowDays.trim() === "" ? ALL_TIME : values.windowDays.trim();
+    const windowChoices = WINDOW_CHOICES.includes(Number(windowValue)) || windowValue === ALL_TIME
+        ? WINDOW_CHOICES
+        : [...WINDOW_CHOICES, Number(windowValue)].sort((a, b) => a - b);
+
+    /* The preview draws the card before any progress: the editor knows no
+       agent, and a bar filled to an invented figure would be a figure. */
+    const previewTarget = Number(values.target) > 0 ? Number(values.target) : template.target;
 
     return (
         <div className="space-y-5">
@@ -60,35 +137,25 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
                     Growth CMS
                 </Link>
                 <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                        Milestone program
-                    </h1>
+                    <div className="min-w-0">
+                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Milestone program</h1>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            {milestoneTypeLabel(template.type)} · {targetLabel(template.type, template.target)} ·{" "}
+                            {template.isActive ? "on every agent's board" : "switched off"}
+                        </p>
+                    </div>
                     <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            className="bg-card"
-                            disabled={!dirty}
-                            onClick={() => {
-                                setDraft(source);
-                                setDirty(false);
-                            }}
-                        >
+                        <Button variant="outline" className="bg-card" disabled={!edited || busy} onClick={discard}>
                             Discard
                         </Button>
-                        <Button
-                            disabled={!dirty}
-                            onClick={() => {
-                                setDirty(false);
-                                toast.success("Milestone published", {
-                                    description: `${draft.title} is now visible to ${draft.audience.toLowerCase()}.`,
-                                });
-                            }}
-                        >
-                            Publish changes
+                        <Button disabled={!dirty || !valid || busy} onClick={() => void save()}>
+                            {busy ? "Saving…" : "Save changes"}
                         </Button>
                     </div>
                 </div>
             </div>
+
+            {formError && <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{formError}</p>}
 
             <div className="grid gap-4 xl:grid-cols-12">
                 {/* Milestone list rail */}
@@ -97,29 +164,23 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
                         Milestones
                     </h3>
                     <ul className="divide-y">
-                        {milestones.map((milestone) => {
-                            const active = milestone.id === draft.id;
+                        {templates.map((row) => {
+                            const active = row.id === template.id;
                             return (
-                                <li key={milestone.id}>
+                                <li key={row.id}>
                                     <Link
-                                        href={`/growth/${milestone.id}`}
+                                        href={`/growth/${row.id}`}
+                                        aria-current={active ? "page" : undefined}
                                         className={cn(
                                             "block px-4 py-3 transition-colors",
-                                            active ? "bg-primary/[0.04]" : "hover:bg-muted/50"
+                                            active ? "bg-primary/[0.04]" : "hover:bg-muted/50",
                                         )}
                                     >
                                         <div className="flex items-center justify-between gap-2">
-                                            <p className="truncate text-sm font-medium text-foreground">
-                                                {milestone.title}
-                                            </p>
-                                            <StatusBadge
-                                                status={MILESTONE_STATUS_META[milestone.status]}
-                                            />
+                                            <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+                                            <StatusBadge status={ACTIVE_META[row.isActive ? "on" : "off"]} />
                                         </div>
-                                        <p className="mt-0.5 text-xs text-muted-foreground">
-                                            {milestone.note ??
-                                                `${formatNumber(milestone.enrolled)} agents enrolled`}
-                                        </p>
+                                        <p className="mt-0.5 text-xs text-muted-foreground">{railLine(row)}</p>
                                     </Link>
                                 </li>
                             );
@@ -129,30 +190,21 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
 
                 {/* Form */}
                 <Card className="rounded-lg border-border p-5 shadow-none xl:col-span-6">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Milestone details
-                    </h3>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Milestone details</h3>
                     <div className="mt-4 space-y-4">
-                        <div className="space-y-1.5">
-                            <Label htmlFor="ms-title">Title</Label>
-                            <Input
-                                id="ms-title"
-                                value={draft.title}
-                                onChange={(event) => update("title", event.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="ms-desc">Description</Label>
+                        <Field id="ms-title" label="Title" error={errorFor("title")}>
+                            <Input id="ms-title" value={values.title} onChange={set("title")} autoComplete="off" />
+                        </Field>
+                        <Field id="ms-desc" label="Description" error={errorFor("description")}>
                             <Textarea
                                 id="ms-desc"
-                                value={draft.description}
-                                onChange={(event) => update("description", event.target.value)}
+                                value={values.description}
+                                onChange={set("description")}
                                 className="min-h-20 resize-none"
                             />
-                        </div>
+                        </Field>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <Label>Target count</Label>
+                            <Field id="ms-target" label="Target count" hint={`In ${meta?.unit ?? "units"}.`} error={errorFor("target")}>
                                 <div className="flex items-center gap-2">
                                     <Button
                                         type="button"
@@ -161,16 +213,18 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
                                         className="size-9 shrink-0"
                                         aria-label="Decrease target"
                                         onClick={() =>
-                                            update("targetCount", Math.max(1, draft.targetCount - 1))
+                                            setValues((current) => ({
+                                                ...current,
+                                                target: String(Math.max(1, (Number(current.target) || 1) - 1)),
+                                            }))
                                         }
                                     >
                                         <Minus className="size-4" />
                                     </Button>
                                     <Input
-                                        value={draft.targetCount}
-                                        onChange={(event) =>
-                                            update("targetCount", Number(event.target.value) || 1)
-                                        }
+                                        id="ms-target"
+                                        value={values.target}
+                                        onChange={set("target")}
                                         inputMode="numeric"
                                         className="text-center"
                                     />
@@ -180,109 +234,101 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
                                         size="icon"
                                         className="size-9 shrink-0"
                                         aria-label="Increase target"
-                                        onClick={() => update("targetCount", draft.targetCount + 1)}
+                                        onClick={() =>
+                                            setValues((current) => ({
+                                                ...current,
+                                                target: String((Number(current.target) || 0) + 1),
+                                            }))
+                                        }
                                     >
                                         <Plus className="size-4" />
                                     </Button>
                                 </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label htmlFor="ms-reward">Reward (₹)</Label>
+                            </Field>
+                            <Field
+                                id="ms-reward"
+                                label="Reward (₹)"
+                                hint="Recorded on claim, released by ADX finance."
+                                error={errorFor("rewardAmount")}
+                            >
                                 <Input
                                     id="ms-reward"
-                                    value={draft.rewardInr}
-                                    inputMode="numeric"
-                                    onChange={(event) =>
-                                        update("rewardInr", Number(event.target.value) || 0)
-                                    }
+                                    value={values.rewardAmount}
+                                    inputMode="decimal"
+                                    onChange={set("rewardAmount")}
+                                    autoComplete="off"
                                 />
-                            </div>
+                            </Field>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <Label>Duration</Label>
+                            <Field id="ms-window" label="Duration" hint="How long the window runs once it starts." error={errorFor("windowDays")}>
                                 <Select
-                                    value={String(draft.durationDays)}
-                                    onValueChange={(value) => update("durationDays", Number(value))}
+                                    value={windowValue}
+                                    onValueChange={(value) =>
+                                        setValues((current) => ({ ...current, windowDays: value === ALL_TIME ? "" : value }))
+                                    }
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger id="ms-window">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {[30, 45, 60, 90].map((days) => (
+                                        <SelectItem value={ALL_TIME}>All time</SelectItem>
+                                        {windowChoices.map((days) => (
                                             <SelectItem key={days} value={String(days)}>
                                                 {days} days
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label htmlFor="ms-event">Target event</Label>
-                                <Input
-                                    id="ms-event"
-                                    value={draft.targetEvent}
-                                    onChange={(event) => update("targetEvent", event.target.value)}
-                                />
-                            </div>
+                            </Field>
+                            <Field
+                                id="ms-starts"
+                                label="Starts"
+                                optional
+                                hint="Empty starts the clock when the agent first sees it."
+                                error={errorFor("startsAt")}
+                            >
+                                <Input id="ms-starts" type="datetime-local" value={values.startsAt} onChange={set("startsAt")} />
+                            </Field>
                         </div>
-
-                        <div className="space-y-1.5">
-                            <Label>Applies to</Label>
-                            <div className="flex flex-wrap gap-1.5">
-                                {audiences.map((audience) => (
-                                    <button
-                                        key={audience}
-                                        type="button"
-                                        onClick={() => update("audience", audience)}
-                                        className={cn(
-                                            "h-9 rounded-lg border px-3 text-sm font-medium transition-colors",
-                                            draft.audience === audience
-                                                ? "border-foreground bg-foreground text-background"
-                                                : "bg-card text-muted-foreground hover:text-foreground"
-                                        )}
-                                    >
-                                        {audience}
-                                    </button>
-                                ))}
-                            </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <Field
+                                id="ms-unlock"
+                                label="Unlock after"
+                                optional
+                                hint="Milestones an agent must complete before this one opens."
+                                error={errorFor("unlockAfter")}
+                            >
+                                <Input id="ms-unlock" type="number" min={0} inputMode="numeric" value={values.unlockAfter} onChange={set("unlockAfter")} placeholder="0" />
+                            </Field>
+                            <Field id="ms-order" label="Order" hint="Where it sits on the board; lower first." error={errorFor("sortOrder")}>
+                                <Input id="ms-order" type="number" min={0} inputMode="numeric" value={values.sortOrder} onChange={set("sortOrder")} />
+                            </Field>
                         </div>
 
                         <div className="space-y-3 border-t pt-4">
                             <label className="flex items-center justify-between gap-4">
                                 <span>
-                                    <span className="block text-sm font-medium text-foreground">
-                                        Auto-enroll new agents
-                                    </span>
+                                    <span className="block text-sm font-medium text-foreground">Active</span>
                                     <span className="block text-xs text-muted-foreground">
-                                        New agents see this milestone on day one
+                                        On every agent&rsquo;s board from their next read; off leaves every board
                                     </span>
                                 </span>
                                 <Switch
-                                    checked={draft.autoEnroll}
-                                    onCheckedChange={(value) => update("autoEnroll", value)}
+                                    checked={values.isActive}
+                                    onCheckedChange={(checked) => setValues((current) => ({ ...current, isActive: checked }))}
                                 />
                             </label>
-                            <label className="flex items-center justify-between gap-4">
-                                <span>
-                                    <span className="block text-sm font-medium text-foreground">
-                                        Push notification on unlock
-                                    </span>
-                                    <span className="block text-xs text-muted-foreground">
-                                        Celebrate completion in the field app
-                                    </span>
-                                </span>
-                                <Switch
-                                    checked={draft.pushOnUnlock}
-                                    onCheckedChange={(value) => update("pushOnUnlock", value)}
-                                />
-                            </label>
+                            <p className="text-xs text-muted-foreground">
+                                Type: <span className="font-medium text-foreground">{milestoneTypeLabel(template.type)}</span>{" "}
+                                — fixed once a milestone exists. To count something else, create a new one.
+                            </p>
                         </div>
                     </div>
                 </Card>
 
-                {/* Agent preview */}
-                <div className="xl:col-span-3">
+                {/* Agent preview + what it counts */}
+                <div className="space-y-4 xl:col-span-3">
                     <Card className="rounded-lg border-border p-5 shadow-none">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                             Agent experience preview
@@ -292,41 +338,56 @@ export function MilestoneEditor({ milestones, activeId }: MilestoneEditorProps) 
                                 <Sparkles className="size-3" />
                                 Milestone
                             </p>
-                            <p className="mt-2 text-sm font-semibold text-foreground">{draft.title}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{draft.description}</p>
-                            <Progress value={progressPreview} className="mt-4 h-1.5" />
+                            <p className="mt-2 text-sm font-semibold text-foreground">{values.title || "Untitled"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{values.description}</p>
+                            <Progress value={0} className="mt-4 h-1.5" />
                             <div className="mt-2 flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">
-                                    {Math.round((progressPreview / 100) * draft.targetCount)} of{" "}
-                                    {draft.targetCount}
-                                </span>
-                                <span className="font-medium text-foreground">{progressPreview}%</span>
+                                <span className="text-muted-foreground">0 of {previewTarget}</span>
+                                <span className="font-medium text-foreground">0%</span>
                             </div>
                             <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-3 text-center">
                                 <div>
-                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                        Reward
-                                    </p>
+                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reward</p>
                                     <p className="text-sm font-semibold text-foreground">
-                                        {formatINR(draft.rewardInr)}
+                                        {problems.rewardAmount ? "—" : formatMoney(values.rewardAmount.trim())}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                        Window
-                                    </p>
+                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Window</p>
                                     <p className="text-sm font-semibold text-foreground">
-                                        {draft.durationDays} days
+                                        {windowLabel(values.windowDays.trim() === "" ? null : Number(values.windowDays))}
                                     </p>
                                 </div>
                             </div>
                         </div>
                         <p className="mt-3 text-xs text-muted-foreground">
-                            This is how the milestone card renders in the ADX agent app.
+                            How the card renders in the ADX agent app before any progress. Each agent&rsquo;s own bar
+                            is derived from their work when they open the board.
+                        </p>
+                    </Card>
+
+                    <Card className="rounded-lg border-border p-5 shadow-none">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            What this counts
+                        </h3>
+                        <p className="mt-3 text-sm font-medium text-foreground">{milestoneTypeLabel(template.type)}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            {meta?.counts ?? "A type the console has not heard of; the server derives its progress."}
+                        </p>
+                        <p className="mt-3 text-xs text-muted-foreground">
+                            Progress is derived from the agent&rsquo;s own record every time their board is read;
+                            nothing is incremented by hand. A claimed reward is recorded as an incentive and
+                            released by ADX finance.
                         </p>
                     </Card>
                 </div>
             </div>
         </div>
     );
+}
+
+/** The rail's sub-line: when it starts, if ahead; otherwise what it is. */
+function railLine(row: TemplateRow): string {
+    if (row.startsAt && Date.parse(row.startsAt) > Date.now()) return `Starts ${formatDate(row.startsAt)}`;
+    return `${milestoneTypeLabel(row.type)} · ${windowLabel(row.windowDays)}`;
 }

@@ -6,103 +6,99 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionCard } from "@/components/adx/section-card";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
+import { StatusBadge } from "@/components/adx/status-badge";
+import { ApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
-    WORK_TASK_PRIORITY_META,
-    WORK_TASK_STATUS_META,
-    type RecurrenceFrequency,
-    type WorkTask,
-    type WorkTaskPriority,
-    type WorkTaskStatus,
-} from "@/types";
+    RECURRENCE_FREQUENCIES,
+    RECURRENCE_FREQUENCY_LABEL,
+    editFormError,
+    editFormOf,
+    personDetail,
+    personName,
+    taskPatch,
+    workService,
+    type TaskEditForm as EditForm,
+    type WorkProject,
+    type WorkRecurrenceFrequency,
+    type WorkTaskDetail,
+} from "@/services/work";
+import { WORK_PRIORITY_META, WORK_PROJECT_KIND_LABEL, WORK_TASK_STATUS_META, type WorkPriority } from "@/types";
+import { LinkedRecordPicker } from "../../linked-record-picker";
 
 interface TaskEditFormProps {
-    task: WorkTask;
+    task: WorkTaskDetail;
+    projects: WorkProject[];
+    /** The patch call — swapped in tests. */
+    patch?: typeof workService.tasks.patch;
 }
 
-const STATUS_FLOW: WorkTaskStatus[] = [
-    "draft",
-    "todo",
-    "in_progress",
-    "blocked",
-    "pending_review",
-    "verified",
-    "archived",
-];
-
-const FREQUENCIES: RecurrenceFrequency[] = [
-    "none",
-    "daily",
-    "weekly",
-    "monthly",
-    "quarterly",
-    "yearly",
-];
-
-export function TaskEditForm({ task }: TaskEditFormProps) {
+/**
+ * The DR 10 frame `Edit task · /tasks/:id/edit`, over `PATCH /work/tasks/:id`.
+ *
+ * The frame's cards are kept — Details, Placement, Schedule, Effort on
+ * the left; State and Team on the right — and the sticky bar counts the
+ * changes and saves them as one patch of only what moved (`taskPatch`).
+ * What each holds is the record's own: the project is a combobox over
+ * the ACTIVE projects (a sub-task follows its parent's, so the field is
+ * read-only there); the schedule is the planned start, the deadline and
+ * the revised end with the recurrence beside them; Effort is the
+ * estimate alone — buffer and slack have no column (Q70). The status is
+ * not a field here: it moves under the module's rules from the task's
+ * page. The team is shown, and edited from the task's page too.
+ */
+export function TaskEditForm({ task, projects, patch = workService.tasks.patch }: TaskEditFormProps) {
     const router = useRouter();
-    const [dirty, setDirty] = React.useState<Set<string>>(new Set());
-    const [form, setForm] = React.useState({
-        title: task.title,
-        description: task.description,
-        status: task.status,
-        priority: task.priority,
-        project: task.project,
-        projectType: task.projectType,
-        location: task.location,
-        startDate: task.startDate,
-        deadline: task.deadline,
-        revisedEndDate: task.revisedEndDate,
-        effortEstimate: task.effortEstimate,
-        bufferTime: task.bufferTime,
-        slackTime: task.slackTime,
-        frequency: task.recurrence.frequency,
-        occursOn: task.recurrence.occursOn ?? "",
-    });
+    const [busy, setBusy] = React.useState(false);
+    const [form, setForm] = React.useState<EditForm>(() => editFormOf(task));
+    const [linkedLabel, setLinkedLabel] = React.useState<string | null>(task.linked?.label ?? null);
 
-    const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
-        setForm((current) => ({ ...current, [key]: value }));
-        setDirty((current) => new Set(current).add(String(key)));
-    };
+    const set = <K extends keyof EditForm>(key: K, value: EditForm[K]) => setForm((current) => ({ ...current, [key]: value }));
 
+    const pending = taskPatch(task, form);
+    const changes = pending ? Object.keys(pending).length : 0;
+    const error = editFormError(form);
     const titleMissing = !form.title.trim();
-    const datesInverted =
-        Boolean(form.startDate && form.deadline) && form.deadline < form.startDate;
-    const canSave = dirty.size > 0 && !titleMissing && !datesInverted;
+    const datesInverted = Boolean(form.startDate && form.deadline) && form.deadline < form.startDate;
+    const canSave = changes > 0 && error === null;
 
-    const save = () => {
-        if (!canSave) return;
-        setDirty(new Set());
-        toast.success("Task updated", { description: form.title });
-        router.push(`/tasks/${task.id}`);
+    const projectItems = React.useMemo(
+        () => projects.map((project) => ({ value: project.id, label: project.name, description: `${project.displayId ?? ""} ${WORK_PROJECT_KIND_LABEL[project.kind]}`.trim() })),
+        [projects],
+    );
+
+    const save = async () => {
+        if (!pending || error) {
+            if (error) toast.error(error);
+            return;
+        }
+        setBusy(true);
+        try {
+            const saved = await patch(task.id, pending);
+            toast.success("Task updated", { description: saved.title });
+            router.push(`/tasks/${encodeURIComponent(task.id)}`);
+        } catch (caught) {
+            toast.error(caught instanceof ApiError ? caught.message : "Could not save the task.");
+            setBusy(false);
+        }
     };
 
     return (
-        <div className={cn("space-y-5", dirty.size > 0 && "pb-24")}>
+        <div className={cn("space-y-5", changes > 0 && "pb-24")}>
             <div>
-                <Link
-                    href={`/tasks/${task.id}`}
-                    className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
+                <Link href={`/tasks/${encodeURIComponent(task.id)}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
                     <ChevronLeft className="size-4" />
                     {task.title}
                 </Link>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                    Edit task
-                </h1>
-                <p className="mt-0.5 text-sm text-muted-foreground">{task.id}</p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Edit task</h1>
+                <p className="mt-0.5 text-sm text-muted-foreground">{task.displayId ?? task.id}</p>
             </div>
 
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -127,51 +123,46 @@ export function TaskEditForm({ task }: TaskEditFormProps) {
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="description">Description</Label>
-                                <Textarea
-                                    id="description"
-                                    rows={4}
-                                    value={form.description}
-                                    onChange={(event) => set("description", event.target.value)}
-                                />
+                                <Textarea id="description" rows={4} value={form.description} onChange={(event) => set("description", event.target.value)} />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="tags">Tags</Label>
+                                <Input id="tags" value={form.tags} onChange={(event) => set("tags", event.target.value)} placeholder="audit, mumbai — comma separated" />
                             </div>
                         </div>
                     </SectionCard>
 
                     <SectionCard title="Placement">
-                        <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
                                 <Label htmlFor="project">Project</Label>
-                                <Input
+                                <Combobox
                                     id="project"
-                                    value={form.project}
-                                    onChange={(event) => set("project", event.target.value)}
+                                    items={projectItems}
+                                    value={form.projectId}
+                                    onValueChange={(projectId) => set("projectId", projectId)}
+                                    placeholder="No project"
+                                    searchPlaceholder="Search projects"
+                                    emptyText="No active project matches."
+                                    disabled={Boolean(task.parent)}
                                 />
+                                {task.parent && <p className="text-xs text-muted-foreground">A sub-task follows its parent&apos;s project.</p>}
                             </div>
                             <div className="space-y-1.5">
-                                <Label htmlFor="project-type">Project type</Label>
-                                <Select
-                                    value={form.projectType}
-                                    onValueChange={(value) =>
-                                        set("projectType", value as WorkTask["projectType"])
-                                    }
-                                >
-                                    <SelectTrigger id="project-type">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Department">Department</SelectItem>
-                                        <SelectItem value="Region">Region</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <Label>Parent task</Label>
+                                <p className="flex h-10 items-center text-sm text-foreground">{task.parent ? task.parent.title : "None"}</p>
                             </div>
-                            <div className="space-y-1.5">
-                                <Label htmlFor="location">Location</Label>
-                                <Input
-                                    id="location"
-                                    value={form.location}
-                                    onChange={(event) => set("location", event.target.value)}
-                                />
-                            </div>
+                        </div>
+                        <div className="mt-4 border-t pt-4">
+                            <LinkedRecordPicker
+                                kind={form.linkedKind}
+                                id={form.linkedId}
+                                label={linkedLabel}
+                                onChange={(linked) => {
+                                    setForm((current) => ({ ...current, linkedKind: linked.kind, linkedId: linked.id }));
+                                    setLinkedLabel(linked.label);
+                                }}
+                            />
                         </div>
                     </SectionCard>
 
@@ -179,13 +170,7 @@ export function TaskEditForm({ task }: TaskEditFormProps) {
                         <div className="grid gap-4 sm:grid-cols-3">
                             <div className="space-y-1.5">
                                 <Label htmlFor="start">Start date</Label>
-                                <Input
-                                    id="start"
-                                    type="date"
-                                    value={form.startDate}
-                                    onChange={(event) => set("startDate", event.target.value)}
-                                    className="tabular-nums"
-                                />
+                                <Input id="start" type="date" value={form.startDate} onChange={(event) => set("startDate", event.target.value)} className="tabular-nums" />
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="deadline">Deadline</Label>
@@ -206,72 +191,62 @@ export function TaskEditForm({ task }: TaskEditFormProps) {
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="revised">Revised end</Label>
-                                <Input
-                                    id="revised"
-                                    type="date"
-                                    value={form.revisedEndDate}
-                                    onChange={(event) => set("revisedEndDate", event.target.value)}
-                                    className="tabular-nums"
-                                />
+                                <Input id="revised" type="date" value={form.revisedEndDate} onChange={(event) => set("revisedEndDate", event.target.value)} className="tabular-nums" />
                             </div>
                         </div>
 
                         <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
                                 <Label htmlFor="frequency">Repeats</Label>
-                                <Select
-                                    value={form.frequency}
-                                    onValueChange={(value) =>
-                                        set("frequency", value as RecurrenceFrequency)
-                                    }
-                                >
+                                <Select value={form.frequency} onValueChange={(value) => set("frequency", value as WorkRecurrenceFrequency | "NONE")}>
                                     <SelectTrigger id="frequency">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {FREQUENCIES.map((option) => (
+                                        <SelectItem value="NONE">Does not repeat</SelectItem>
+                                        {RECURRENCE_FREQUENCIES.map((option) => (
                                             <SelectItem key={option} value={option}>
-                                                {option === "none"
-                                                    ? "Does not repeat"
-                                                    : option[0].toUpperCase() + option.slice(1)}
+                                                {RECURRENCE_FREQUENCY_LABEL[option]}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            {form.frequency !== "none" && (
+                            {form.frequency !== "NONE" && (
                                 <div className="space-y-1.5">
                                     <Label htmlFor="occurs-on">Occurs on</Label>
-                                    <Input
-                                        id="occurs-on"
-                                        value={form.occursOn}
-                                        onChange={(event) => set("occursOn", event.target.value)}
-                                        placeholder="Mon, Wed, Fri"
-                                    />
+                                    <Input id="occurs-on" value={form.occursOn} onChange={(event) => set("occursOn", event.target.value)} placeholder="Mon, Wed, Fri" />
                                 </div>
                             )}
+                            {form.frequency !== "NONE" && (
+                                <>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="recurrence-end">Until</Label>
+                                        <Input id="recurrence-end" type="date" value={form.recurrenceEnd} onChange={(event) => set("recurrenceEnd", event.target.value)} className="tabular-nums" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="occurrences">Or a number of times</Label>
+                                        <Input id="occurrences" type="number" min={1} value={form.totalOccurrences} onChange={(event) => set("totalOccurrences", event.target.value)} className="tabular-nums" />
+                                    </div>
+                                </>
+                            )}
                         </div>
+                        {task.recurrence?.occurrence && task.recurrence.occurrence > 1 && (
+                            <p className="mt-3 text-xs text-muted-foreground">This is occurrence {task.recurrence.occurrence} of the series.</p>
+                        )}
                     </SectionCard>
 
                     <SectionCard title="Effort">
-                        <div className="grid gap-4 sm:grid-cols-3">
-                            {(
-                                [
-                                    ["effortEstimate", "Estimate"],
-                                    ["bufferTime", "Buffer"],
-                                    ["slackTime", "Slack"],
-                                ] as const
-                            ).map(([key, label]) => (
-                                <div key={key} className="space-y-1.5">
-                                    <Label htmlFor={key}>{label}</Label>
-                                    <Input
-                                        id={key}
-                                        value={form[key]}
-                                        onChange={(event) => set(key, event.target.value)}
-                                        className="tabular-nums"
-                                    />
-                                </div>
-                            ))}
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="effort">Estimate (hours)</Label>
+                                <Input id="effort" type="number" min={0} step="0.5" value={form.effort} onChange={(event) => set("effort", event.target.value)} className="tabular-nums" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="progress">Progress (%)</Label>
+                                <Input id="progress" type="number" min={0} max={100} value={form.progress} onChange={(event) => set("progress", event.target.value)} className="tabular-nums" disabled={task.children.length > 0} />
+                                {task.children.length > 0 && <p className="text-xs text-muted-foreground">The mean of the sub-tasks&apos; progress — set theirs.</p>}
+                            </div>
                         </div>
                     </SectionCard>
                 </div>
@@ -280,42 +255,24 @@ export function TaskEditForm({ task }: TaskEditFormProps) {
                     <SectionCard title="State">
                         <div className="space-y-4">
                             <div className="space-y-1.5">
-                                <Label htmlFor="status">Status</Label>
-                                <Select
-                                    value={form.status}
-                                    onValueChange={(value) => set("status", value as WorkTaskStatus)}
-                                >
-                                    <SelectTrigger id="status">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {STATUS_FLOW.map((option) => (
-                                            <SelectItem key={option} value={option}>
-                                                {WORK_TASK_STATUS_META[option].label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <Label>Status</Label>
+                                <div className="flex items-center gap-2">
+                                    <StatusBadge status={WORK_TASK_STATUS_META[task.status]} />
+                                    <Link href={`/tasks/${encodeURIComponent(task.id)}`} className="text-xs text-muted-foreground hover:underline">
+                                        moves from the task&apos;s page
+                                    </Link>
+                                </div>
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="priority">Priority</Label>
-                                <Select
-                                    value={form.priority}
-                                    onValueChange={(value) =>
-                                        set("priority", value as WorkTaskPriority)
-                                    }
-                                >
+                                <Select value={form.priority} onValueChange={(value) => set("priority", value as WorkPriority)}>
                                     <SelectTrigger id="priority">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {(
-                                            Object.keys(
-                                                WORK_TASK_PRIORITY_META
-                                            ) as WorkTaskPriority[]
-                                        ).map((option) => (
+                                        {(Object.keys(WORK_PRIORITY_META) as WorkPriority[]).map((option) => (
                                             <SelectItem key={option} value={option}>
-                                                {WORK_TASK_PRIORITY_META[option].label}
+                                                {WORK_PRIORITY_META[option].label}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
@@ -324,48 +281,39 @@ export function TaskEditForm({ task }: TaskEditFormProps) {
                         </div>
                     </SectionCard>
 
-                    <SectionCard
-                        title="Team"
-                        description={`${task.team.length} assigned`}
-                        contentClassName="px-5 py-1"
-                    >
-                        <ul className="divide-y">
-                            {task.team.map((member) => (
-                                <li key={member.id} className="flex items-center gap-2.5 py-3">
-                                    <InitialsAvatar name={member.name} size="sm" />
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-medium text-foreground">
-                                            {member.name}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                            {member.role}
-                                        </p>
-                                    </div>
-                                    <Button variant="ghost" size="sm">
-                                        Remove
-                                    </Button>
-                                </li>
-                            ))}
-                        </ul>
+                    <SectionCard title="Team" description={`${task.assignees.length} assigned · edited from the task's page`} contentClassName="px-5 py-1">
+                        {task.assignees.length ? (
+                            <ul className="divide-y">
+                                {task.assignees.map((person) => (
+                                    <li key={person.userId} className="flex items-center gap-2.5 py-3">
+                                        <InitialsAvatar name={personName(person)} size="sm" />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm font-medium text-foreground">{personName(person)}</p>
+                                            <p className="text-xs text-muted-foreground">{personDetail(person)}</p>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="py-3 text-sm text-muted-foreground">Nobody is assigned.</p>
+                        )}
                     </SectionCard>
                 </div>
             </div>
 
-            {dirty.size > 0 && (
+            {changes > 0 && (
                 <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 backdrop-blur md:left-[243px]">
                     <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
                         <p className="text-sm text-muted-foreground">
-                            <span className="font-medium tabular-nums text-foreground">
-                                {dirty.size}
-                            </span>{" "}
-                            {dirty.size === 1 ? "change" : "changes"}
+                            <span className="font-medium tabular-nums text-foreground">{changes}</span> {changes === 1 ? "change" : "changes"}
+                            {error && <span className="ml-2 text-danger">· {error}</span>}
                         </p>
                         <div className="flex items-center gap-2">
-                            <Button variant="ghost" onClick={() => router.push(`/tasks/${task.id}`)}>
+                            <Button variant="ghost" onClick={() => router.push(`/tasks/${encodeURIComponent(task.id)}`)} disabled={busy}>
                                 Cancel
                             </Button>
-                            <Button onClick={save} disabled={!canSave}>
-                                Save
+                            <Button onClick={() => void save()} disabled={!canSave || busy}>
+                                {busy ? "Saving…" : "Save"}
                             </Button>
                         </div>
                     </div>

@@ -1,31 +1,34 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import type { PlatformUser } from "@/types";
-import { UsersView } from "./users-view";
+import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { UsersOverviewView } from "./users-overview";
 
 export const metadata: Metadata = { title: "Users" };
 
-export default async function UsersPage() {
-    const [users, admins] = await Promise.all([api.users.list(), api.adminUsers.list()]);
+/** The facets the accounts directory keeps in its URL — a link carrying one meant the table, and still lands on it. */
+const DIRECTORY_FACETS = ["state", "role", "sort"] as const;
 
-    /* Admin console accounts, folded into the same directory. */
-    const adminAccounts: PlatformUser[] = admins
-        .filter((admin) => !users.some((user) => user.email === admin.email))
-        .map((admin) => ({
-            id: admin.id,
-            name: admin.name,
-            email: admin.email,
-            mobile: "—",
-            roles: ["ADMIN"],
-            status: admin.status,
-            city: "Bengaluru",
-            joinedAt: "2025-08-19",
-            lastActive: admin.lastLogin,
-            kycVerified: true,
-            twoFactor: admin.twoFactorEnabled,
-            sessions: [],
-            activity: [],
-        }));
-
-    return <UsersView users={[...users, ...adminAccounts]} />;
+/**
+ * The section's landing tab — package O-C: the overview over
+ * `GET /section-overviews/users`. The accounts directory moved to
+ * `/users/accounts`; a deep link that carried its facets (`/users?state=
+ * closed`, `/users?role=ADMIN`) is sent there with them, since only the
+ * directory honours those words. Suspense because the loader keeps the
+ * window in the URL.
+ */
+export default async function UsersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+    const params = await searchParams;
+    if (DIRECTORY_FACETS.some((facet) => typeof params[facet] === "string")) {
+        const query = new URLSearchParams();
+        for (const facet of DIRECTORY_FACETS) {
+            const value = params[facet];
+            if (typeof value === "string") query.set(facet, value);
+        }
+        redirect(`/users/accounts?${query.toString()}`);
+    }
+    return (
+        <Suspense fallback={null}>
+            <UsersOverviewView />
+        </Suspense>
+    );
 }

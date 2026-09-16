@@ -112,6 +112,23 @@ interface DataTableProps<TData, TValue> {
     onRowClick?: (row: TData) => void;
     emptyState?: React.ReactNode;
     initialPageSize?: number;
+    /** The footer's rows-per-page choices. Default [5, 10, 20, 50]; initialPageSize should be one of them. */
+    pageSizes?: number[];
+    /**
+     * Draw the footer's rows-per-page and Previous/Next. Default true. Off
+     * for a table whose page the server already cut — the caller draws the
+     * server's pager instead, and the whole page it was handed is shown.
+     */
+    showPagination?: boolean;
+    /**
+     * Sorting owned by the caller (Lot G, package CG1): the state is drawn
+     * from here and every header click is reported through `onSortingChange`
+     * rather than applied to the rows — for a table whose sort the server
+     * does (`?sort=&dir=`), so a click refetches instead of re-ordering the
+     * one page in hand. Leave both off for the table's own client-side sort.
+     */
+    sorting?: SortingState;
+    onSortingChange?: (sorting: SortingState) => void;
     className?: string;
 }
 
@@ -125,19 +142,52 @@ export function DataTable<TData, TValue>({
     onRowClick,
     emptyState,
     initialPageSize = 10,
+    pageSizes = [5, 10, 20, 50],
+    showPagination = true,
+    sorting: controlledSorting,
+    onSortingChange,
     className,
 }: DataTableProps<TData, TValue>) {
-    const [sorting, setSorting] = React.useState<SortingState>([]);
+    const [ownSorting, setOwnSorting] = React.useState<SortingState>([]);
+    const manualSorting = controlledSorting !== undefined;
+    const sorting = manualSorting ? controlledSorting : ownSorting;
     const [globalFilter, setGlobalFilter] = React.useState("");
     const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
     const [rowSelection, setRowSelection] = React.useState({});
 
+    /**
+     * Bulk actions imply a way to select rows, so the checkbox column is added
+     * here rather than left to every caller to remember.
+     *
+     * It was a caller's job until five pricing tables shipped with bulk actions
+     * and no checkboxes: the toolbar could never appear, because nothing could
+     * ever be selected. A table that offers an action nobody can reach is worse
+     * than one that offers none, and the coupling is real enough that the
+     * component should enforce it.
+     *
+     * Guarded so the tables that already add it by hand do not get two.
+     */
+    const resolvedColumns = React.useMemo(() => {
+        if (!bulkActions) return columns;
+        if (columns.some((column) => column.id === "select")) return columns;
+        return [selectionColumn<TData>() as ColumnDef<TData, TValue>, ...columns];
+    }, [bulkActions, columns]);
+
     const table = useReactTable({
         data,
-        columns,
+        columns: resolvedColumns,
         state: { sorting, globalFilter, columnVisibility, rowSelection },
-        initialState: { pagination: { pageSize: initialPageSize } },
-        onSortingChange: setSorting,
+        // A server-sorted page is shown in the order it came: the click is
+        // reported, never applied to the rows.
+        manualSorting,
+        // A server-cut page is shown whole: nothing the caller handed over is
+        // hidden behind a second pager.
+        initialState: { pagination: { pageSize: showPagination ? initialPageSize : Number.MAX_SAFE_INTEGER } },
+        onSortingChange: (updater) => {
+            const next = typeof updater === "function" ? updater(sorting) : updater;
+            if (manualSorting) onSortingChange?.(next);
+            else setOwnSorting(next);
+        },
         onGlobalFilterChange: setGlobalFilter,
         onColumnVisibilityChange: setColumnVisibility,
         onRowSelectionChange: setRowSelection,
@@ -269,7 +319,7 @@ export function DataTable<TData, TValue>({
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={columns.length} className="h-48 p-0">
+                                <TableCell colSpan={resolvedColumns.length} className="h-48 p-0">
                                     {emptyState ?? (
                                         <p className="flex h-full items-center justify-center text-sm text-muted-foreground">
                                             No results found.
@@ -282,6 +332,7 @@ export function DataTable<TData, TValue>({
                 </Table>
             </div>
 
+            {showPagination && (
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     Rows per page
@@ -293,7 +344,7 @@ export function DataTable<TData, TValue>({
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent side="top">
-                            {[5, 10, 20, 50].map(size => (
+                            {pageSizes.map(size => (
                                 <SelectItem key={size} value={String(size)}>
                                     {size}
                                 </SelectItem>
@@ -330,6 +381,7 @@ export function DataTable<TData, TValue>({
                     </div>
                 </div>
             </div>
+            )}
         </div>
     );
 }

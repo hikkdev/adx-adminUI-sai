@@ -1,6 +1,8 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import { AdminUsersLoader } from "./admin-users-loader";
 
-/** Admin accounts now live with every other account under Users. */
+export const metadata: Metadata = { title: "Role members" };
+
 export default function AdminUsersPage() {
-    redirect("/users");
+    return <AdminUsersLoader />;
 }

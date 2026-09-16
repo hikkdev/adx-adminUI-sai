@@ -1,17 +1,14 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
 import { CommsNav } from "./comms-nav";
-import { TemplatesView } from "./templates/templates-view";
+import { TemplatesLoader } from "./templates/templates-loader";
 
 export const metadata: Metadata = { title: "Comms" };
 
-export default async function CommsPage() {
-    const { templates, variables } = await api.comms.templates();
-
+export default function CommsPage() {
     return (
         <div className="space-y-5">
             <CommsNav />
-            <TemplatesView templates={templates} variables={variables} />
+            <TemplatesLoader />
         </div>
     );
 }

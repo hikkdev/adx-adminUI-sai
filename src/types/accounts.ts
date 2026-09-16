@@ -1,4 +1,6 @@
+import type { KycQueueState } from "./kyc-state";
 import type { StatusMeta } from "./common";
+import type { KycDigio, KycDocumentReview, KycEscalation, KycLiveness, KycRecorded, KycRequest } from "./finance";
 
 /* ------------------------------------------------------------------ */
 /* Platform user accounts                                              */
@@ -22,45 +24,9 @@ export const USER_ROLE_META: Record<UserRole, { label: string; description: stri
     AGENT_ADVERTISER: { label: "Advertiser agent", description: "Onboards and services advertisers" },
 };
 
-export type UserAccountStatus = "active" | "invited" | "suspended";
-
-export const USER_ACCOUNT_STATUS_META: Record<UserAccountStatus, StatusMeta> = {
-    active: { label: "Active", tone: "success" },
-    invited: { label: "Invited", tone: "warning" },
-    suspended: { label: "Suspended", tone: "danger" },
-};
-
-export interface UserSession {
-    id: string;
-    device: string;
-    location: string;
-    lastSeen: string;
-    current: boolean;
-}
-
-export interface UserActivityEntry {
-    id: string;
-    action: string;
-    detail: string;
-    at: string;
-}
-
-export interface PlatformUser {
-    id: string;
-    name: string;
-    email: string;
-    mobile: string;
-    roles: UserRole[];
-    status: UserAccountStatus;
-    city: string;
-    joinedAt: string;
-    lastActive: string;
-    /** Verified identity on file. */
-    kycVerified: boolean;
-    twoFactor: boolean;
-    sessions: UserSession[];
-    activity: UserActivityEntry[];
-}
+/* `PlatformUser`, its sessions, activity and `UserAccountStatus` are gone:
+   the users domain reads `GET /users` and the shapes live with the service
+   (`WireUserRow`, `WireUserDetail`, `UserStatus` in services/users.ts). */
 
 /* ------------------------------------------------------------------ */
 /* Advertiser KYC                                                      */
@@ -76,41 +42,84 @@ export const ADVERTISER_KYC_TYPE_META: Record<AdvertiserKycType, string> = {
     AGENCY: "Agency",
 };
 
-/** Mirrors the backend KycStatus enum. */
-export type AdvertiserKycStatus = "PENDING" | "VERIFIED" | "REJECTED";
+/** Mirrors the backend KycStatus enum; NEEDS_INFO is Lot D's re-upload ask. */
+export type AdvertiserKycStatus = "PENDING" | "VERIFIED" | "REJECTED" | "NEEDS_INFO";
 
 export const ADVERTISER_KYC_STATUS_META: Record<AdvertiserKycStatus, StatusMeta> = {
     PENDING: { label: "Pending", tone: "warning" },
+    NEEDS_INFO: { label: "Needs info", tone: "info" },
     VERIFIED: { label: "Verified", tone: "success" },
     REJECTED: { label: "Rejected", tone: "danger" },
 };
 
 export interface AdvertiserKycDocument {
-    /** Backend field name, e.g. panCardUrl. */
+    /** Backend field name, e.g. panCardUrl — what a per-document decision names. */
     field: string;
     label: string;
     fileName: string | null;
     uploadedAt: string | null;
+    /** Where the file lives: a `/files/:id` URL the desk fetches with the token, or a pre-Lot-D public one. */
+    url: string | null;
 }
 
 export interface AdvertiserKycCase {
+    /** The KYC row id when there is a record, else (N3-B) the profile id — either is accepted as `:id` on every desk route. */
     id: string;
-    advertiserId: string;
+    /** The account's `User.id` — who the liveness video belongs to. N3-B: null for a profile nobody has registered against. */
+    advertiserId: string | null;
+    /** N3-B: the Advertiser PROFILE the record belongs to — what the desk records and asks over. Null on a case read older than N3-B. */
+    profileId: string | null;
+    /** The same as `advertiserId`, under the name the other parties use. */
+    userId: string | null;
+    /** N3-B: the party's state as the server derives it — AWAITING_DOCUMENTS from the moment the profile exists. */
+    state: KycQueueState;
+    /** N3-B: the record's id, null while the profile has no record yet. */
+    kycId: string | null;
+    displayId: string | null;
+    city: string | null;
+    /** When the profile arrived — the arrival order the awaiting rows sort by. Null on a case read that carries no party. */
+    createdAt: string | null;
+    /** The company name, else the account's name, else the mobile. */
     advertiser: string;
     contact: string;
     email: string;
-    city: string;
     kycType: AdvertiserKycType;
     status: AdvertiserKycStatus;
     submittedAt: string;
     reviewedAt: string | null;
-    reviewedBy: string | null;
+    reviewedById: string | null;
     rejectionReason: string | null;
-    /** Hours until the review SLA is breached. Negative once breached. */
+    /** Lot D (Q42): what the reviewer said with the decision or the re-upload ask. */
+    reviewNote: string | null;
+    /** Lot D (Q119): the admin working the case, or null. A filter, not ownership. */
+    assignedToId: string | null;
+    /** E7-3: the people on the case by name, from the case read; a list row carries ids only. */
+    reviewedBy: { id: string; name: string | null } | null;
+    assignedTo: { id: string; name: string | null } | null;
+    /** Lot A (Q31): hours since submission as the server measured; null once decided. */
+    ageHours: number | null;
+    slaBreached: boolean;
+    /** Hours until the review SLA is breached. Negative once breached, 0 once decided. */
     slaHoursLeft: number;
-    monthlySpend: number;
     documents: AdvertiserKycDocument[];
-    riskFlags: string[];
+    /** The PAN typed on the DR 08 ladder. */
+    panNumber: string | null;
+    /** Documents uploaded, or Digio's verification. */
+    method: "MANUAL" | "DIGIO";
+    /** The Digio session, when one was ever started. */
+    digio: KycDigio | null;
+    /** Lot D (Q42): the decision on each tile, from the case read; empty on a list row. */
+    documentReviews: KycDocumentReview[];
+    /** Lot D (Q131): the liveness video, from the case read; null on a list row or when none. */
+    liveness: KycLiveness | null;
+    /** Lot D (Q127): when the Digio-path images were purged; the reference stays as proof. */
+    imagesPurgedAt: string | null;
+    /** Lot G (Q127/142): handed to Compliance, by whom and why; null while not escalated (a decision clears it). */
+    escalation: KycEscalation | null;
+    /** Lot N: the desk's ask — when, who, which channel — or null while nobody has asked. */
+    request: KycRequest | null;
+    /** Lot N: who recorded the documents and from where; null before any submission. */
+    recorded: KycRecorded | null;
 }
 
 /** Which documents the backend expects for each advertiser type. */

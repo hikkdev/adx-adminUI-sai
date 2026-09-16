@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { ListingsTable } from "./listings-table";
+import { ListingsNav } from "./listings-nav";
+import { ListingsLoader } from "./listings-loader";
 
 export const metadata: Metadata = { title: "Listings" };
 
-export default async function ListingsPage() {
-    const listings = await api.listings.list();
-    return <ListingsTable listings={listings} />;
+export default function ListingsPage() {
+    return (
+        <div className="space-y-5">
+            <ListingsNav />
+            <ListingsLoader />
+        </div>
+    );
 }

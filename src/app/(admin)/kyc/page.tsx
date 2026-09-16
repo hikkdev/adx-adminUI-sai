@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
+import { Suspense } from "react";
 import { KycNav } from "./kyc-nav";
-import { KycQueue } from "./kyc-queue";
+import { KycQueueLoader } from "./kyc-queue-loader";
 
 export const metadata: Metadata = { title: "KYC Queue" };
 
-export default async function KycQueuePage() {
-    const cases = await api.kyc.list();
-
+/** D7 / Lot D — the publisher KYC queue, read on the client from `/publishers/kyc-queue`. Suspense because the loader keeps the state chip in `?state=`. */
+export default function KycQueuePage() {
     return (
         <div className="space-y-5">
             <KycNav />
-            <KycQueue cases={cases} />
+            <Suspense fallback={null}>
+                <KycQueueLoader />
+            </Suspense>
         </div>
     );
 }

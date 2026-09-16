@@ -77,9 +77,10 @@ export function FilterPanel({
     const [draft, setDraft] = React.useState<FilterSelection>(selection);
 
     // Re-sync whenever the panel opens so it always reflects what is applied.
-    React.useEffect(() => {
-        if (open) setDraft(selection);
-    }, [open, selection]);
+    const handleOpenChange = (next: boolean) => {
+        if (next) setDraft(selection);
+        setOpen(next);
+    };
 
     const applied = activeFilterCount(selection);
     const staged = activeFilterCount(draft);
@@ -101,7 +102,7 @@ export function FilterPanel({
     const clearAll = () => setDraft({});
 
     return (
-        <Sheet open={open} onOpenChange={setOpen}>
+        <Sheet open={open} onOpenChange={handleOpenChange}>
             <SheetTrigger asChild>
                 <Button variant="outline" className={cn("h-9 bg-card", className)}>
                     <SlidersHorizontal className="size-4" />

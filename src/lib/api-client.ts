@@ -26,6 +26,22 @@ export class ApiError extends Error {
         const flattened = this.details as { fieldErrors?: Record<string, string[]> } | undefined;
         return flattened?.fieldErrors ?? {};
     }
+
+    /**
+     * Seconds to wait before trying again, when the backend said so.
+     *
+     * The OTP budget refusals carry it twice — as a `Retry-After` header and
+     * as `details.retryAfterSeconds` — and either is enough. Read here so a
+     * screen counting down a resend button does not have to know which.
+     */
+    get retryAfterSeconds(): number | null {
+        const fromDetails = (this.details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds;
+        if (typeof fromDetails === "number" && Number.isFinite(fromDetails)) return fromDetails;
+        return this.retryAfterHeader;
+    }
+
+    /** Set by `apiFetch` from the response header; not part of the envelope. */
+    retryAfterHeader: number | null = null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -82,10 +98,19 @@ export const tokens = {
  */
 const REQUEST_TIMEOUT_MS = 45_000;
 
-interface RequestOptions extends Omit<RequestInit, "body"> {
+export interface RequestOptions extends Omit<RequestInit, "body"> {
     body?: unknown;
     /** Skip the Authorization header (login, forgot password, reset password). */
     anonymous?: boolean;
+    /**
+     * A bearer other than the session's own — the fifteen-minute token
+     * `POST /users/:id/impersonate` mints for the read-only view-as panel.
+     *
+     * A 401 under it is that token's, not the admin's session: it is neither
+     * refreshed (there is no refresh token for it) nor allowed to sign the
+     * admin out. The caller sees `IMPERSONATION_EXPIRED` and ends the panel.
+     */
+    bearer?: string;
     /** Internal: prevents a refresh loop. */
     _retried?: boolean;
 }
@@ -138,14 +163,51 @@ function endSession() {
     sessionEndedListeners.forEach((listener) => listener());
 }
 
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const { body, anonymous, _retried, headers, ...rest } = options;
+/**
+ * Lot K2: the backend holds a session to enrolling an authenticator app
+ * when the policy requires one — every route but the enrolment ones
+ * answers 403 `TOTP_ENROLMENT_REQUIRED`. Fired once per such refusal so the
+ * admin shell can put the setup in front of the operator; the caller still
+ * gets the error, so a screen that was loading says so too.
+ */
+export const ENROLMENT_REQUIRED = "TOTP_ENROLMENT_REQUIRED";
+
+const enrolmentRequiredListeners = new Set<() => void>();
+
+export function onEnrolmentRequired(listener: () => void): () => void {
+    enrolmentRequiredListeners.add(listener);
+    return () => {
+        enrolmentRequiredListeners.delete(listener);
+    };
+}
+
+/** True for the guard's refusal, whatever route it came off. */
+export function isEnrolmentRequired(error: unknown): error is ApiError {
+    return error instanceof ApiError && error.status === 403 && error.code === ENROLMENT_REQUIRED;
+}
+
+function noticeOf(error: ApiError): ApiError {
+    if (isEnrolmentRequired(error)) enrolmentRequiredListeners.forEach((listener) => listener());
+    return error;
+}
+
+/**
+ * The request itself: headers, the timeout, and the 401 → refresh → replay
+ * dance. Shared by the JSON and the blob readers so a download recovers from
+ * an expired access token exactly the way a page read does — before this the
+ * three services that pulled a file each re-implemented `fetch` with a raw
+ * token and simply failed on a stale one.
+ */
+async function send(path: string, options: RequestOptions): Promise<Response> {
+    const { body, anonymous, bearer, _retried, headers, ...rest } = options;
 
     const requestHeaders = new Headers(headers);
     if (body !== undefined && !(body instanceof FormData)) {
         requestHeaders.set("Content-Type", "application/json");
     }
-    if (!anonymous) {
+    if (bearer) {
+        requestHeaders.set("Authorization", `Bearer ${bearer}`);
+    } else if (!anonymous) {
         const token = tokens.access;
         if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
     }
@@ -178,13 +240,43 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         throw new ApiError(0, "NETWORK", "Could not reach the ADX backend.");
     }
 
+    /* An explicit bearer's 401 is its own expiry, never the session's. */
+    if (response.status === 401 && bearer) {
+        throw new ApiError(401, "IMPERSONATION_EXPIRED", "The view-as session has expired.");
+    }
+
     /* 401 → refresh once, then replay the original request. */
     if (response.status === 401 && !anonymous && !_retried) {
         const refreshed = await refreshAccessToken();
-        if (refreshed) return apiFetch<T>(path, { ...options, _retried: true });
+        if (refreshed) return send(path, { ...options, _retried: true });
         endSession();
         throw new ApiError(401, "UNAUTHENTICATED", "Your session has expired.");
     }
+
+    return response;
+}
+
+/** The backend's failure envelope as an `ApiError`, with a fallback when the body is not JSON. */
+async function failureOf(response: Response, fallback: string): Promise<ApiError> {
+    let code = "REQUEST_FAILED";
+    let message = fallback;
+    let details: unknown;
+    try {
+        const payload = (await response.json()) as { error?: { code?: string; message?: string; details?: unknown } };
+        code = payload.error?.code ?? code;
+        message = payload.error?.message ?? message;
+        details = payload.error?.details;
+    } catch {
+        /* Not a JSON envelope — a storage error page, say. The status is enough. */
+    }
+    const error = new ApiError(response.status, code, message, details);
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterHeader = retryAfter;
+    return noticeOf(error);
+}
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    const response = await send(path, options);
 
     if (response.status === 204) return undefined as T;
 
@@ -203,15 +295,106 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     };
 
     if (!response.ok || envelope.success === false) {
-        throw new ApiError(
+        const error = new ApiError(
             response.status,
             envelope.error?.code ?? "REQUEST_FAILED",
             envelope.error?.message ?? "Something went wrong.",
             envelope.error?.details
         );
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterHeader = retryAfter;
+        throw noticeOf(error);
     }
 
     return (envelope.data ?? (payload as T)) as T;
+}
+
+/**
+ * The whole envelope, for the few reads that carry facts *beside* `data`.
+ *
+ * `GET /users` (K-B1) answers `{ success, data: [rows], counts, total }` —
+ * the array stays `data` for the callers that read it as a list, and the
+ * per-state counts the directory's chips draw travel next to it. `apiFetch`
+ * unwraps to `data` alone, which is right everywhere else; this keeps the
+ * siblings. Same headers, timeout and 401 → refresh → replay.
+ */
+export async function apiFetchEnvelope<T, M extends object = Record<string, never>>(
+    path: string,
+    options: RequestOptions = {},
+): Promise<{ data: T } & M> {
+    const response = await send(path, options);
+    let payload: unknown;
+    try {
+        payload = await response.json();
+    } catch {
+        throw new ApiError(response.status, "BAD_RESPONSE", "The server sent an unreadable response.");
+    }
+    const envelope = payload as {
+        success?: boolean;
+        data?: T;
+        error?: { code?: string; message?: string; details?: unknown };
+    } & M;
+    if (!response.ok || envelope.success === false) {
+        throw noticeOf(
+            new ApiError(
+                response.status,
+                envelope.error?.code ?? "REQUEST_FAILED",
+                envelope.error?.message ?? "Something went wrong.",
+                envelope.error?.details
+            )
+        );
+    }
+    const { success: _success, error: _error, ...rest } = envelope;
+    return rest as { data: T } & M;
+}
+
+/* ------------------------------------------------------------------ */
+/* Blob mode                                                           */
+/* ------------------------------------------------------------------ */
+
+export interface BlobResult {
+    blob: Blob;
+    /** What `Content-Disposition: attachment; filename="…"` named, if anything. */
+    filename: string | null;
+    contentType: string | null;
+}
+
+/** The filename a `Content-Disposition: attachment; filename="…"` header names, if any. */
+export function attachmentFilename(header: string | null): string | null {
+    const match = header?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * A route that streams bytes rather than a JSON envelope — an invoice PDF,
+ * a bank file, the audit CSV, a private KYC image.
+ *
+ * Same headers, same timeout, same 401 → refresh → replay as `apiFetch`; the
+ * only difference is what is done with the body. A failure is still the
+ * backend's envelope when it sent one, so a 403 on a file reads like a 403
+ * anywhere else.
+ */
+export async function apiFetchBlob(path: string, options: RequestOptions = {}): Promise<BlobResult> {
+    const response = await send(path, { ...options, method: options.method ?? "GET" });
+    if (!response.ok) throw await failureOf(response, "The download failed.");
+    return {
+        blob: await response.blob(),
+        filename: attachmentFilename(response.headers.get("content-disposition")),
+        contentType: response.headers.get("content-type"),
+    };
+}
+
+/** Hands a blob to the browser as a download. A no-op outside a document. */
+export function saveBlob(blob: Blob, filename: string): void {
+    if (typeof document === "undefined") return;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -224,4 +407,9 @@ export const api = {
         apiFetch<T>(path, { ...options, method: "PUT", body }),
     delete: <T>(path: string, options?: RequestOptions) =>
         apiFetch<T>(path, { ...options, method: "DELETE" }),
+    /** A GET whose answer carries facts beside `data` (`counts`, `total`) — the envelope minus `success`. */
+    getEnvelope: <T, M extends object = Record<string, never>>(path: string, options?: RequestOptions) =>
+        apiFetchEnvelope<T, M>(path, { ...options, method: "GET" }),
+    /** Bytes rather than an envelope, through the same refresh-and-replay path. */
+    blob: (path: string, options?: RequestOptions) => apiFetchBlob(path, options),
 };

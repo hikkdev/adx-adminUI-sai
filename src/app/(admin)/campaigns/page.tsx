@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { CampaignsTable } from "./campaigns-table";
+import { Suspense } from "react";
+import { CampaignsLoader } from "./campaigns-loader";
 
 export const metadata: Metadata = { title: "Campaigns" };
 
-export default async function CampaignsPage() {
-    const campaigns = await api.campaigns.list();
-    return <CampaignsTable campaigns={campaigns} />;
+/** Suspense because the loader reads `?advertiserId=` off the URL — the advertiser page's "View campaign queue". */
+export default function CampaignsPage() {
+    return (
+        <Suspense fallback={null}>
+            <CampaignsLoader />
+        </Suspense>
+    );
 }

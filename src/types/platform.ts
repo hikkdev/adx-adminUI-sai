@@ -1,176 +1,129 @@
-import type { StatusMeta, Tone } from "./common";
+import type { StatusMeta } from "./common";
 
 /* ------------------------------------------------------------------ */
 /* Support console                                                     */
 /* ------------------------------------------------------------------ */
 
-export type TicketStatus = "open" | "pending" | "resolved";
+/**
+ * Ticket status, exactly the backend's `TicketStatus` enum.
+ *
+ * Three states since Lot D (Q53): WAITING is "on the requester" — the SLA
+ * clock is paused until they answer or ops moves it back to OPEN. The console
+ * used to carry a "pending" between open and resolved that the backend never
+ * had; WAITING is the real thing, and it is the server that pauses the clock.
+ */
+export type TicketStatus = "OPEN" | "WAITING" | "CLOSED";
 
 export const TICKET_STATUS_META: Record<TicketStatus, StatusMeta> = {
-    open: { label: "Open", tone: "warning" },
-    pending: { label: "Pending", tone: "info" },
-    resolved: { label: "Resolved", tone: "success" },
+    OPEN: { label: "Open", tone: "warning" },
+    WAITING: { label: "Waiting on requester", tone: "info" },
+    CLOSED: { label: "Closed", tone: "success" },
 };
+
+/** Lot D (Q91): the four priorities, each with its own pair of SLA targets. */
+export type TicketPriority = "URGENT" | "HIGH" | "NORMAL" | "LOW";
+
+export const TICKET_PRIORITIES: readonly TicketPriority[] = ["URGENT", "HIGH", "NORMAL", "LOW"];
+
+export const TICKET_PRIORITY_META: Record<TicketPriority, StatusMeta> = {
+    URGENT: { label: "Urgent", tone: "danger" },
+    HIGH: { label: "High", tone: "danger" },
+    NORMAL: { label: "Normal", tone: "neutral" },
+    LOW: { label: "Low", tone: "neutral" },
+};
+
+/**
+ * The two clocks, derived on read by the server (`slaView`) and never stored.
+ * `dueIn` is milliseconds to the next clock — first response until one is
+ * given, resolution after — negative once it has run out, null once closed.
+ */
+export interface TicketSla {
+    firstResponseBreached: boolean;
+    resolutionBreached: boolean;
+    /** True while WAITING on the requester — the clock is stopped. */
+    paused: boolean;
+    dueIn: number | null;
+    firstResponseDueAt: string | null;
+    resolutionDueAt: string | null;
+}
 
 export interface TicketMessage {
     id: string;
     from: string;
-    kind: "requester" | "support" | "system" | "internal";
+    /** `internal` is an ops note the requester never sees. */
+    kind: "requester" | "support" | "internal";
     body: string;
     at: string;
-    attachment?: { name: string; size: string };
 }
 
+/**
+ * A support request, shaped as `GET /support/tickets/queue` returns it.
+ *
+ * The ops queue returns ticket rows and nothing else — no requester join, no
+ * message thread. The desk fetches the thread by id when a ticket is selected.
+ */
 export interface Ticket {
     id: string;
-    subject: string;
-    team: "Payments" | "Fulfilment" | "KYC" | "Orders" | "Account";
-    ago: string;
-    requester: string;
-    requesterRole: "Publisher" | "Advertiser" | "Agent" | "Publisher agent";
-    priority: "low" | "normal" | "high";
-    status: TicketStatus;
-    assignee: string;
-    createdAt: string;
-    slaLeft: string;
-    mine?: boolean;
-    wallet: number;
-    openOrders: number;
-    ticketCount: number;
-    recentActivity: { label: string; ago: string }[];
-    messages: TicketMessage[];
-}
-
-/* ------------------------------------------------------------------ */
-/* Content moderation                                                  */
-/* ------------------------------------------------------------------ */
-
-export type CreativeStatus = "awaiting" | "flagged" | "approved" | "rejected" | "resubmitted";
-
-export const CREATIVE_STATUS_META: Record<CreativeStatus, StatusMeta> = {
-    awaiting: { label: "Awaiting review", tone: "warning" },
-    flagged: { label: "Flagged", tone: "danger" },
-    approved: { label: "Approved", tone: "success" },
-    rejected: { label: "Rejected", tone: "danger" },
-    resubmitted: { label: "Resubmitted", tone: "info" },
-};
-
-export interface Creative {
-    id: string;
-    advertiser: string;
-    campaign: string;
-    kind: "Static" | "Video";
-    dimensions: string;
-    fileSize: string;
-    submittedAt: string;
-    status: CreativeStatus;
-    flags: string[];
-    /** Deterministic placeholder gradient hue for the preview tile */
-    previewHue: number;
-}
-
-/* ------------------------------------------------------------------ */
-/* Growth CMS (agent milestone program)                                */
-/* ------------------------------------------------------------------ */
-
-export type MilestoneStatus = "live" | "scheduled" | "paused" | "draft" | "ended";
-
-export const MILESTONE_STATUS_META: Record<MilestoneStatus, StatusMeta> = {
-    live: { label: "Live", tone: "success" },
-    scheduled: { label: "Scheduled", tone: "info" },
-    paused: { label: "Paused", tone: "warning" },
-    draft: { label: "Draft", tone: "neutral" },
-    ended: { label: "Ended", tone: "neutral" },
-};
-
-export type MilestoneAudience = "Publisher agents" | "Advertiser agents" | "Both";
-
-export interface Milestone {
-    id: string;
+    /** The User who raised it. Not resolved to a name by the queue endpoint. */
+    userId: string;
     title: string;
     description: string;
-    audience: MilestoneAudience;
-    targetCount: number;
-    targetLabel: string;
-    rewardInr: number;
-    durationDays: number;
-    targetEvent: string;
-    autoEnroll: boolean;
-    pushOnUnlock: boolean;
-    status: MilestoneStatus;
-    enrolled: number;
-    completed: number;
-    note?: string;
+    category: string;
+    status: TicketStatus;
+    /** The agent ADX put on this request; what later authorises delegated
+     *  access to the requester's account. */
+    assignedAgentId: string | null;
+    assignedAt: string | null;
+    assignedById: string | null;
+    relatedOrderId: string | null;
+    createdAt: string;
+    /** TKT-… or FB-…, minted off the identifiers counter when the ticket is
+     *  raised. Rows older than DR 07's second wave have none. */
+    displayId?: string | null;
+    /** Feedback is a ticket wearing FB- clothes; the desk shows it as one. */
+    kind?: "ISSUE" | "FEEDBACK";
+    /** What the raiser attached, as uploaded URLs. */
+    attachmentUrls?: string[];
+    /* Lot D (Q53/Q91): the priority, the ops owner and desk, and the clocks. */
+    priority: TicketPriority;
+    /** The ops user working it — distinct from the field agent above. */
+    assignedAdminUserId: string | null;
+    assignedAdminAt: string | null;
+    team: string | null;
+    firstRespondedAt: string | null;
+    sla: TicketSla;
+    /** E7-3: who raised it, as the queue row carries it — the party's name
+     *  and record when the login has one, else the account's. Absent on rows
+     *  from before Lot E. */
+    requester?: TicketRequester | null;
 }
 
-/* ------------------------------------------------------------------ */
-/* Roles & permissions                                                 */
-/* ------------------------------------------------------------------ */
+/** The console's vocabulary for who a login is: the party record's type when
+ *  it has one, else the account's primary role folded to it. */
+export type RequesterRole = "PUBLISHER" | "ADVERTISER" | "AGENT" | "PARTNER" | "ADMIN";
 
-/** One row of the capability matrix (e.g. "Approve withdrawals ≤ ₹1L"). */
-export interface CapabilityRow {
-    id: string;
-    label: string;
+/** `{ userId, name, role, displayId }` on every queue row (E7-3). */
+export interface TicketRequester {
+    userId: string;
+    name: string | null;
+    role: RequesterRole | null;
+    displayId: string | null;
 }
 
-export interface CapabilityGroup {
-    id: string;
-    label: string;
-    capabilities: CapabilityRow[];
-}
+/* `Creative`, `CreativeStatus` and `CREATIVE_STATUS_META` are gone: the
+   review desk reads `/campaigns/creatives/review-queue` through
+   `moderationService`, whose shapes live with the service, and the seeded
+   `cr_*` creatives named a status vocabulary (awaiting, flagged…) that no
+   CampaignCreative has. */
 
-/** One column of the matrix: a role and the capability ids it holds. */
-export interface RoleColumn {
-    id: string;
-    name: string;
-    members: number;
-    grants: string[];
-    system?: boolean;
-}
-
-/* ------------------------------------------------------------------ */
-/* Admin users                                                         */
-/* ------------------------------------------------------------------ */
-
-export type AdminUserStatus = "active" | "invited" | "suspended";
-
-export const ADMIN_USER_STATUS_META: Record<AdminUserStatus, StatusMeta> = {
-    active: { label: "Active", tone: "success" },
-    invited: { label: "Invited", tone: "info" },
-    suspended: { label: "Suspended", tone: "danger" },
-};
-
-export interface AdminUser {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-    twoFactorEnabled: boolean;
-    lastLogin: string;
-    status: AdminUserStatus;
-}
+/* `CapabilityGroup`, `RoleColumn` and `AdminUser` are gone: the roles domain
+   reads `/roles-config` and its shapes live with the service
+   (`PermissionGroup`, `RoleConfig` in services/roles.ts). */
 
 /* ------------------------------------------------------------------ */
 /* Notifications & audit                                               */
 /* ------------------------------------------------------------------ */
 
-export interface AppNotification {
-    id: string;
-    severity: Tone;
-    title: string;
-    body: string;
-    time: string;
-    read: boolean;
-    href?: string;
-}
+/* `AppNotification` is gone: the feed's row is `NotificationRow` in
+   `services/notifications.ts`, shaped from what `GET /notifications` sends. */
 
-export interface AuditEvent {
-    id: string;
-    actor: string;
-    actorRole: string;
-    action: string;
-    target: string;
-    module: string;
-    at: string;
-    ip: string;
-}

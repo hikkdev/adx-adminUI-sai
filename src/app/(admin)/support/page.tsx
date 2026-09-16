@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { SupportConsole } from "./support-console";
+import { SupportLoader } from "./support-loader";
+import { SupportNav } from "./support-nav";
 
 export const metadata: Metadata = { title: "Support" };
 
-export default async function SupportPage() {
-    const tickets = await api.support.tickets();
-    return <SupportConsole tickets={tickets} />;
+export default function SupportPage() {
+    return (
+        <div className="space-y-5">
+            <SupportNav />
+            <SupportLoader />
+        </div>
+    );
 }

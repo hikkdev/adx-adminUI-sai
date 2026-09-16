@@ -1,0 +1,536 @@
+{
+  "$comment": "Lot G (answer 144): the console's features. Every src/app/(admin)/**/page.tsx must sit under one of the paths below (scripts/check-features.mjs, run by `npm run lint`); the longest path wins. A key the backend declares in a features.ts only needs its paths — the backend's kind, owner and description carry over and CONSOLE is added to its surfaces; a console-only key carries all four. `npm run features:sync` in ADX-backendv1 folds this into docs/feature-registry.json.",
+  "surface": "CONSOLE",
+  "features": {
+    "console.overview": {
+      "paths": [
+        "dashboard"
+      ]
+    },
+    "console.analytics": {
+      "paths": [
+        "analytics"
+      ],
+      "owner": "platform",
+      "kind": "FEATURE",
+      "launch": "on",
+      "description": "Q115: the console's analytics — earnings, spend, commissions and onboarding as separate series, every one sortable and filterable."
+    },
+    "console.bookings-calendar": {
+      "paths": [
+        "bookings"
+      ],
+      "owner": "marketplace",
+      "kind": "FEATURE",
+      "launch": "on",
+      "description": "Q116: bookings by day and by slot — digital signage and billboards carry slotsTotal, a static wall is one."
+    },
+    "console.section-overviews": {
+      "paths": [
+        "publishers",
+        "advertisers",
+        "agents",
+        "print-partners",
+        "employees",
+        "users"
+      ]
+    },
+    "publisher.onboarding": {
+      "paths": [
+        "publishers/directory",
+        "publishers/[id]"
+      ]
+    },
+    "supply.funnel": {
+      "paths": [
+        "publishers/activation"
+      ]
+    },
+    "publisher.legacy-import": {
+      "paths": [
+        "publishers/import"
+      ]
+    },
+    "console.party-imports": {
+      "paths": [
+        "advertisers/import",
+        "agents/import",
+        "print-partners/import",
+        "employees/import"
+      ]
+    },
+    "advertisers.accounts": {
+      "paths": [
+        "advertisers/directory",
+        "advertisers/[id]"
+      ]
+    },
+    "advertisers.funnel": {
+      "paths": [
+        "advertisers/activation"
+      ]
+    },
+    "agent.profile": {
+      "paths": [
+        "agents/directory",
+        "agents/[id]"
+      ]
+    },
+    "agent.leads": {
+      "paths": [
+        "leads"
+      ]
+    },
+    "agent.field-visits": {
+      "paths": [
+        "visits"
+      ]
+    },
+    "listings.inventory": {
+      "paths": [
+        "listings"
+      ]
+    },
+    "supply.listing-attempts": {
+      "paths": [
+        "listings/attempts"
+      ]
+    },
+    "listings.review-desk": {
+      "paths": [
+        "listings/review"
+      ]
+    },
+    "supply.verification": {
+      "paths": [
+        "listings/verification"
+      ]
+    },
+    "supply.claims": {
+      "paths": [
+        "listings/claims"
+      ]
+    },
+    "console.listing-imports": {
+      "paths": [
+        "listings/import"
+      ]
+    },
+    "campaigns.booking": {
+      "paths": [
+        "campaigns"
+      ]
+    },
+    "campaigns.landing-pages": {
+      "paths": [
+        "campaigns/landing-pages"
+      ]
+    },
+    "packages.sales": {
+      "paths": [
+        "packages/sales"
+      ]
+    },
+    "packages.catalogue": {
+      "paths": [
+        "packages/catalogue"
+      ]
+    },
+    "revenue.publisher-plans": {
+      "paths": [
+        "packages/subscriptions"
+      ]
+    },
+    "orders.booking": {
+      "paths": [
+        "orders"
+      ]
+    },
+    "orders.ops-moves": {
+      "paths": [
+        "orders/pipeline"
+      ]
+    },
+    "publisher.kyc-desk": {
+      "paths": [
+        "kyc"
+      ]
+    },
+    "kyc.advertiser": {
+      "paths": [
+        "kyc/advertisers"
+      ]
+    },
+    "print.partner-kyc": {
+      "paths": [
+        "kyc/print-partners"
+      ]
+    },
+    "kyc.agent": {
+      "paths": [
+        "kyc/agents"
+      ]
+    },
+    "kyc.employee": {
+      "paths": [
+        "kyc/employees"
+      ]
+    },
+    "onboarding.submissions": {
+      "paths": [
+        "onboarding/submissions"
+      ]
+    },
+    "onboarding.agent-assist": {
+      "paths": [
+        "access"
+      ]
+    },
+    "legal.agreements": {
+      "paths": [
+        "agreements"
+      ]
+    },
+    "legal.documents": {
+      "paths": [
+        "legal"
+      ]
+    },
+    "payouts.withdrawals": {
+      "paths": [
+        "finance"
+      ]
+    },
+    "finance.wallets": {
+      "paths": [
+        "finance/wallets"
+      ]
+    },
+    "finance.ledger": {
+      "paths": [
+        "finance/ledger"
+      ]
+    },
+    "payouts.methods": {
+      "paths": [
+        "finance/payout-methods"
+      ]
+    },
+    "payouts.batches": {
+      "paths": [
+        "finance/payouts"
+      ]
+    },
+    "payouts.incentives": {
+      "paths": [
+        "finance/incentives"
+      ]
+    },
+    "advertisers.wallet": {
+      "paths": [
+        "finance/refunds"
+      ]
+    },
+    "payments.gateways": {
+      "paths": [
+        "finance/payments"
+      ]
+    },
+    "finance.desk": {
+      "paths": [
+        "finance/settings"
+      ]
+    },
+    "finance.invoices": {
+      "paths": [
+        "finance/invoices"
+      ]
+    },
+    "finance.reconciliation": {
+      "paths": [
+        "finance/reconciliation"
+      ]
+    },
+    "revenue.commission": {
+      "paths": [
+        "finance/revenue"
+      ]
+    },
+    "pricing.engine": {
+      "paths": [
+        "pricing",
+        "pricing/engine-settings"
+      ]
+    },
+    "pricing.price-approvals": {
+      "paths": [
+        "pricing/approvals"
+      ]
+    },
+    "pricing.price-model": {
+      "paths": [
+        "pricing/categories",
+        "pricing/dimensions",
+        "pricing/model",
+        "pricing/rules",
+        "pricing/simulator"
+      ]
+    },
+    "pricing.quotes": {
+      "paths": [
+        "pricing/quotes"
+      ]
+    },
+    "pricing.binding-factors": {
+      "paths": [
+        "pricing/factors"
+      ]
+    },
+    "pricing.market-data": {
+      "paths": [
+        "pricing/market-data"
+      ]
+    },
+    "pricing.vocabulary": {
+      "paths": [
+        "pricing/media-types",
+        "pricing/venues",
+        "pricing/vocabulary"
+      ]
+    },
+    "pricing.rate-cards": {
+      "paths": [
+        "pricing/rate-cards"
+      ]
+    },
+    "pricing.surge": {
+      "paths": [
+        "pricing/scraper",
+        "pricing/surge"
+      ]
+    },
+    "campaigns.creative-moderation": {
+      "paths": [
+        "moderation"
+      ]
+    },
+    "support.disputes": {
+      "paths": [
+        "disputes"
+      ]
+    },
+    "safety.fraud-desk": {
+      "paths": [
+        "disputes/fraud"
+      ]
+    },
+    "support.tickets": {
+      "paths": [
+        "support",
+        "support/assignments"
+      ]
+    },
+    "support.live-chat": {
+      "paths": [
+        "support/live",
+        "support/canned"
+      ]
+    },
+    "safety.alerts": {
+      "paths": [
+        "support/safety"
+      ]
+    },
+    "comms.dispatcher": {
+      "paths": [
+        "comms"
+      ]
+    },
+    "comms.announcements": {
+      "paths": [
+        "comms/announcements"
+      ]
+    },
+    "comms.delivery-log": {
+      "paths": [
+        "comms/delivery-logs"
+      ]
+    },
+    "comms.templates": {
+      "paths": [
+        "comms/templates"
+      ]
+    },
+    "agent.milestones": {
+      "paths": [
+        "growth"
+      ]
+    },
+    "agent.tiers": {
+      "paths": [
+        "growth/ladder"
+      ]
+    },
+    "agent.leaderboard": {
+      "paths": [
+        "growth/leaderboard"
+      ]
+    },
+    "agent.training": {
+      "paths": [
+        "training",
+        "training/library"
+      ]
+    },
+    "agent.certification": {
+      "paths": [
+        "training/certifications"
+      ]
+    },
+    "users.directory": {
+      "paths": [
+        "users/accounts",
+        "users/[id]"
+      ]
+    },
+    "users.admins": {
+      "paths": [
+        "users/admins"
+      ],
+      "owner": "platform",
+      "kind": "FEATURE",
+      "launch": "on",
+      "description": "Lot K2: the console's own operators — role, the second factor the next sign-in asks for, last sign-in, state; change role, reset 2FA, invite and create an admin. The app itself is auth.authenticator-app."
+    },
+    "qr.desk": {
+      "paths": [
+        "qr"
+      ]
+    },
+    "account.closure": {
+      "paths": [
+        "users/closures"
+      ]
+    },
+    "account.erasure": {
+      "paths": [
+        "users/erasure"
+      ]
+    },
+    "users.profile": {
+      "paths": [
+        "account"
+      ]
+    },
+    "system.roles": {
+      "paths": [
+        "roles"
+      ]
+    },
+    "system.platform-settings": {
+      "paths": [
+        "settings"
+      ]
+    },
+    "system.app-status": {
+      "paths": [
+        "settings/app-status"
+      ]
+    },
+    "system.identifiers": {
+      "paths": [
+        "settings/identifiers"
+      ]
+    },
+    "geo.rollout": {
+      "paths": [
+        "settings/geographies",
+        "settings/geographies/[slug]"
+      ]
+    },
+    "system.feature-flags": {
+      "paths": [
+        "settings/flags"
+      ]
+    },
+    "system.health": {
+      "paths": [
+        "settings/system-health"
+      ]
+    },
+    "print.partners": {
+      "paths": [
+        "print-partners/roster",
+        "print-partners/quote-requests",
+        "print-partners/[id]"
+      ]
+    },
+    "system.integrations": {
+      "paths": [
+        "settings/integrations",
+        "settings/ai"
+      ]
+    },
+    "reports.catalogue": {
+      "paths": [
+        "settings/reports"
+      ]
+    },
+    "console.import-formats": {
+      "paths": [
+        "settings/import-formats"
+      ]
+    },
+    "system.audit-trail": {
+      "paths": [
+        "audit"
+      ]
+    },
+    "comms.inbox": {
+      "paths": [
+        "notifications"
+      ]
+    },
+    "hr.schedule": {
+      "paths": [
+        "schedule"
+      ]
+    },
+    "work.tasks": {
+      "paths": [
+        "tasks"
+      ]
+    },
+    "work.issues": {
+      "paths": [
+        "tasks/issues"
+      ]
+    },
+    "work.projects": {
+      "paths": [
+        "tasks/projects"
+      ]
+    },
+    "hr.employees": {
+      "paths": [
+        "employees/directory",
+        "employees/new"
+      ]
+    },
+    "hr.departments": {
+      "paths": [
+        "employees/departments"
+      ]
+    },
+    "hr.holidays": {
+      "paths": [
+        "employees/holidays"
+      ]
+    },
+    "system.flow-editor": {
+      "paths": [
+        "flows"
+      ]
+    }
+  }
+}

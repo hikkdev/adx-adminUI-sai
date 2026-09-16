@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { ListingCreate } from "./listing-create";
+import { ListingCreateLoader } from "./listing-create-loader";
 
-export const metadata: Metadata = { title: "Add Inventory" };
+export const metadata: Metadata = { title: "Add inventory" };
 
-export default async function ListingCreatePage() {
-    const publishers = await api.publishers.list();
-    return <ListingCreate publishers={publishers} />;
+export default function ListingCreatePage() {
+    return <ListingCreateLoader />;
 }

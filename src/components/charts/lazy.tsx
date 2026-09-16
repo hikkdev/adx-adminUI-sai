@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 
 /**
- * Deferred versions of the four chart components.
+ * Deferred versions of the chart components.
  *
  * Recharts is by far the heaviest thing on the screens that use it — the chart
  * routes carried ~160 kB of route-specific JavaScript against a 102 kB shared
@@ -34,22 +34,51 @@ function ChartSkeleton({ height }: { height: number }) {
     );
 }
 
-export const DailyGmvChart = dynamic(
-    () => import("./daily-gmv-chart").then((m) => m.DailyGmvChart),
+export const MonthSeriesChart = dynamic(
+    () => import("./month-series-chart").then((m) => m.MonthSeriesChart),
     { ssr: false, loading: () => <ChartSkeleton height={280} /> },
 );
 
-export const MonthlyGmvChart = dynamic(
-    () => import("./monthly-gmv-chart").then((m) => m.MonthlyGmvChart),
-    { ssr: false, loading: () => <ChartSkeleton height={220} /> },
+export const DashboardGmvChart = dynamic(
+    () => import("./dashboard-charts").then((m) => m.DashboardGmvChart),
+    { ssr: false, loading: () => <ChartSkeleton height={240} /> },
 );
 
 export const PublisherGrowthChart = dynamic(
-    () => import("./publisher-growth-chart").then((m) => m.PublisherGrowthChart),
-    { ssr: false, loading: () => <ChartSkeleton height={220} /> },
+    () => import("./dashboard-charts").then((m) => m.PublisherGrowthChart),
+    { ssr: false, loading: () => <ChartSkeleton height={240} /> },
 );
 
-export const RateRealisationChart = dynamic(
-    () => import("./rate-realisation-chart").then((m) => m.RateRealisationChart),
+export const FeatureCoverageChart = dynamic(
+    () => import("./feature-coverage-chart").then((m) => m.FeatureCoverageChart),
+    { ssr: false, loading: () => <ChartSkeleton height={168} /> },
+);
+
+/* Lot G (Q115) — package CG1: the analytics page's day-granular charts. */
+
+export const DailyGmvChart = dynamic(
+    () => import("./analytics-charts").then((m) => m.DailyGmvChart),
+    { ssr: false, loading: () => <ChartSkeleton height={280} /> },
+);
+
+export const MoneySeriesChart = dynamic(
+    () => import("./analytics-charts").then((m) => m.MoneySeriesChart),
+    { ssr: false, loading: () => <ChartSkeleton height={180} /> },
+);
+
+export const OnboardingChart = dynamic(
+    () => import("./analytics-charts").then((m) => m.OnboardingChart),
+    { ssr: false, loading: () => <ChartSkeleton height={180} /> },
+);
+
+export const WorkloadChart = dynamic(
+    () => import("./workload-chart").then((m) => m.WorkloadChart),
     { ssr: false, loading: () => <ChartSkeleton height={240} /> },
+);
+
+/* Package O-C: the overview tabs' day series, this window against the previous. */
+
+export const OverviewSeriesChart = dynamic(
+    () => import("./overview-series-chart").then((m) => m.OverviewSeriesChart),
+    { ssr: false, loading: () => <ChartSkeleton height={200} /> },
 );

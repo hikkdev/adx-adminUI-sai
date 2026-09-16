@@ -1,155 +1,168 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataTable, SortableHeader } from "@/components/adx/data-table";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { SubNav } from "@/components/adx/sub-nav";
-import { ADMIN_USER_STATUS_META, type AdminUser } from "@/types";
+import { ApiError } from "@/lib/api-client";
+import { formatDateTime } from "@/lib/format";
+import type { RoleConfig } from "@/services/roles";
+import { USER_STATUS_META, usersService, type UserRow } from "@/services/users";
+import { EnforcementBanner, RolesNav } from "../roles-nav";
 
-interface AdminUsersViewProps {
-    users: AdminUser[];
-    invites: { email: string; role: string; sent: string }[];
+/**
+ * Who holds which console role — the Members tab under Roles.
+ *
+ * No DR 10 frame draws this screen (the README lists `/roles/users` among
+ * the eight without one), so it is composed from the console's table. Each
+ * row is an ADMIN account from `GET /users` with the role `GET /users/:id`
+ * reports, and the picker writes `PUT /users/:id/role-config`. "Super admin"
+ * in the picker is the launch rule spelled out: an admin with no role holds
+ * every permission, so removing a role is a widening, and the API audits it
+ * as one.
+ */
+
+export interface AdminMember extends UserRow {
+    roleConfig: { id: string; name: string } | null;
 }
 
-export function AdminUsersView({ users, invites }: AdminUsersViewProps) {
-    const columns = React.useMemo<ColumnDef<AdminUser>[]>(
+/** The picker's value for "no role", which `PUT` takes as `null`. */
+const NO_ROLE = "__none__";
+
+interface AdminUsersViewProps {
+    members: AdminMember[];
+    roles: RoleConfig[];
+    onChanged: () => void;
+}
+
+export function AdminUsersView({ members, roles, onChanged }: AdminUsersViewProps) {
+    const [busyId, setBusyId] = React.useState<string | null>(null);
+
+    const assign = React.useCallback(
+        async (member: AdminMember, value: string) => {
+            const roleConfigId = value === NO_ROLE ? null : value;
+            if ((member.roleConfig?.id ?? null) === roleConfigId) return;
+            setBusyId(member.id);
+            try {
+                const result = await usersService.setRoleConfig(member.id, roleConfigId);
+                toast.success(
+                    result.roleConfig
+                        ? `${member.displayName} now holds ${result.roleConfig.name}`
+                        : `${member.displayName} holds no role — every permission, under the launch rule`
+                );
+                onChanged();
+            } catch (caught) {
+                toast.error(caught instanceof ApiError ? caught.message : "Could not change the role.");
+            } finally {
+                setBusyId(null);
+            }
+        },
+        [onChanged]
+    );
+
+    const columns = React.useMemo<ColumnDef<AdminMember>[]>(
         () => [
             {
                 id: "name",
-                accessorKey: "name",
+                accessorKey: "displayName",
                 header: ({ column }) => <SortableHeader column={column}>Name</SortableHeader>,
                 cell: ({ row }) => (
-                    <div className="flex items-center gap-2.5">
-                        <InitialsAvatar name={row.original.name} size="sm" />
-                        <span className="font-medium text-foreground">{row.original.name}</span>
-                        {row.original.twoFactorEnabled && (
-                            <ShieldCheck className="size-3.5 text-success" aria-label="2FA enabled" />
-                        )}
-                    </div>
-                ),
-            },
-            {
-                id: "email",
-                accessorKey: "email",
-                header: "Email",
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.email}</span>
+                    <Link
+                        href={`/users/${row.original.id}`}
+                        className="flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                        <InitialsAvatar name={row.original.displayName} size="sm" />
+                        <span className="min-w-0">
+                            <span className="block truncate font-medium text-foreground underline-offset-4 hover:underline">
+                                {row.original.displayName}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                                {row.original.email ?? row.original.mobile}
+                            </span>
+                        </span>
+                    </Link>
                 ),
             },
             {
                 id: "role",
-                accessorKey: "role",
-                header: "Role",
-                cell: ({ row }) => row.original.role,
+                accessorFn: (row) => row.roleConfig?.name ?? "",
+                header: "Console role",
+                cell: ({ row }) => (
+                    <Select
+                        value={row.original.roleConfig?.id ?? NO_ROLE}
+                        onValueChange={(value) => void assign(row.original, value)}
+                        disabled={busyId === row.original.id}
+                    >
+                        <SelectTrigger
+                            className="h-8 w-[14rem] bg-card"
+                            aria-label={`Console role for ${row.original.displayName}`}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value={NO_ROLE}>Super admin (no role — every permission)</SelectItem>
+                            {roles.map((role) => (
+                                <SelectItem key={role.id} value={role.id}>
+                                    {role.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                ),
             },
             {
                 id: "last-active",
-                accessorKey: "lastLogin",
-                header: "Last active",
+                accessorKey: "lastLoginAt",
+                header: ({ column }) => <SortableHeader column={column}>Last active</SortableHeader>,
                 cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.lastLogin}</span>
+                    <span className="text-muted-foreground">
+                        {row.original.lastLoginAt ? formatDateTime(row.original.lastLoginAt) : "Never signed in"}
+                    </span>
                 ),
             },
             {
                 id: "status",
                 accessorKey: "status",
                 header: "Status",
-                cell: ({ row }) => (
-                    <StatusBadge status={ADMIN_USER_STATUS_META[row.original.status]} />
-                ),
+                cell: ({ row }) => <StatusBadge status={USER_STATUS_META[row.original.status]} />,
             },
         ],
-        []
+        [assign, busyId, roles]
     );
 
     return (
         <div className="space-y-5">
-            <SubNav
-                items={[
-                    { label: "Permissions", href: "/roles", exact: true },
-                    { label: "Admin users", href: "/roles/users" },
-                ]}
-            />
+            <RolesNav />
 
             <PageHeader
-                title="Admin users"
-                subtitle="Everyone with access to this console"
+                title="Members"
+                subtitle="Everyone with access to this console, and the role each one holds"
                 actions={
-                    <>
-                        <Button
-                            variant="outline"
-                            className="bg-card"
-                            onClick={() => toast.success("Admin list exported")}
-                        >
-                            Export list
-                        </Button>
-                        <Button onClick={() => toast.info("Invites are sent to @adx.co.in work emails.")}>
-                            <Plus className="mr-1.5 size-4" />
-                            Invite admin
-                        </Button>
-                    </>
+                    <Button variant="outline" className="bg-card" asChild>
+                        <Link href="/users/accounts">Invite under Users</Link>
+                    </Button>
                 }
             />
 
-            <div className="grid gap-4 xl:grid-cols-3">
-                <div className="xl:col-span-2">
-                    <DataTable
-                        columns={columns}
-                        data={users}
-                        searchPlaceholder="Search admins"
-                        initialPageSize={10}
-                    />
-                </div>
-                <Card className="h-fit rounded-lg border-border shadow-none">
-                    <div className="border-b px-5 py-4">
-                        <h3 className="text-base font-semibold text-foreground">Pending invites</h3>
-                        <p className="mt-0.5 text-sm text-muted-foreground">
-                            Expire automatically after 7 days
-                        </p>
-                    </div>
-                    <ul className="divide-y">
-                        {invites.map((invite) => (
-                            <li key={invite.email} className="px-5 py-3.5">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <p className="truncate text-sm font-medium text-foreground">
-                                            {invite.email}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                            {invite.role} · Sent {invite.sent}
-                                        </p>
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-1">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-7 px-2 text-xs"
-                                            onClick={() => toast.success(`Invite resent to ${invite.email}`)}
-                                        >
-                                            Resend
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-7 px-2 text-xs text-danger hover:text-danger"
-                                            onClick={() => toast.success(`Invite revoked for ${invite.email}`)}
-                                        >
-                                            Revoke
-                                        </Button>
-                                    </div>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </Card>
-            </div>
+            <EnforcementBanner />
+
+            <DataTable
+                columns={columns}
+                data={members}
+                searchPlaceholder="Search members"
+                initialPageSize={20}
+                emptyState={
+                    <p className="px-5 py-12 text-center text-sm text-muted-foreground">
+                        No admin accounts yet.
+                    </p>
+                }
+            />
         </div>
     );
 }

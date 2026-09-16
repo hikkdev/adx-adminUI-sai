@@ -1,5 +1,8 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import { CategoriesLoader } from "./categories-loader";
 
-export default function RedirectToPricingModel() {
-    redirect("/pricing/model");
+export const metadata: Metadata = { title: "Category rules" };
+
+export default function CategoriesPage() {
+    return <CategoriesLoader />;
 }

@@ -1,243 +1,298 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import {
-    Bar,
-    BarChart,
-    CartesianGrid,
-    Cell,
-    Pie,
-    PieChart,
-    ResponsiveContainer,
-    Tooltip,
-    XAxis,
-    YAxis,
-} from "recharts";
+import { ArrowRight, Briefcase, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { KpiCard } from "@/components/adx/kpi-card";
+import { BreakdownTable, CountTile, MixBar, StatTile } from "@/components/adx/overview";
 import { SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { formatDate } from "@/lib/format";
+import { WorkloadChart } from "@/components/charts/lazy";
+import { WORKLOAD_COLORS } from "@/components/charts/workload-colors";
+import { formatDate, formatNumber } from "@/lib/format";
+import { useApiResource } from "@/lib/use-api-resource";
+import { useNow } from "@/lib/use-now";
 import {
-    ATTENDANCE_STATUS_META,
-    type AttendanceRecord,
-    type Employee,
-    type HrOverview,
-    type JobOpening,
-    type LeaveRequest,
-} from "@/types";
+    WORKLOAD_LEVELS,
+    WORKLOAD_LEVEL_LABEL,
+    employeesService,
+    holidayKindMeta,
+    hrmsProviderLabel,
+    istDateOf,
+    shapeWorkloadSeries,
+    splitHolidays,
+    weekdayOf,
+    workloadBandLabel,
+    type Holiday,
+} from "@/services/employees";
+import { integrationsService, type HrmsSettings } from "@/services/integrations";
+import { SECTION_META, kycMixItems, type EmployeesOverviewSection } from "@/services/section-overviews";
+import { workService, type WorkOverview } from "@/services/work";
 
-interface EmployeesOverviewProps {
-    employees: Employee[];
-    overview: HrOverview;
-    attendance: AttendanceRecord[];
-    jobs: JobOpening[];
-    leave: LeaveRequest[];
+const meta = SECTION_META.employees;
+
+interface Tools {
+    /** The HR-tool section of the integrations row; null when that read failed. */
+    hrms: HrmsSettings | null;
 }
 
-const SPLIT_COLORS = [
-    "hsl(153 73% 28%)",
-    "hsl(217 80% 42%)",
-    "hsl(34 100% 30%)",
-    "hsl(4 76% 40%)",
-];
+/**
+ * The DR 10 frame `Employees · /employees` (`5102:29144`), rebuilt over
+ * `GET /section-overviews/employees` — package O-C.
+ *
+ * The frame's header, tab strip, tiles, the two-card row and the
+ * "Workload distribution" chart are kept. The tiles read the section's
+ * one read now: the headcount and the open positions (`GET /employees/
+ * overview`, carried verbatim), who joined in the window against the
+ * window before, the holidays in it, and — new — the KYC queue as a mix
+ * (each state opening the employees' queue with that chip on), the
+ * tenure mix, and the active staff by department, work mode, employment
+ * type and region. The chart is Lot G (Q120): the workload measure by
+ * month over the window, the share of staff at low, medium and high
+ * load, banded by the thresholds under Settings › People. The two cards
+ * are the HR tool's portal (Q98) and — Lot AA, replacing the work tool's
+ * link-out — the Work card over `GET /work/overview`: open, overdue and
+ * awaiting review, opening the Tasks section; the table at the bottom is
+ * the holidays still to come, the one HR record kept in-house. All three
+ * are side reads that fail soft, so the overview stands without them.
+ */
+export function EmployeesOverview({ data, link }: { data: EmployeesOverviewSection; link: (href: string | null) => string | null }) {
+    const { overview, tiles, breakdowns, workload } = data;
+    const now = useNow();
+    const today = now === null ? null : istDateOf(now);
+    const year = today ? Number(today.slice(0, 4)) : null;
 
-export function EmployeesOverview({
-    employees,
-    overview,
-    attendance,
-    jobs,
-    leave,
-}: EmployeesOverviewProps) {
-    const today = attendance.filter((record) => record.date === "2026-08-10");
-    const present = today.filter((record) => record.status !== "absent").length;
-    const openRoles = jobs
-        .filter((job) => job.status === "open")
-        .reduce((sum, job) => sum + job.openings, 0);
-    const pendingLeave = leave.filter((request) => request.status === "pending").length;
+    const tools = useApiResource<Tools>("employees:overview:tools", () =>
+        integrationsService
+            .get()
+            .then((settings) => ({ hrms: settings.hrms ?? null }))
+            .catch(() => ({ hrms: null })),
+    );
+    const work = useApiResource<WorkOverview | null>("employees:overview:work", () => workService.overview().catch(() => null));
+    const holidays = useApiResource<Holiday[]>(`employees:overview:holidays:${year ?? "-"}`, () =>
+        year !== null ? employeesService.holidays(year).catch(() => [] as Holiday[]) : Promise.resolve([]),
+    );
+
+    const series = shapeWorkloadSeries(workload);
+    const { upcoming } = today ? splitHolidays(holidays.data ?? [], today) : { upcoming: [] as Holiday[] };
+    const hrms = tools.data?.hrms ?? null;
+    const provider = hrmsProviderLabel(hrms?.provider);
+    const workTasks = work.data?.tasks ?? null;
+    const openTasks = workTasks ? (workTasks.byStatus.TODO ?? 0) + (workTasks.byStatus.IN_PROGRESS ?? 0) + (workTasks.byStatus.PENDING_REVIEW ?? 0) + (workTasks.byStatus.BLOCKED ?? 0) : 0;
+    const tenureTotal = tiles.tenure.under1y + tiles.tenure.from1to3y + tiles.tenure.over3y;
 
     return (
-        <div className="space-y-4">
+        <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <KpiCard
-                    stat={{
-                        id: "headcount",
-                        label: "Total employees",
-                        value: String(employees.length),
-                        hint: "across 12 departments",
-                    }}
+                <StatTile
+                    label="Total employees"
+                    value={formatNumber(overview.headcount.total)}
+                    delta={null}
+                    previous={null}
+                    hint={`across ${formatNumber(breakdowns.byDepartment.total)} ${breakdowns.byDepartment.total === 1 ? "department" : "departments"}`}
+                    href={meta.directory}
                 />
-                <KpiCard
-                    stat={{
-                        id: "attendance",
-                        label: "Today's attendance",
-                        value: `${present} of ${today.length}`,
-                        hint: "checked in for 10 Aug",
-                    }}
+                <StatTile
+                    label="Active records"
+                    value={formatNumber(overview.headcount.active)}
+                    delta={null}
+                    previous={null}
+                    hint={overview.headcount.inactive > 0 ? `${formatNumber(overview.headcount.inactive)} inactive` : "nobody inactive"}
                 />
-                <KpiCard
-                    stat={{
-                        id: "leave",
-                        label: "Pending leave requests",
-                        value: String(pendingLeave),
-                        hint: "waiting on HR approval",
-                    }}
+                <CountTile label="Joined in window" figure={tiles.joined} hint="records created" />
+                <StatTile
+                    label="Open positions"
+                    value={formatNumber(overview.openPositions)}
+                    delta={null}
+                    previous={null}
+                    hint="across the active departments' open roles"
+                    href="/employees/departments"
                 />
-                <KpiCard
-                    stat={{
-                        id: "roles",
-                        label: "Open positions",
-                        value: String(openRoles),
-                        hint: "across active job posts",
-                    }}
+                <CountTile label="Holidays in window" figure={tiles.holidays} href="/employees/holidays" />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+                <MixBar
+                    title="KYC by state"
+                    hint="Every employee, by where their verification stands now — each state opens the queue with that chip on."
+                    items={kycMixItems(tiles.kyc, meta.kycQueue)}
+                />
+                <MixBar
+                    title="Tenure"
+                    hint={`${formatNumber(tenureTotal)} active staff by time since their record was created.`}
+                    items={[
+                        { key: "under1y", label: "Under a year", count: tiles.tenure.under1y, href: null, tone: "info" },
+                        { key: "from1to3y", label: "One to three years", count: tiles.tenure.from1to3y, href: null, tone: "success" },
+                        { key: "over3y", label: "Three years and more", count: tiles.tenure.over3y, href: null, tone: "neutral" },
+                    ]}
                 />
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-3">
-                <Card className="rounded-lg border-border p-5 shadow-none">
-                    <h2 className="text-sm font-semibold text-foreground">Where everyone is</h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">Today's attendance split</p>
-                    <div className="mx-auto mt-1 h-[170px] w-full max-w-[210px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={overview.attendanceSplit}
-                                    dataKey="value"
-                                    nameKey="label"
-                                    innerRadius={48}
-                                    outerRadius={72}
-                                    paddingAngle={2}
-                                    strokeWidth={0}
-                                >
-                                    {overview.attendanceSplit.map((segment, index) => (
-                                        <Cell key={segment.label} fill={SPLIT_COLORS[index]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    formatter={(value, name) => [`${value} people`, String(name)]}
-                                    contentStyle={{
-                                        borderRadius: 8,
-                                        border: "1px solid hsl(240 5.9% 90%)",
-                                        fontSize: 12,
-                                        boxShadow: "0 4px 12px rgb(0 0 0 / 0.06)",
-                                    }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
+            <Card className="rounded-lg border-border p-5 shadow-none">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-sm font-semibold text-foreground">Workload distribution</h2>
+                        <p className="mt-0.5 text-xs text-muted-foreground">Share of staff running at low, medium and high utilisation, by month over the window</p>
                     </div>
-                    <ul className="mt-2 space-y-1.5 border-t pt-3">
-                        {overview.attendanceSplit.map((segment, index) => (
-                            <li key={segment.label} className="flex items-center gap-2 text-xs">
-                                <span
-                                    className="size-2 rounded-full"
-                                    style={{ backgroundColor: SPLIT_COLORS[index] }}
-                                />
-                                <span className="text-muted-foreground">{segment.label}</span>
-                                <span className="ml-auto font-medium text-foreground">
-                                    {segment.value}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
+                    <Link href="/settings#people" className="text-xs font-medium text-primary hover:underline">
+                        Thresholds
+                    </Link>
+                </div>
+                <div className="mt-4">
+                    {series.every((point) => point.staff === 0) ? (
+                        <p className="text-sm text-muted-foreground">No active staff in the window, so there is nothing to band.</p>
+                    ) : (
+                        <WorkloadChart data={series} />
+                    )}
+                </div>
+                <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                    {WORKLOAD_LEVELS.map((level) => (
+                        <li key={level} className="flex items-center gap-1.5">
+                            <span
+                                className="inline-block size-2 rounded-full"
+                                style={{ backgroundColor: WORKLOAD_COLORS[level.toLowerCase() as keyof typeof WORKLOAD_COLORS] }}
+                                aria-hidden
+                            />
+                            {WORKLOAD_LEVEL_LABEL[level]} · {workloadBandLabel(level, workload.thresholds)}
+                        </li>
+                    ))}
+                    <li className="basis-full text-[11px]">
+                        Weighted items: open KYC cases ×{workload.weights.open.kyc}, tickets ×{workload.weights.open.tickets}, fraud cases ×{workload.weights.open.fraud};
+                        decisions ×{workload.weights.actions.decisions}, replies ×{workload.weights.actions.replies}; a diary entry ×{workload.weights.schedule}.
+                    </li>
+                </ul>
+            </Card>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+                <BreakdownTable
+                    title="By department"
+                    hint="Active departments: their active members and open roles — the department's page."
+                    labelHeading="Department"
+                    page={breakdowns.byDepartment}
+                    initialSort="headcount"
+                    linkFor={(row) => link(row.href)}
+                    columns={[
+                        { key: "headcount", label: "Headcount", align: "right", render: (row) => formatNumber(row.headcount), sortValue: (row) => row.headcount },
+                        { key: "openRoles", label: "Open roles", align: "right", render: (row) => formatNumber(row.openRoles), sortValue: (row) => row.openRoles },
+                    ]}
+                />
+                <BreakdownTable
+                    title="By region"
+                    hint="Active employees per region."
+                    labelHeading="Region"
+                    page={breakdowns.byRegion}
+                    initialSort="count"
+                    linkFor={(row) => link(row.href)}
+                    columns={[{ key: "count", label: "Employees", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count }]}
+                />
+                <BreakdownTable
+                    title="By work mode"
+                    hint="Active employees per work mode."
+                    labelHeading="Work mode"
+                    page={breakdowns.byWorkMode}
+                    initialSort="count"
+                    linkFor={(row) => link(row.href)}
+                    columns={[{ key: "count", label: "Employees", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count }]}
+                />
+                <BreakdownTable
+                    title="By employment type"
+                    hint="Active employees per employment type."
+                    labelHeading="Type"
+                    page={breakdowns.byEmploymentType}
+                    initialSort="count"
+                    linkFor={(row) => link(row.href)}
+                    columns={[{ key: "count", label: "Employees", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count }]}
+                />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border-border p-5 shadow-none">
+                    <h2 className="text-sm font-semibold text-foreground">HR tool</h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        Attendance, leave, payroll and hiring are worked in the HR tool, not here. A record's HR-tool id links its profile through.
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                        {tools.data === null ? (
+                            <p className="text-sm text-muted-foreground">Reading the integrations row…</p>
+                        ) : hrms === null ? (
+                            <p className="text-sm text-muted-foreground">The integrations row could not be read, so the tool cannot be named here.</p>
+                        ) : provider === null ? (
+                            <p className="text-sm text-muted-foreground">No HR tool is switched on. Pick one under Settings › Integrations.</p>
+                        ) : hrms.portalUrl ? (
+                            <Button asChild>
+                                <a href={hrms.portalUrl} target="_blank" rel="noopener noreferrer">
+                                    <ExternalLink className="size-4" />
+                                    Open in {provider}
+                                </a>
+                            </Button>
+                        ) : (
+                            <p className="text-sm text-muted-foreground">{provider} is the tool, but no portal URL is set yet — add it under Settings › Integrations.</p>
+                        )}
+                        <Link href="/settings/integrations" className="text-xs font-medium text-primary hover:underline">
+                            Integration settings
+                        </Link>
+                    </div>
                 </Card>
 
-                <Card className="rounded-lg border-border p-5 shadow-none xl:col-span-2">
-                    <h2 className="text-sm font-semibold text-foreground">Workload distribution</h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                        Share of staff running at low, medium and high utilisation
-                    </p>
-                    <div className="mt-3">
-                        <ResponsiveContainer width="100%" height={230}>
-                            <BarChart
-                                data={overview.performanceTrend}
-                                margin={{ top: 8, right: 8, bottom: 0, left: -18 }}
-                            >
-                                <CartesianGrid vertical={false} stroke="hsl(240 5.9% 90%)" strokeWidth={1} />
-                                <XAxis
-                                    dataKey="label"
-                                    tickLine={false}
-                                    axisLine={false}
-                                    tick={{ fontSize: 11, fill: "hsl(240 3.8% 46.1%)" }}
-                                    dy={6}
-                                />
-                                <YAxis
-                                    tickLine={false}
-                                    axisLine={false}
-                                    tickFormatter={(value: number) => `${value}%`}
-                                    tick={{ fontSize: 11, fill: "hsl(240 3.8% 46.1%)" }}
-                                />
-                                <Tooltip
-                                    formatter={(value, name) => [
-                                        `${value}%`,
-                                        name === "low"
-                                            ? "Low"
-                                            : name === "medium"
-                                              ? "Medium"
-                                              : "High",
-                                    ]}
-                                    contentStyle={{
-                                        borderRadius: 8,
-                                        border: "1px solid hsl(240 5.9% 90%)",
-                                        fontSize: 12,
-                                        boxShadow: "0 4px 12px rgb(0 0 0 / 0.06)",
-                                    }}
-                                />
-                                <Bar dataKey="low" stackId="a" fill="hsl(240 5.9% 84%)" />
-                                <Bar dataKey="medium" stackId="a" fill="hsl(34 100% 30%)" />
-                                <Bar
-                                    dataKey="high"
-                                    stackId="a"
-                                    fill="hsl(359.5 85.5% 29.8%)"
-                                    radius={[3, 3, 0, 0]}
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
+                <Card className="rounded-lg border-border p-5 shadow-none" data-testid="work-card">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                                <Briefcase className="size-4 text-muted-foreground" />
+                                Work
+                            </h2>
+                            <p className="mt-0.5 text-xs text-muted-foreground">Tasks, boards and issues are worked in the console&apos;s Tasks section — this Indian month, across every active project.</p>
+                        </div>
+                        <Link href="/tasks" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                            Open Tasks
+                            <ArrowRight className="size-3.5" />
+                        </Link>
                     </div>
-                    <div className="mt-1 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1.5">
-                            <span className="size-2 rounded-full bg-[hsl(240_5.9%_84%)]" /> Low
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                            <span className="size-2 rounded-full bg-warning" /> Medium
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                            <span className="size-2 rounded-full bg-primary" /> High
-                        </span>
+                    <div className="mt-4">
+                        {work.loading && work.data === null ? (
+                            <p className="text-sm text-muted-foreground">Reading the work overview…</p>
+                        ) : workTasks === null ? (
+                            <p className="text-sm text-muted-foreground">The Tasks section could not be read, so its numbers cannot be shown here.</p>
+                        ) : (
+                            <dl className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <dt className="text-xs text-muted-foreground">Open</dt>
+                                    <dd className="text-metric mt-1 text-foreground">{formatNumber(openTasks)}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-xs text-muted-foreground">Overdue</dt>
+                                    <dd className={workTasks.overdue > 0 ? "text-metric mt-1 text-danger" : "text-metric mt-1 text-foreground"}>{formatNumber(workTasks.overdue)}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-xs text-muted-foreground">Awaiting review</dt>
+                                    <dd className="text-metric mt-1 text-foreground">{formatNumber(workTasks.byStatus.PENDING_REVIEW ?? 0)}</dd>
+                                </div>
+                            </dl>
+                        )}
                     </div>
                 </Card>
             </div>
 
             <div>
                 <div className="mb-2.5 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-foreground">Latest attendance</h2>
-                    <Link
-                        href="/employees/attendance"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                    >
-                        Full attendance log
+                    <h2 className="text-sm font-semibold text-foreground">Upcoming holidays</h2>
+                    <Link href="/employees/holidays" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                        Full calendar
                         <ArrowRight className="size-3.5" />
                     </Link>
                 </div>
                 <SimpleTable
                     columns={[
-                        { key: "employee", label: "Employee", render: (row) => row.employee },
-                        { key: "department", label: "Department", render: (row) => row.department },
-                        { key: "date", label: "Date", render: (row) => formatDate(row.date) },
-                        { key: "in", label: "Check in", render: (row) => row.checkIn },
-                        { key: "out", label: "Check out", render: (row) => row.checkOut },
-                        {
-                            key: "status",
-                            label: "Status",
-                            render: (row) => (
-                                <StatusBadge status={ATTENDANCE_STATUS_META[row.status]} />
-                            ),
-                        },
+                        { key: "date", label: "Date", render: (row: Holiday) => <span className="font-medium text-foreground">{formatDate(row.date)}</span> },
+                        { key: "day", label: "Day", render: (row) => weekdayOf(row.date) },
+                        { key: "name", label: "Holiday", render: (row) => row.name },
+                        { key: "type", label: "Type", render: (row) => <StatusBadge status={holidayKindMeta(row)} /> },
                     ]}
-                    rows={attendance.slice(0, 6)}
+                    rows={upcoming.slice(0, 6)}
                     rowKey={(row) => row.id}
+                    emptyMessage={today && holidays.data ? "No holidays left this year." : "Reading the calendar…"}
                 />
             </div>
-        </div>
+        </>
     );
 }

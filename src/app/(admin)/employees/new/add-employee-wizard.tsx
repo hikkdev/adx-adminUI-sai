@@ -1,126 +1,139 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { FieldList } from "@/components/adx/simple-table";
+import { StatusBadge } from "@/components/adx/status-badge";
+import { ApiError } from "@/lib/api-client";
+import { apiConfig } from "@/lib/api-config";
+import { useApiResource } from "@/lib/use-api-resource";
+import { useDebounced } from "@/lib/use-debounced";
 import { cn } from "@/lib/utils";
+import type { DepartmentView } from "@/services/departments";
+import {
+    EMPLOYMENT_TYPES,
+    EMPLOYMENT_TYPE_META,
+    WORK_MODES,
+    WORK_MODE_META,
+    employeesService,
+    type CreateEmployeeInput,
+    type EmploymentType,
+    type InviteMethod,
+    type WorkMode,
+} from "@/services/employees";
+import type { RoleConfig } from "@/services/roles";
+import { USER_STATUS_META, type UserRow } from "@/services/users";
+import { USER_ROLE_META } from "@/types";
 
 interface AddEmployeeWizardProps {
-    departments: string[];
+    departments: DepartmentView[];
+    roles: RoleConfig[];
 }
 
-const STEPS = ["Personal", "Professional", "Documents & BGV", "Payroll", "Account", "Review"];
+const STEPS = ["Person", "Professional", "Console access", "Review"];
 
-const DOCUMENT_SLOTS = [
-    "Aadhaar card",
-    "PAN card",
-    "Appointment letter",
-    "Salary slips",
-    "Relieving letter",
-    "Experience letter",
-    "BGV report",
-];
+/** The pickers' values for "no role", "no department", "not set". */
+const NO_ROLE = "__none__";
+const NO_DEPARTMENT = "__none__";
+const UNSET = "__unset__";
 
-const BGV_STATUSES = ["Not started", "In progress", "Clear", "Discrepancy found"];
-
-export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
+/**
+ * The DR 10 frame `Add Employee · /employees/new`.
+ *
+ * The frame's stepper, card and Back / Continue row are kept. The steps are
+ * not the frame's six: an HR record hangs off a `User` that already exists
+ * (`POST /employees` is 404 against an unknown one), so the first step
+ * finds the account rather than typing a name; the Documents step went to
+ * the HR tool with the documents themselves (Q98), and the Payroll step
+ * had no column to write to. What is left is what the route takes — the
+ * user, a department record and designation, and Lot A's optional console
+ * invitation with its role picker — and a review. Lot G (Q122/Q140): the
+ * department is a record picked by id, and the Professional step also
+ * takes the region, the work mode and the employment type, which are
+ * columns on `Employee` now.
+ */
+export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps) {
     const router = useRouter();
     const [step, setStep] = React.useState(0);
-    const [uploaded, setUploaded] = React.useState<string[]>([]);
+    const [query, setQuery] = React.useState("");
+    const settledQuery = useDebounced(query.trim());
+    const [user, setUser] = React.useState<UserRow | null>(null);
     const [form, setForm] = React.useState({
-        firstName: "",
-        lastName: "",
-        mobile: "",
-        email: "",
-        dob: "",
-        gender: "Female",
-        maritalStatus: "Single",
-        address: "",
-        department: departments[0] ?? "Design",
+        departmentId: NO_DEPARTMENT,
         designation: "",
-        type: "office",
-        employment: "permanent",
-        joiningDate: "2026-08-17",
-        location: "Main Office",
-        region: "Maharashtra",
-        officialEmail: "",
-        slackId: "",
-        githubId: "",
-        aadhaar: "",
-        bgvStatus: "Not started",
-        bgvAgency: "",
-        bgvNotes: "",
-        monthlyCtc: "",
-        bankAccount: "",
-        ifsc: "",
-        pan: "",
-        uan: "",
+        region: "",
+        workMode: UNSET as WorkMode | typeof UNSET,
+        employmentType: UNSET as EmploymentType | typeof UNSET,
+        invite: false,
+        roleId: NO_ROLE,
+        method: "PASSWORD" as InviteMethod,
     });
+    const [submitting, setSubmitting] = React.useState(false);
 
-    const patch = (partial: Partial<typeof form>) =>
-        setForm((current) => ({ ...current, ...partial }));
+    const matches = useApiResource<UserRow[]>(`employees:new:users:${settledQuery}`, () =>
+        settledQuery.length >= 2 ? employeesService.searchUsers(settledQuery) : Promise.resolve([]),
+    );
 
-    const stepValid = () => {
-        if (step === 0)
-            return (
-                form.firstName.trim().length > 1 &&
-                form.lastName.trim().length > 0 &&
-                form.mobile.trim().length >= 10
-            );
-        if (step === 1) return form.designation.trim().length > 1;
-        if (step === 2)
-            return form.aadhaar.trim() === "" || /^\d{12}$/.test(form.aadhaar.trim());
-        if (step === 3)
-            return (
-                Number(form.monthlyCtc) > 0 &&
-                form.bankAccount.trim().length >= 9 &&
-                form.ifsc.trim().length === 11
-            );
-        return true;
+    const patch = (partial: Partial<typeof form>) => setForm((current) => ({ ...current, ...partial }));
+
+    const department = departments.find((candidate) => candidate.id === form.departmentId) ?? null;
+    const designation = form.designation.trim();
+    const region = form.region.trim();
+
+    const stepProblem = (): string | null => {
+        if (step === 0 && !user) return "Pick the account the record hangs off.";
+        if (step === 1 && !designation) return "Add the designation for this role.";
+        if (step === 2 && form.invite && !user?.email) return "This account has no email, so it cannot be invited. Turn the invitation off or add an email under Users.";
+        return null;
     };
 
     const next = () => {
-        if (!stepValid()) {
-            toast.error(
-                step === 0
-                    ? "Name and a valid mobile number are needed."
-                    : step === 1
-                      ? "Add the designation for this role."
-                      : step === 2
-                        ? "Aadhaar must be exactly 12 digits."
-                        : "Monthly CTC, a bank account and an 11 character IFSC are needed."
-            );
+        const problem = stepProblem();
+        if (problem) {
+            toast.error(problem);
             return;
         }
         setStep((current) => Math.min(current + 1, STEPS.length - 1));
     };
 
-    const submit = () => {
-        toast.success(`${form.firstName} ${form.lastName} added`, {
-            description: "Profile created and onboarding email sent.",
-        });
-        router.push("/employees/directory");
+    const submit = async () => {
+        if (!user) return;
+        const input: CreateEmployeeInput = {
+            userId: user.id,
+            ...(department ? { departmentId: department.id } : {}),
+            ...(designation ? { designation } : {}),
+            ...(region ? { region } : {}),
+            ...(form.workMode !== UNSET ? { workMode: form.workMode } : {}),
+            ...(form.employmentType !== UNSET ? { employmentType: form.employmentType } : {}),
+            ...(form.invite
+                ? { inviteToConsole: { method: form.method, ...(form.roleId !== NO_ROLE ? { roleConfigId: form.roleId } : {}) } }
+                : {}),
+        };
+        setSubmitting(true);
+        try {
+            const created = await employeesService.create(input);
+            toast.success(`${user.displayName} added${created.displayId ? ` as ${created.displayId}` : ""}`, {
+                description: created.invite
+                    ? `Console invitation sent to ${created.invite.email}; the link lasts a week.`
+                    : "HR record opened.",
+            });
+            router.push(`/employees/directory/${user.id}`);
+        } catch (caught) {
+            toast.error(caught instanceof ApiError ? caught.message : "Could not create the record.");
+            setSubmitting(false);
+        }
     };
-
-    const toggleUpload = (slot: string) =>
-        setUploaded((current) =>
-            current.includes(slot)
-                ? current.filter((item) => item !== slot)
-                : [...current, slot]
-        );
 
     return (
         <div className="space-y-4">
@@ -134,7 +147,7 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                                     ? "bg-success text-white"
                                     : index === step
                                       ? "bg-primary text-primary-foreground"
-                                      : "bg-muted text-muted-foreground"
+                                      : "bg-muted text-muted-foreground",
                             )}
                         >
                             {index < step ? <Check className="size-3.5" /> : index + 1}
@@ -142,9 +155,7 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                         <span
                             className={cn(
                                 "hidden text-sm sm:inline",
-                                index === step
-                                    ? "font-medium text-foreground"
-                                    : "text-muted-foreground"
+                                index === step ? "font-medium text-foreground" : "text-muted-foreground",
                             )}
                         >
                             {label}
@@ -156,75 +167,84 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
 
             <Card className="rounded-lg border-border p-5 shadow-none">
                 {step === 0 && (
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-4">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="emp-first">First name</Label>
-                            <Input
-                                id="emp-first"
-                                value={form.firstName}
-                                onChange={(event) => patch({ firstName: event.target.value })}
-                            />
+                            <Label htmlFor="emp-user">Find the account</Label>
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    id="emp-user"
+                                    value={query}
+                                    onChange={(event) => setQuery(event.target.value)}
+                                    placeholder="Name, email or mobile"
+                                    className="pl-9"
+                                    autoComplete="off"
+                                    autoFocus
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                An HR record hangs off a user account. No account yet? Invite one under{" "}
+                                <Link href="/users/accounts" className="font-medium text-primary hover:underline">
+                                    Users
+                                </Link>{" "}
+                                or approve their intake under{" "}
+                                <Link href="/onboarding/submissions?userType=EMPLOYEE" className="font-medium text-primary hover:underline">
+                                    Onboarding
+                                </Link>
+                                .
+                            </p>
                         </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-last">Last name</Label>
-                            <Input
-                                id="emp-last"
-                                value={form.lastName}
-                                onChange={(event) => patch({ lastName: event.target.value })}
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-mobile">Mobile</Label>
-                            <Input
-                                id="emp-mobile"
-                                value={form.mobile}
-                                onChange={(event) => patch({ mobile: event.target.value })}
-                                placeholder="10 digit number"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-email">Personal email</Label>
-                            <Input
-                                id="emp-email"
-                                type="email"
-                                value={form.email}
-                                onChange={(event) => patch({ email: event.target.value })}
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-dob">Date of birth</Label>
-                            <Input
-                                id="emp-dob"
-                                type="date"
-                                value={form.dob}
-                                onChange={(event) => patch({ dob: event.target.value })}
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-gender">Gender</Label>
-                            <Select
-                                value={form.gender}
-                                onValueChange={(value) => patch({ gender: value })}
-                            >
-                                <SelectTrigger id="emp-gender">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Female">Female</SelectItem>
-                                    <SelectItem value="Male">Male</SelectItem>
-                                    <SelectItem value="Other">Other</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="grid gap-1.5 sm:col-span-2">
-                            <Label htmlFor="emp-address">Address</Label>
-                            <Input
-                                id="emp-address"
-                                value={form.address}
-                                onChange={(event) => patch({ address: event.target.value })}
-                                placeholder="Street, city"
-                            />
-                        </div>
+                        {user && (
+                            <div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+                                <InitialsAvatar name={user.displayName} />
+                                <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-foreground">{user.displayName}</p>
+                                    <p className="truncate text-xs text-muted-foreground">
+                                        {[user.email, user.mobile].filter(Boolean).join(" · ")}
+                                    </p>
+                                </div>
+                                <Button variant="outline" size="sm" className="bg-card" onClick={() => setUser(null)}>
+                                    Change
+                                </Button>
+                            </div>
+                        )}
+                        {!user && settledQuery.length >= 2 && (
+                            <ul className="divide-y rounded-lg border">
+                                {matches.loading && matches.data === null ? (
+                                    <li className="px-3 py-3 text-sm text-muted-foreground">Searching…</li>
+                                ) : matches.error ? (
+                                    <li className="px-3 py-3 text-sm text-danger">{matches.error}</li>
+                                ) : (matches.data ?? []).length === 0 ? (
+                                    <li className="px-3 py-3 text-sm text-muted-foreground">No account matches "{settledQuery}".</li>
+                                ) : (
+                                    (matches.data ?? []).slice(0, 8).map((row) => (
+                                        <li key={row.id}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setUser(row)}
+                                                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                                            >
+                                                <InitialsAvatar name={row.displayName} size="sm" />
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm font-medium text-foreground">{row.displayName}</span>
+                                                    <span className="block truncate text-xs text-muted-foreground">
+                                                        {[row.email, row.mobile].filter(Boolean).join(" · ")}
+                                                    </span>
+                                                </span>
+                                                <span className="flex shrink-0 items-center gap-1">
+                                                    {row.roles.slice(0, 2).map((role) => (
+                                                        <span key={role} className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                                            {USER_ROLE_META[role]?.label ?? role}
+                                                        </span>
+                                                    ))}
+                                                    <StatusBadge status={USER_STATUS_META[row.status]} />
+                                                </span>
+                                            </button>
+                                        </li>
+                                    ))
+                                )}
+                            </ul>
+                        )}
                     </div>
                 )}
 
@@ -232,21 +252,26 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                     <div className="grid gap-4 sm:grid-cols-2">
                         <div className="grid gap-1.5">
                             <Label htmlFor="emp-department">Department</Label>
-                            <Select
-                                value={form.department}
-                                onValueChange={(value) => patch({ department: value })}
-                            >
+                            <Select value={form.departmentId} onValueChange={(value) => patch({ departmentId: value })}>
                                 <SelectTrigger id="emp-department">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {departments.map((department) => (
-                                        <SelectItem key={department} value={department}>
-                                            {department}
+                                    <SelectItem value={NO_DEPARTMENT}>No department yet</SelectItem>
+                                    {departments.map((candidate) => (
+                                        <SelectItem key={candidate.id} value={candidate.id}>
+                                            {candidate.name}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">
+                                A department not listed is added under{" "}
+                                <Link href="/employees/departments" className="font-medium text-primary hover:underline">
+                                    Departments
+                                </Link>
+                                .
+                            </p>
                         </div>
                         <div className="grid gap-1.5">
                             <Label htmlFor="emp-designation">Designation</Label>
@@ -258,291 +283,130 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                             />
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="emp-type">Work mode</Label>
-                            <Select
-                                value={form.type}
-                                onValueChange={(value) => patch({ type: value })}
-                            >
-                                <SelectTrigger id="emp-type">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="office">Office</SelectItem>
-                                    <SelectItem value="remote">Remote</SelectItem>
-                                    <SelectItem value="field">Field</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-employment">Employment</Label>
-                            <Select
-                                value={form.employment}
-                                onValueChange={(value) => patch({ employment: value })}
-                            >
-                                <SelectTrigger id="emp-employment">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="permanent">Permanent</SelectItem>
-                                    <SelectItem value="contract">Contract</SelectItem>
-                                    <SelectItem value="part_time">Part time</SelectItem>
-                                    <SelectItem value="probation">Probation</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-joining">Joining date</Label>
-                            <Input
-                                id="emp-joining"
-                                type="date"
-                                value={form.joiningDate}
-                                onChange={(event) => patch({ joiningDate: event.target.value })}
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
                             <Label htmlFor="emp-region">Region</Label>
-                            <Input
-                                id="emp-region"
-                                value={form.region}
-                                onChange={(event) => patch({ region: event.target.value })}
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {step === 2 && (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                        {DOCUMENT_SLOTS.map((slot) => {
-                            const done = uploaded.includes(slot);
-                            return (
-                                <button
-                                    key={slot}
-                                    type="button"
-                                    onClick={() => toggleUpload(slot)}
-                                    className={cn(
-                                        "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center transition-colors",
-                                        done
-                                            ? "border-success/40 bg-success-soft"
-                                            : "bg-card hover:border-primary/40"
-                                    )}
-                                >
-                                    {done ? (
-                                        <Check className="size-5 text-success" />
-                                    ) : (
-                                        <Upload className="size-5 text-muted-foreground" />
-                                    )}
-                                    <span className="text-sm font-medium text-foreground">{slot}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {done ? "Attached" : "PDF or image up to 5 MB"}
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                )}
-
-                {step === 2 && (
-                    <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-aadhaar">Aadhaar number</Label>
-                            <Input
-                                id="emp-aadhaar"
-                                inputMode="numeric"
-                                maxLength={12}
-                                value={form.aadhaar}
-                                onChange={(event) =>
-                                    patch({ aadhaar: event.target.value.replace(/\D/g, "") })
-                                }
-                                placeholder="12 digits"
-                                className="tabular-nums"
-                            />
+                            <Input id="emp-region" value={form.region} onChange={(event) => patch({ region: event.target.value })} placeholder="e.g. Delhi NCR" maxLength={80} />
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="emp-bgv-status">BGV status</Label>
-                            <Select
-                                value={form.bgvStatus}
-                                onValueChange={(value) => patch({ bgvStatus: value })}
-                            >
-                                <SelectTrigger id="emp-bgv-status">
+                            <Label htmlFor="emp-work-mode">Work mode</Label>
+                            <Select value={form.workMode} onValueChange={(value) => patch({ workMode: value as WorkMode | typeof UNSET })}>
+                                <SelectTrigger id="emp-work-mode">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {BGV_STATUSES.map((option) => (
-                                        <SelectItem key={option} value={option}>
-                                            {option}
+                                    <SelectItem value={UNSET}>Not set</SelectItem>
+                                    {WORK_MODES.map((mode) => (
+                                        <SelectItem key={mode} value={mode}>
+                                            {WORK_MODE_META[mode].label}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="emp-bgv-agency">BGV agency</Label>
-                            <Input
-                                id="emp-bgv-agency"
-                                value={form.bgvAgency}
-                                onChange={(event) => patch({ bgvAgency: event.target.value })}
-                                placeholder="e.g. AuthBridge"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-bgv-notes">BGV notes</Label>
-                            <Input
-                                id="emp-bgv-notes"
-                                value={form.bgvNotes}
-                                onChange={(event) => patch({ bgvNotes: event.target.value })}
-                                placeholder="Findings, reference numbers"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {step === 3 && (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-ctc">Monthly CTC (₹)</Label>
-                            <Input
-                                id="emp-ctc"
-                                type="number"
-                                min="0"
-                                step="1000"
-                                value={form.monthlyCtc}
-                                onChange={(event) => patch({ monthlyCtc: event.target.value })}
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-pan">PAN</Label>
-                            <Input
-                                id="emp-pan"
-                                maxLength={10}
-                                value={form.pan}
-                                onChange={(event) => patch({ pan: event.target.value.toUpperCase() })}
-                                placeholder="ABCDE1234F"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-bank">Bank account number</Label>
-                            <Input
-                                id="emp-bank"
-                                inputMode="numeric"
-                                value={form.bankAccount}
-                                onChange={(event) =>
-                                    patch({ bankAccount: event.target.value.replace(/\D/g, "") })
-                                }
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-ifsc">IFSC</Label>
-                            <Input
-                                id="emp-ifsc"
-                                maxLength={11}
-                                value={form.ifsc}
-                                onChange={(event) => patch({ ifsc: event.target.value.toUpperCase() })}
-                                placeholder="HDFC0001234"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-uan">PF UAN (optional)</Label>
-                            <Input
-                                id="emp-uan"
-                                inputMode="numeric"
-                                maxLength={12}
-                                value={form.uan}
-                                onChange={(event) =>
-                                    patch({ uan: event.target.value.replace(/\D/g, "") })
-                                }
-                                className="tabular-nums"
-                            />
+                            <Label htmlFor="emp-employment-type">Employment type</Label>
+                            <Select value={form.employmentType} onValueChange={(value) => patch({ employmentType: value as EmploymentType | typeof UNSET })}>
+                                <SelectTrigger id="emp-employment-type">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={UNSET}>Not set</SelectItem>
+                                    {EMPLOYMENT_TYPES.map((type) => (
+                                        <SelectItem key={type} value={type}>
+                                            {EMPLOYMENT_TYPE_META[type].label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <p className="self-end text-xs text-muted-foreground sm:col-span-2">
-                            Payroll starts on the first full month after joining. It can be paused
-                            any time from the Payroll register.
+                            Joining date and pay are recorded in the HR tool, not here.
                         </p>
                     </div>
                 )}
 
-                {step === 4 && (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-official">Official email</Label>
-                            <Input
-                                id="emp-official"
-                                value={form.officialEmail}
-                                onChange={(event) => patch({ officialEmail: event.target.value })}
-                                placeholder="name@adx.in"
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-slack">Slack handle</Label>
-                            <Input
-                                id="emp-slack"
-                                value={form.slackId}
-                                onChange={(event) => patch({ slackId: event.target.value })}
-                            />
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="emp-github">GitHub username</Label>
-                            <Input
-                                id="emp-github"
-                                value={form.githubId}
-                                onChange={(event) => patch({ githubId: event.target.value })}
-                            />
-                        </div>
+                {step === 2 && (
+                    <div className="space-y-4">
+                        <label className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+                            <span>
+                                <span className="block text-sm font-medium text-foreground">Invite to the console</span>
+                                <span className="block text-xs text-muted-foreground">
+                                    {user?.email
+                                        ? `A one-week link goes to ${user.email} once the record exists.`
+                                        : "This account has no email on file, so there is nowhere to send an invitation."}
+                                </span>
+                            </span>
+                            <Switch checked={form.invite} onCheckedChange={(checked) => patch({ invite: checked })} disabled={!user?.email} aria-label="Invite to the console" />
+                        </label>
+                        {form.invite && (
+                            <>
+                                <div className="grid gap-1.5">
+                                    <Label htmlFor="emp-role">Console role</Label>
+                                    <Select value={form.roleId} onValueChange={(value) => patch({ roleId: value })}>
+                                        <SelectTrigger id="emp-role">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value={NO_ROLE}>Super admin (no role — every permission)</SelectItem>
+                                            {roles.map((role) => (
+                                                <SelectItem key={role.id} value={role.id}>
+                                                    {role.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <fieldset className="grid gap-2">
+                                    <legend className="text-sm font-medium text-foreground">How they will sign in</legend>
+                                    <RadioGroup value={form.method} onValueChange={(value) => patch({ method: value as InviteMethod })}>
+                                        <label className="flex items-start gap-2.5 rounded-md border px-3 py-2.5">
+                                            <RadioGroupItem value="PASSWORD" className="mt-0.5" />
+                                            <span>
+                                                <span className="block text-sm font-medium text-foreground">Password</span>
+                                                <span className="block text-xs text-muted-foreground">They choose one as they accept.</span>
+                                            </span>
+                                        </label>
+                                        <label className="flex items-start gap-2.5 rounded-md border px-3 py-2.5">
+                                            <RadioGroupItem value="GOOGLE" className="mt-0.5" />
+                                            <span>
+                                                <span className="block text-sm font-medium text-foreground">Google Workspace</span>
+                                                <span className="block text-xs text-muted-foreground">
+                                                    {apiConfig.googleClientId
+                                                        ? "They sign in with the Workspace account at this address."
+                                                        : "The console has no Google client ID configured, so this sign-in will not be offered on the accept screen until it does."}
+                                                </span>
+                                            </span>
+                                        </label>
+                                    </RadioGroup>
+                                </fieldset>
+                            </>
+                        )}
                     </div>
                 )}
 
-                {step === 5 && (
+                {step === 3 && user && (
                     <FieldList
                         items={[
-                            ["Name", `${form.firstName} ${form.lastName}`.trim() || "Not set"],
-                            ["Mobile", form.mobile || "Not set"],
-                            ["Personal email", form.email || "Not set"],
-                            ["Department", form.department],
-                            ["Designation", form.designation || "Not set"],
+                            ["Account", `${user.displayName}${user.email ? ` · ${user.email}` : ""}`],
+                            ["Mobile", user.mobile],
+                            ["Department", department?.name ?? "—"],
+                            ["Designation", designation || "—"],
+                            ["Region", region || "—"],
+                            ["Work mode", form.workMode === UNSET ? "—" : WORK_MODE_META[form.workMode].label],
+                            ["Employment type", form.employmentType === UNSET ? "—" : EMPLOYMENT_TYPE_META[form.employmentType].label],
                             [
-                                "Work mode",
-                                form.type[0].toUpperCase() + form.type.slice(1),
+                                "Console access",
+                                form.invite
+                                    ? `Invitation to ${user.email} · ${form.roleId === NO_ROLE ? "Super admin" : (roles.find((role) => role.id === form.roleId)?.name ?? form.roleId)} · ${form.method === "GOOGLE" ? "Google Workspace" : "password"}`
+                                    : "No invitation",
                             ],
-                            ["Employment", form.employment.replace("_", " ")],
-                            ["Joining", form.joiningDate],
-                            ["Region", form.region],
-                            [
-                                "Documents",
-                                uploaded.length
-                                    ? `${uploaded.length} of ${DOCUMENT_SLOTS.length} attached`
-                                    : "None attached yet",
-                            ],
-                            ["Official email", form.officialEmail || "Will be provisioned"],
-                            [
-                                "Aadhaar",
-                                form.aadhaar ? `•••• •••• ${form.aadhaar.slice(-4)}` : "Not captured",
-                            ],
-                            ["BGV", form.bgvStatus],
-                            [
-                                "Monthly CTC",
-                                form.monthlyCtc
-                                    ? `₹${Number(form.monthlyCtc).toLocaleString("en-IN")}`
-                                    : "Not set",
-                            ],
-                            [
-                                "Salary account",
-                                form.bankAccount
-                                    ? `••••${form.bankAccount.slice(-4)} · ${form.ifsc}`
-                                    : "Not set",
-                            ],
+                            ["Employee ID", "Minted on create (EMP-…)"],
                         ]}
                     />
                 )}
             </Card>
 
             <div className="flex items-center justify-between">
-                <Button
-                    variant="outline"
-                    className="bg-card"
-                    disabled={step === 0}
-                    onClick={() => setStep((current) => Math.max(current - 1, 0))}
-                >
+                <Button variant="outline" className="bg-card" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0 || submitting}>
                     <ChevronLeft className="size-4" />
                     Back
                 </Button>
@@ -552,7 +416,9 @@ export function AddEmployeeWizard({ departments }: AddEmployeeWizardProps) {
                         <ChevronRight className="size-4" />
                     </Button>
                 ) : (
-                    <Button onClick={submit}>Add employee</Button>
+                    <Button onClick={() => void submit()} disabled={submitting}>
+                        {submitting ? "Creating…" : "Create record"}
+                    </Button>
                 )}
             </div>
         </div>

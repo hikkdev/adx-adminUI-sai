@@ -7,6 +7,7 @@ export function CommsNav() {
             items={[
                 { label: "Templates", href: "/comms", exact: true },
                 { label: "Delivery logs", href: "/comms/delivery-logs" },
+                { label: "Announcements", href: "/comms/announcements" },
             ]}
         />
     );

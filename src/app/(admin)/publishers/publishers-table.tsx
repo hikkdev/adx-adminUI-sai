@@ -1,17 +1,16 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Plus, Tag } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -21,24 +20,27 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { DataTable, SortableHeader, selectionColumn } from "@/components/adx/data-table";
 import { EmptyState } from "@/components/adx/empty-state";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { SuspendedChip } from "@/components/adx/suspended-chip";
+import { KYC_TONE, kycLabel, type RosterPublisher } from "@/services/supply";
 import { CreatePublisherDialog } from "./create-publisher-dialog";
-import { KYC_STATUS_META, type KycStatus, type Publisher } from "@/types";
 
 interface PublishersTableProps {
-    publishers: Publisher[];
+    publishers: RosterPublisher[];
+    onChanged: () => void;
 }
 
-export function PublishersTable({ publishers }: PublishersTableProps) {
+/** The KYC states a publisher record can be in, as the API words them. */
+const KYC_FILTERS = ["VERIFIED", "SUBMITTED", "UNDER_REVIEW", "REJECTED", "PENDING", "NOT_STARTED"];
+
+export function PublishersTable({ publishers, onChanged }: PublishersTableProps) {
     const router = useRouter();
     const [createOpen, setCreateOpen] = React.useState(false);
-    const [kycFilter, setKycFilter] = React.useState<KycStatus | "all">("all");
-    const [suspendTarget, setSuspendTarget] = React.useState<Publisher | null>(null);
+    const [kycFilter, setKycFilter] = React.useState<string>("all");
 
     const filtered = React.useMemo(
         () =>
@@ -48,9 +50,9 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
         [publishers, kycFilter]
     );
 
-    const columns = React.useMemo<ColumnDef<Publisher>[]>(
+    const columns = React.useMemo<ColumnDef<RosterPublisher>[]>(
         () => [
-            selectionColumn<Publisher>(),
+            selectionColumn<RosterPublisher>(),
             {
                 id: "name",
                 accessorKey: "name",
@@ -58,30 +60,68 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
                 cell: ({ row }) => (
                     <div className="flex items-center gap-2.5">
                         <InitialsAvatar name={row.original.name} size="sm" />
-                        <span className="font-medium text-foreground">{row.original.name}</span>
+                        <div className="min-w-0">
+                            <span className="font-medium text-foreground">{row.original.name}</span>
+                            <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                                {row.original.displayId ?? "No identifier yet"}
+                            </p>
+                        </div>
                     </div>
                 ),
             },
             {
-                id: "owner",
-                accessorKey: "owner",
-                header: "Owner",
+                id: "contact",
+                accessorKey: "mobile",
+                header: "Mobile",
                 cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.owner}</span>
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {row.original.mobile}
+                    </span>
+                ),
+            },
+            {
+                id: "city",
+                accessorFn: (publisher) => publisher.city ?? "",
+                header: "City",
+                cell: ({ row }) => (
+                    <span className="text-muted-foreground">{row.original.city ?? "—"}</span>
+                ),
+            },
+            {
+                id: "arrived",
+                accessorFn: (publisher) => (publisher.onboardedByAgent ? "Agent" : "Self-serve"),
+                header: "Arrived",
+                cell: ({ row }) => (
+                    // DR 08 lets a publisher sign up with no agent at all, and
+                    // which way they arrived decides who chases their paperwork.
+                    <span className="text-muted-foreground">
+                        {row.original.onboardedByAgent ? "Onboarded by agent" : "Self-serve"}
+                    </span>
+                ),
+            },
+            {
+                id: "sites",
+                accessorKey: "listingCount",
+                header: ({ column }) => <SortableHeader column={column}>Spots</SortableHeader>,
+                cell: ({ row }) => (
+                    <span className="tabular-nums">{row.original.listingCount}</span>
                 ),
             },
             {
                 id: "kyc-status",
                 accessorKey: "kycStatus",
                 header: "KYC status",
-                cell: ({ row }) => <StatusBadge status={KYC_STATUS_META[row.original.kycStatus]} />,
-            },
-            {
-                id: "last-active",
-                accessorKey: "lastActive",
-                header: "Last active",
                 cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.lastActive}</span>
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <StatusBadge
+                            status={{
+                                label: kycLabel(row.original.kycStatus),
+                                tone: KYC_TONE[row.original.kycStatus] ?? "neutral",
+                            }}
+                        />
+                        {/* Lot A: a publisher stays KYC-verified while suspended; the chip says which. */}
+                        <SuspendedChip scopes={row.original.suspensionScopes} />
+                    </span>
                 ),
             },
             {
@@ -98,27 +138,18 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-52">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            {/* "Send KYC reminder", "Suspend account" and "Export
+                                CSV" used to live here and each only fired a
+                                success toast — no endpoint, nothing written.
+                                They are gone rather than left looking real;
+                                what remains navigates somewhere that acts. */}
                             <DropdownMenuItem
                                 onSelect={() => router.push(`/publishers/${row.original.id}`)}
                             >
                                 View details
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() =>
-                                    toast.success(`KYC reminder sent to ${row.original.owner}`)
-                                }
-                            >
-                                Send KYC reminder
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => router.push("/kyc")}>
+                            <DropdownMenuItem onSelect={() => router.push(`/kyc/${row.original.id}`)}>
                                 Review KYC
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                                className="text-danger focus:text-danger"
-                                onSelect={() => setSuspendTarget(row.original)}
-                            >
-                                Suspend account
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -132,26 +163,13 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
         <div className="space-y-5">
             <PageHeader
                 title="Publishers"
+                subtitle={`${publishers.length} on the marketplace`}
                 actions={
                     <>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="icon" className="size-9 bg-card">
-                                    <MoreHorizontal className="size-4" />
-                                    <span className="sr-only">More actions</span>
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                    onSelect={() => toast.success("Publisher list exported as CSV")}
-                                >
-                                    Export CSV
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => router.push("/publishers/import")}>
-                                    Import publishers
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        {/* Lot D (Q43): the legacy book as CSV — validated, then committed. */}
+                        <Button variant="outline" className="bg-card" asChild>
+                            <Link href="/publishers/import">Import publishers</Link>
+                        </Button>
                         <Button onClick={() => setCreateOpen(true)}>
                             <Plus className="mr-1.5 size-4" />
                             Add publisher
@@ -163,57 +181,29 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
             <DataTable
                 columns={columns}
                 data={filtered}
-                searchPlaceholder="Search publishers, PAN, GSTIN"
+                searchPlaceholder="Search publishers, identifier, city"
                 initialPageSize={10}
                 onRowClick={(publisher) => router.push(`/publishers/${publisher.id}`)}
                 toolbar={
-                    <Select
-                        value={kycFilter}
-                        onValueChange={(value) => setKycFilter(value as KycStatus | "all")}
-                    >
-                        <SelectTrigger className="h-9 w-[170px] bg-card">
+                    <Select value={kycFilter} onValueChange={setKycFilter}>
+                        <SelectTrigger className="h-9 w-[190px] bg-card">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">KYC: All</SelectItem>
-                            <SelectItem value="verified">Verified</SelectItem>
-                            <SelectItem value="under_review">Under review</SelectItem>
-                            <SelectItem value="rejected">Rejected</SelectItem>
-                            <SelectItem value="pending">Pending</SelectItem>
+                            {KYC_FILTERS.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                    {kycLabel(status)}
+                                </SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                 }
-                bulkActions={(rows, clear) => (
-                    <>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8"
-                            onClick={() => {
-                                toast.success(`KYC reminder sent to ${rows.length} publishers`);
-                                clear();
-                            }}
-                        >
-                            Send KYC reminder
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-danger hover:text-danger"
-                            onClick={() => {
-                                toast.success(`${rows.length} accounts suspended`);
-                                clear();
-                            }}
-                        >
-                            Suspend selected
-                        </Button>
-                    </>
-                )}
                 emptyState={
                     <EmptyState
                         icon={Tag}
                         title="No publishers yet"
-                        description="Publishers will appear here once they sign up or are added by an agent."
+                        description="Publishers appear here once they sign up or an agent onboards them."
                         action={
                             <Button onClick={() => setCreateOpen(true)}>
                                 <Plus className="mr-1.5 size-4" />
@@ -224,18 +214,11 @@ export function PublishersTable({ publishers }: PublishersTableProps) {
                 }
             />
 
-            <CreatePublisherDialog open={createOpen} onOpenChange={setCreateOpen} />
-
-            <ConfirmDialog
-                open={suspendTarget !== null}
-                onOpenChange={(open) => !open && setSuspendTarget(null)}
-                title="Suspend account?"
-                description="Access removal begins immediately. Existing payouts continue to process, and access can be restored within 30 days."
-                confirmLabel="Suspend account"
-                destructive
-                onConfirm={() => {
-                    toast.success(`${suspendTarget?.name} suspended`);
-                    setSuspendTarget(null);
+            <CreatePublisherDialog
+                open={createOpen}
+                onOpenChange={(open) => {
+                    setCreateOpen(open);
+                    if (!open) onChanged();
                 }}
             />
         </div>

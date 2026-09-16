@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { AccountView } from "./account-view";
+import { AccountLoader } from "./account-loader";
 
 export const metadata: Metadata = { title: "My Account" };
 
 export default function AccountPage() {
-    return <AccountView />;
+    return <AccountLoader />;
 }

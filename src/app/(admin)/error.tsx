@@ -1,12 +1,18 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { errorReference } from "@/lib/error-reference";
 
-const ERROR_REFERENCE = "ERR-7F3A21C9";
-
+/**
+ * The route-group error boundary. The reference is a short hash of the
+ * crash's message and stack (Q-C item 10) — stable for one crash, different
+ * for another — and the error is logged under it, so a report quoting the
+ * reference can be matched to the console line that carries the stack.
+ */
 export default function AdminError({
     error,
     reset,
@@ -14,7 +20,11 @@ export default function AdminError({
     error: Error & { digest?: string };
     reset: () => void;
 }) {
-    const reference = error.digest ? `ERR-${error.digest.slice(0, 8).toUpperCase()}` : ERROR_REFERENCE;
+    const reference = errorReference(error);
+
+    React.useEffect(() => {
+        console.error(`[${reference}]`, error);
+    }, [reference, error]);
 
     const copyReference = async () => {
         await navigator.clipboard.writeText(reference);

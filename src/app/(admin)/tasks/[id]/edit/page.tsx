@@ -1,18 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { api } from "@/services";
-import { TaskEditForm } from "./task-edit-form";
+import { TaskEditLoader } from "./task-edit-loader";
 
 export const metadata: Metadata = { title: "Edit Task" };
 
-export default async function TaskEditPage({
-    params,
-}: {
-    params: Promise<{ id: string }>;
-}) {
+/** The DR 10 frame `Edit task · /tasks/:id/edit`, over `PATCH /work/tasks/:id` (Lot AA). */
+export default async function TaskEditPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
-    const task = await api.tasks.get(id);
-    if (!task) notFound();
-
-    return <TaskEditForm task={task} />;
+    return <TaskEditLoader id={id} />;
 }

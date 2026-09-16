@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
+import { Suspense } from "react";
 import { KycNav } from "../kyc-nav";
-import { AdvertiserKycView } from "./advertiser-kyc-view";
+import { AdvertiserKycLoader } from "./advertiser-kyc-loader";
 
 export const metadata: Metadata = { title: "Advertiser KYC" };
 
-export default async function AdvertiserKycPage() {
-    const cases = await api.advertiserKyc.list();
-
+/** The advertiser KYC tab. Suspense because the loader keeps the state chip in `?state=`. */
+export default function AdvertiserKycPage() {
     return (
         <div className="space-y-5">
             <KycNav />
-            <AdvertiserKycView cases={cases} />
+            <Suspense fallback={null}>
+                <AdvertiserKycLoader />
+            </Suspense>
         </div>
     );
 }

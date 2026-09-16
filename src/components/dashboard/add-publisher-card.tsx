@@ -1,100 +1,53 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { PlugZap } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { AddPublisherForm, CreatedState } from "@/components/adx/add-publisher-form";
+import { isLive } from "@/lib/api-config";
+import type { CreatedPublisher } from "@/services/publishers";
 
-/** Dashboard quick form, invites a publisher with the KYC checklist. */
+/**
+ * The dashboard's "Add a publisher" card — `POST /publishers` from the desk.
+ *
+ * The frame's layout is kept: title and one-line subtitle, a two-column row,
+ * a select, one more field, the button bottom-right. The copy is not. It
+ * promised an activation link with a KYC checklist emailed to an owner, and
+ * nothing sends one — a publisher's identity is their mobile, and the owner
+ * claims the account by signing in with that number. So the fields are the
+ * schema's, the number is required, the email is not, and the success state
+ * says what actually happens next.
+ *
+ * "Attribute to agent" is Q29: an admin's publisher goes on nobody's book
+ * unless the admin names an agent, and the picker searches `GET /agents`
+ * rather than holding the roster.
+ */
 export function AddPublisherCard() {
-    const [businessName, setBusinessName] = React.useState("");
-    const [ownerEmail, setOwnerEmail] = React.useState("");
-    const [businessType, setBusinessType] = React.useState("individual");
-    const [note, setNote] = React.useState("");
-
-    const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        toast.success(`Invite sent to ${ownerEmail}`, {
-            description: `${businessName} will receive an activation link with the KYC checklist.`,
-        });
-        setBusinessName("");
-        setOwnerEmail("");
-        setNote("");
-    };
+    const live = isLive("supply");
+    const [created, setCreated] = React.useState<CreatedPublisher | null>(null);
 
     return (
         <Card className="flex flex-col rounded-lg border-border p-5 shadow-none">
             <div>
                 <h2 className="text-base font-semibold text-foreground">Add a publisher</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                    Sends an activation link with the KYC checklist
+                    Opens the account now; the owner claims it by signing in with their number
                 </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-4 flex flex-1 flex-col gap-4">
-                <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                        <Label htmlFor="qa-business">Business name</Label>
-                        <Input
-                            id="qa-business"
-                            required
-                            value={businessName}
-                            onChange={(event) => setBusinessName(event.target.value)}
-                            placeholder="e.g. Sharma Hoardings"
-                            className="h-9"
-                        />
-                    </div>
-                    <div className="space-y-1.5">
-                        <Label htmlFor="qa-email">Owner email</Label>
-                        <Input
-                            id="qa-email"
-                            type="email"
-                            required
-                            value={ownerEmail}
-                            onChange={(event) => setOwnerEmail(event.target.value)}
-                            placeholder="owner@business.in"
-                            className="h-9"
-                        />
-                    </div>
+            {!live ? (
+                <div className="mt-4 flex flex-1 items-start gap-3 rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                    <PlugZap className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    <p>
+                        Publishers are opened on the API. Set <code className="font-mono text-xs">NEXT_PUBLIC_USE_API=true</code>{" "}
+                        and point the console at the ADX backend to use this card.
+                    </p>
                 </div>
-
-                <div className="space-y-1.5">
-                    <Label>Business type</Label>
-                    <Select value={businessType} onValueChange={setBusinessType}>
-                        <SelectTrigger className="h-9">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="individual">Individual</SelectItem>
-                            <SelectItem value="company">Company</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                <div className="space-y-1.5">
-                    <Label htmlFor="qa-note">Note</Label>
-                    <Input
-                        id="qa-note"
-                        value={note}
-                        onChange={(event) => setNote(event.target.value)}
-                        placeholder="Optional note for the activation email"
-                        className="h-9"
-                    />
-                </div>
-
-                <div className="mt-auto flex justify-end pt-1">
-                    <Button type="submit">Send invite</Button>
-                </div>
-            </form>
+            ) : created ? (
+                <CreatedState publisher={created} onAnother={() => setCreated(null)} />
+            ) : (
+                <AddPublisherForm onCreated={setCreated} />
+            )}
         </Card>
     );
 }

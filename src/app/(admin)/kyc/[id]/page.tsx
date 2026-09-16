@@ -1,17 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { api } from "@/services";
-import { KycWorkbench } from "./kyc-workbench";
+import { KycCaseLoader } from "./kyc-case-loader";
 
 export const metadata: Metadata = { title: "KYC Review" };
 
-export default async function KycCasePage({
-    params,
-}: {
-    params: Promise<{ id: string }>;
-}) {
+/** D7 / Lot D — one publisher's case: the documents, the per-tile decisions, the Digio session, the liveness video. */
+export default async function KycCasePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
-    const kycCase = await api.kyc.get(id);
-    if (!kycCase) notFound();
-    return <KycWorkbench kycCase={kycCase} />;
+    return <KycCaseLoader publisherId={id} />;
 }

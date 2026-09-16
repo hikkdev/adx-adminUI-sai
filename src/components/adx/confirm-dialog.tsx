@@ -23,6 +23,10 @@ interface ConfirmDialogProps {
     confirmLabel?: string;
     cancelLabel?: string;
     destructive?: boolean;
+    /** Blocks the action while an async confirm is in flight. */
+    busy?: boolean;
+    /** Blocks it because the body is incomplete — an unpicked target, say. */
+    disabled?: boolean;
     onConfirm: () => void;
 }
 
@@ -36,6 +40,8 @@ export function ConfirmDialog({
     confirmLabel = "Confirm",
     cancelLabel = "Cancel",
     destructive = false,
+    busy = false,
+    disabled = false,
     onConfirm,
 }: ConfirmDialogProps) {
     return (
@@ -50,12 +56,12 @@ export function ConfirmDialog({
                     <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
                     <AlertDialogAction
                         className={cn(
-                            destructive &&
-                                buttonVariants({ variant: "destructive" })
+                            destructive && buttonVariants({ variant: "destructive" })
                         )}
+                        disabled={busy || disabled}
                         onClick={onConfirm}
                     >
-                        {confirmLabel}
+                        {busy ? "Working…" : confirmLabel}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

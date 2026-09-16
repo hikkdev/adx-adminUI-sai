@@ -12,11 +12,17 @@ import { GoogleSignInButton } from "@/components/adx/google-sign-in-button";
 import { TurnstileWidget } from "@/components/adx/turnstile-widget";
 import { ApiError } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
-import { useAuth } from "@/lib/auth";
+import { holdsAdmin, useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
     const router = useRouter();
-    const { signIn, signInWithGoogle } = useAuth();
+    const { signIn, signInWithGoogle, user, loading } = useAuth();
+
+    /* An operator whose session is already valid — the tab was reopened, or
+       a bounce landed here with tokens set — is not asked to sign in again. */
+    React.useEffect(() => {
+        if (!loading && holdsAdmin(user)) router.replace("/dashboard");
+    }, [loading, user, router]);
 
     const [email, setEmail] = React.useState("");
     const [password, setPassword] = React.useState("");
@@ -31,10 +37,7 @@ export default function LoginPage() {
     const [slow, setSlow] = React.useState(false);
 
     React.useEffect(() => {
-        if (!submitting && !googleBusy) {
-            setSlow(false);
-            return;
-        }
+        if (!submitting && !googleBusy) return;
         const timer = setTimeout(() => setSlow(true), 4000);
         return () => clearTimeout(timer);
     }, [submitting, googleBusy]);
@@ -42,10 +45,14 @@ export default function LoginPage() {
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setSubmitting(true);
+        setSlow(false);
         setError(null);
         try {
-            await signIn(email, password, captchaToken);
-            router.replace("/dashboard");
+            /* An admin gets a challenge, not tokens: signIn has already sent
+               them to /verify, and replacing to /dashboard here would bounce
+               them straight back to this form. */
+            const outcome = await signIn(email, password, captchaToken);
+            if (outcome === "session") router.replace("/dashboard");
         } catch (caught) {
             setError(
                 caught instanceof ApiError
@@ -61,10 +68,11 @@ export default function LoginPage() {
     const handleGoogleCredential = React.useCallback(
         async (idToken: string) => {
             setGoogleBusy(true);
+            setSlow(false);
             setError(null);
             try {
-                await signInWithGoogle(idToken);
-                router.replace("/dashboard");
+                const outcome = await signInWithGoogle(idToken);
+                if (outcome === "session") router.replace("/dashboard");
             } catch (caught) {
                 setError(
                     caught instanceof ApiError

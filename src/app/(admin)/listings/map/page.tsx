@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { InventoryMap } from "./inventory-map";
+import { InventoryMapLoader } from "./inventory-map-loader";
 
 export const metadata: Metadata = { title: "Inventory Map" };
 
 export default function InventoryMapPage() {
-    return <InventoryMap />;
+    return <InventoryMapLoader />;
 }

@@ -13,7 +13,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
-import { currentAdmin } from "@/data/platform";
+import { PresenceDot } from "@/components/adx/presence-dot";
 import { useAuth } from "@/lib/auth";
 
 interface HeaderProps {
@@ -31,8 +31,11 @@ export function Header({
     unreadCount,
 }: HeaderProps) {
     const router = useRouter();
+    /* The signed-in operator, off `GET /users/me` through the auth context;
+       the header only mounts inside <RequireAuth>, so a null here is a
+       render between sign-out and the redirect, not a state to draw. */
     const { user, signOut } = useAuth();
-    const account = user ?? currentAdmin;
+    const account = user ?? { name: "ADX user", email: "" };
 
     return (
         <header className="fixed inset-x-0 top-0 z-40 flex h-[57px] items-center gap-3 border-b bg-card px-4">
@@ -63,6 +66,10 @@ export function Header({
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                {/* Lot I: whether this operator is on the live desk, and how
+                    much they are holding. Draws nothing when the desk is off. */}
+                <PresenceDot />
+
                 <Button
                     variant="ghost"
                     size="icon"

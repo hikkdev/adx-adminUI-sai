@@ -4,7 +4,6 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -17,15 +16,21 @@ import { DataTable, SortableHeader, selectionColumn } from "@/components/adx/dat
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { formatCompactINR } from "@/lib/format";
+import { SuspendedChip } from "@/components/adx/suspended-chip";
+import { formatDate } from "@/lib/format";
+import { ADVERTISER_TYPE_LABELS } from "@/types";
 import { ADVERTISER_STATUS_META, type Advertiser } from "@/types";
+import { CreateAdvertiserDialog } from "./create-advertiser-dialog";
 
 interface AdvertisersTableProps {
     advertisers: Advertiser[];
+    /** Re-read after an account is opened from the desk. */
+    onChanged: () => void;
 }
 
-export function AdvertisersTable({ advertisers }: AdvertisersTableProps) {
+export function AdvertisersTable({ advertisers, onChanged }: AdvertisersTableProps) {
     const router = useRouter();
+    const [creating, setCreating] = React.useState(false);
 
     const columns = React.useMemo<ColumnDef<Advertiser>[]>(
         () => [
@@ -39,7 +44,15 @@ export function AdvertisersTable({ advertisers }: AdvertisersTableProps) {
                         <InitialsAvatar name={row.original.name} size="sm" />
                         <div>
                             <p className="font-medium text-foreground">{row.original.name}</p>
-                            <p className="text-xs text-muted-foreground">{row.original.industry}</p>
+                            {row.original.displayId ? (
+                                <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                                    {row.original.displayId}
+                                </p>
+                            ) : (
+                                <p className="text-xs text-muted-foreground">
+                                    {row.original.companyName ?? ADVERTISER_TYPE_LABELS[row.original.type]}
+                                </p>
+                            )}
                         </div>
                     </div>
                 ),
@@ -57,31 +70,45 @@ export function AdvertisersTable({ advertisers }: AdvertisersTableProps) {
                 accessorKey: "status",
                 header: "Status",
                 cell: ({ row }) => (
-                    <StatusBadge status={ADVERTISER_STATUS_META[row.original.status]} />
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={ADVERTISER_STATUS_META[row.original.status]} />
+                        <SuspendedChip scopes={row.original.suspensionScopes} />
+                    </span>
                 ),
             },
+            /*
+             * "Active campaigns", "Total spend" and "Last campaign activity"
+             * used to sit here. There is no campaign table to count, no
+             * aggregate that computes spend, and nothing tracks last activity —
+             * so each was a number about somebody's business that nothing
+             * checked. These three the API can actually answer.
+             */
             {
-                id: "campaigns",
-                accessorKey: "activeCampaigns",
-                header: ({ column }) => (
-                    <SortableHeader column={column}>Active campaigns</SortableHeader>
-                ),
-                cell: ({ row }) => row.original.activeCampaigns,
-            },
-            {
-                id: "spend",
-                accessorKey: "totalSpend",
-                header: ({ column }) => <SortableHeader column={column}>Total spend</SortableHeader>,
+                id: "type",
+                accessorKey: "type",
+                header: "Type",
                 cell: ({ row }) => (
-                    <span className="font-medium">{formatCompactINR(row.original.totalSpend)}</span>
+                    <span className="text-muted-foreground">
+                        {ADVERTISER_TYPE_LABELS[row.original.type]}
+                    </span>
                 ),
             },
             {
-                id: "last-activity",
-                accessorKey: "lastActive",
-                header: "Last campaign activity",
+                id: "city",
+                accessorKey: "city",
+                header: "City",
                 cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.lastActive}</span>
+                    <span className="text-muted-foreground">{row.original.city ?? "—"}</span>
+                ),
+            },
+            {
+                id: "joined",
+                accessorKey: "joinedAt",
+                header: ({ column }) => <SortableHeader column={column}>Joined</SortableHeader>,
+                cell: ({ row }) => (
+                    <span className="text-muted-foreground">
+                        {formatDate(row.original.joinedAt)}
+                    </span>
                 ),
             },
             {
@@ -103,14 +130,6 @@ export function AdvertisersTable({ advertisers }: AdvertisersTableProps) {
                             >
                                 View details
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => router.push("/campaigns")}>
-                                View campaigns
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => toast.success(`Statement emailed to ${row.original.contact}`)}
-                            >
-                                Email statement
-                            </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ),
@@ -124,12 +143,17 @@ export function AdvertisersTable({ advertisers }: AdvertisersTableProps) {
             <PageHeader
                 title="Advertisers"
                 actions={
-                    <Button onClick={() => toast.info("Advertisers join via the brand portal, send an invite from there.")}>
+                    /* Wired to `POST /advertisers { onBehalf: true }` — the
+                       same route the field app uses to open an account at
+                       the door — rather than the toast that used to say
+                       advertisers join elsewhere. */
+                    <Button onClick={() => setCreating(true)}>
                         <Plus className="mr-1.5 size-4" />
                         Add advertiser
                     </Button>
                 }
             />
+            <CreateAdvertiserDialog open={creating} onOpenChange={setCreating} onCreated={onChanged} />
             <DataTable
                 columns={columns}
                 data={advertisers}

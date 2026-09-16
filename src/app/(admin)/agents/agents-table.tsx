@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -13,117 +13,125 @@ import {
     DropdownMenuLabel,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { DataTable, SortableHeader, selectionColumn } from "@/components/adx/data-table";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { SuspendedChip } from "@/components/adx/suspended-chip";
+import { formatDate } from "@/lib/format";
+import { hoursLabel, tierLabel, workingDaysLabel } from "@/services/agents";
 import { AGENT_STATUS_META, type Agent } from "@/types";
+import { CreateAgentDialog } from "./create-agent-dialog";
 
 interface AgentsTableProps {
     agents: Agent[];
+    /** Refetch the roster, so a created agent appears without a reload. */
+    onCreated: () => void;
 }
 
-const ZONES = [
-    "South Bengaluru",
-    "North Bengaluru",
-    "Mumbai West",
-    "Delhi NCR",
-    "Chennai Central",
-    "Hyderabad East",
-    "Pune City",
-    "Kochi Metro",
-];
-
-export function AgentsTable({ agents: seed }: AgentsTableProps) {
+/**
+ * The roster, as `GET /agents` lists it.
+ *
+ * The wireframe's columns were Agent / Zone / Works from / Publishers / Orders
+ * MTD / Status. Zone and works-from are real since D5 — the home zone and
+ * territory ops records, and the days and hours the agent works; publishers
+ * onboarded and orders this month are aggregates nothing computes, and stay
+ * gone rather than filled with a figure about somebody's work that nothing
+ * checked — the rule the orders board set. The zone-transfer and
+ * payout-summary actions went with them: both were toasts over nothing.
+ */
+export function AgentsTable({ agents, onCreated }: AgentsTableProps) {
     const router = useRouter();
-    const [agents, setAgents] = React.useState(seed);
-    const [transferId, setTransferId] = React.useState<string | null>(null);
-    const [targetZone, setTargetZone] = React.useState(ZONES[0]);
-
-    const transferring = agents.find((agent) => agent.id === transferId) ?? null;
-
-    const applyTransfer = () => {
-        if (!transferring) return;
-        const previous = agents;
-        setAgents((current) =>
-            current.map((agent) =>
-                agent.id === transferring.id ? { ...agent, zone: targetZone } : agent
-            )
-        );
-        setTransferId(null);
-        toast.success(`${transferring.name} moved to ${targetZone}`, {
-            action: { label: "Undo", onClick: () => setAgents(previous) },
-        });
-    };
+    const [creating, setCreating] = React.useState(false);
 
     const columns = React.useMemo<ColumnDef<Agent>[]>(
         () => [
             selectionColumn<Agent>(),
             {
                 id: "agent",
-                accessorKey: "name",
+                accessorFn: (agent) => agent.name ?? agent.mobile,
                 header: ({ column }) => <SortableHeader column={column}>Agent</SortableHeader>,
+                cell: ({ row }) => {
+                    const label = row.original.name ?? row.original.mobile;
+                    return (
+                        <div className="flex items-center gap-2.5">
+                            <InitialsAvatar name={label} size="sm" />
+                            <div>
+                                <p className="font-medium text-foreground">{label}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {row.original.displayId ?? "No identifier yet"}
+                                </p>
+                            </div>
+                        </div>
+                    );
+                },
+            },
+            {
+                id: "mobile",
+                accessorKey: "mobile",
+                header: "Mobile",
                 cell: ({ row }) => (
-                    <div className="flex items-center gap-2.5">
-                        <InitialsAvatar name={row.original.name} size="sm" />
-                        <span className="font-medium text-foreground">{row.original.name}</span>
+                    <span className="text-muted-foreground">{row.original.mobile}</span>
+                ),
+            },
+            {
+                id: "city",
+                accessorFn: (agent) => [agent.city, agent.state].filter(Boolean).join(", "),
+                header: ({ column }) => <SortableHeader column={column}>City</SortableHeader>,
+                cell: ({ row }) => {
+                    const place = [row.original.city, row.original.state].filter(Boolean).join(", ");
+                    return <span className="text-foreground">{place || "—"}</span>;
+                },
+            },
+            {
+                id: "zone",
+                accessorFn: (agent) => agent.homeZone ?? agent.territory ?? "",
+                header: ({ column }) => <SortableHeader column={column}>Zone</SortableHeader>,
+                cell: ({ row }) => (
+                    <div>
+                        <p className="text-foreground">{row.original.homeZone ?? "—"}</p>
+                        {row.original.territory && (
+                            <p className="text-xs text-muted-foreground">{row.original.territory}</p>
+                        )}
                     </div>
                 ),
             },
             {
-                id: "zone",
-                accessorKey: "zone",
-                header: ({ column }) => <SortableHeader column={column}>Zone</SortableHeader>,
-                cell: ({ row }) => (
-                    <span className="font-medium text-foreground">{row.original.zone}</span>
-                ),
-            },
-            {
-                id: "works-from",
-                accessorKey: "worksFrom",
-                header: "Works from",
+                id: "works",
+                header: "Works",
                 cell: ({ row }) => (
                     <div>
-                        <p className="text-foreground">{row.original.worksFrom}</p>
+                        <p className="text-foreground">{workingDaysLabel(row.original.workingDays)}</p>
                         <p className="text-xs text-muted-foreground">
-                            {row.original.area}, {row.original.city}
+                            {hoursLabel(row.original.hoursFrom, row.original.hoursTo)}
                         </p>
                     </div>
                 ),
             },
             {
-                id: "publishers",
-                accessorKey: "publishersOnboarded",
-                header: ({ column }) => <SortableHeader column={column}>Publishers</SortableHeader>,
-                cell: ({ row }) => row.original.publishersOnboarded,
+                id: "tier",
+                accessorKey: "tier",
+                header: ({ column }) => <SortableHeader column={column}>Tier</SortableHeader>,
+                cell: ({ row }) => tierLabel(row.original.tier, row.original.tierLevel),
             },
             {
-                id: "orders-mtd",
-                accessorKey: "ordersCompleted",
-                header: ({ column }) => <SortableHeader column={column}>Orders MTD</SortableHeader>,
-                cell: ({ row }) => row.original.ordersCompleted,
+                id: "joined",
+                accessorKey: "joinedAt",
+                header: ({ column }) => <SortableHeader column={column}>Joined</SortableHeader>,
+                cell: ({ row }) => formatDate(row.original.joinedAt),
             },
             {
                 id: "status",
                 accessorKey: "status",
                 header: "Status",
-                cell: ({ row }) => <StatusBadge status={AGENT_STATUS_META[row.original.status]} />,
+                cell: ({ row }) => (
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={AGENT_STATUS_META[row.original.status]} />
+                        {/* Lot A: only BLOCK_NEW moves the profile status; a frozen
+                            wallet or a blocked sign-in shows here and nowhere else on the row. */}
+                        {row.original.status !== "suspended" && <SuspendedChip scopes={row.original.suspensionScopes} />}
+                    </span>
+                ),
             },
             {
                 id: "actions",
@@ -145,21 +153,6 @@ export function AgentsTable({ agents: seed }: AgentsTableProps) {
                             <DropdownMenuItem onSelect={() => router.push("/orders")}>
                                 View orders
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    setTargetZone(
-                                        ZONES.find((zone) => zone !== row.original.zone) ?? ZONES[0]
-                                    );
-                                    setTransferId(row.original.id);
-                                }}
-                            >
-                                Transfer zone
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => toast.success(`Payout summary sent to ${row.original.name}`)}
-                            >
-                                Send payout summary
-                            </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ),
@@ -173,51 +166,26 @@ export function AgentsTable({ agents: seed }: AgentsTableProps) {
             <PageHeader
                 title="Agents"
                 actions={
-                    <Button onClick={() => toast.info("Agents are onboarded through the ADX field app.")}>
-                        <Plus className="mr-1.5 size-4" />
-                        Add agent
-                    </Button>
+                    <>
+                        {/* Lot D (Q131): the intake — submitted, reviewed, approved into an agent through the same door. */}
+                        <Button variant="outline" className="bg-card" asChild>
+                            <Link href="/onboarding/submissions?userType=AGENT">Onboard</Link>
+                        </Button>
+                        <Button onClick={() => setCreating(true)}>
+                            <Plus className="mr-1.5 size-4" />
+                            Add agent
+                        </Button>
+                    </>
                 }
             />
             <DataTable
                 columns={columns}
                 data={agents}
-                searchPlaceholder="Search agents, territory, phone"
+                searchPlaceholder="Search agents by name, number or city"
                 initialPageSize={10}
                 onRowClick={(agent) => router.push(`/agents/${agent.id}`)}
             />
-
-            <Dialog open={transferId !== null} onOpenChange={(open) => !open && setTransferId(null)}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle>Transfer {transferring?.name}</DialogTitle>
-                        <DialogDescription>
-                            Current zone: {transferring?.zone}. Open orders stay with the agent.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-1.5 py-1">
-                        <Label htmlFor="agent-zone">Move to</Label>
-                        <Select value={targetZone} onValueChange={setTargetZone}>
-                            <SelectTrigger id="agent-zone">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {ZONES.filter((zone) => zone !== transferring?.zone).map((zone) => (
-                                    <SelectItem key={zone} value={zone}>
-                                        {zone}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" className="bg-card" onClick={() => setTransferId(null)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={applyTransfer}>Transfer</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <CreateAgentDialog open={creating} onOpenChange={setCreating} onCreated={onCreated} />
         </div>
     );
 }

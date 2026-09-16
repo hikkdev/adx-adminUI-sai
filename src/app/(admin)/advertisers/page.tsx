@@ -1,10 +1,19 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { AdvertisersTable } from "./advertisers-table";
+import { Suspense } from "react";
+import { AdvertisersOverviewView } from "./advertisers-overview";
 
 export const metadata: Metadata = { title: "Advertisers" };
 
-export default async function AdvertisersPage() {
-    const advertisers = await api.advertisers.list();
-    return <AdvertisersTable advertisers={advertisers} />;
+/**
+ * The section's landing tab — package O-C: the overview over
+ * `GET /section-overviews/advertisers`. The directory moved to
+ * `/advertisers/directory`; the activation funnel is the tab beside it.
+ * Suspense because the loader keeps the window in the URL.
+ */
+export default function AdvertisersPage() {
+    return (
+        <Suspense fallback={null}>
+            <AdvertisersOverviewView />
+        </Suspense>
+    );
 }

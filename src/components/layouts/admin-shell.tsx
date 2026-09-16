@@ -3,10 +3,17 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { EnrolmentGate } from "./enrolment-gate";
 import { Header } from "./header";
 import { Sidebar } from "./sidebar";
-import { seedNotifications } from "@/data/platform";
-import type { AppNotification } from "@/types";
+import { useApiResource } from "@/lib/use-api-resource";
+import {
+    notificationService,
+    notificationsReadApi,
+    type NotificationFeed,
+    type NotificationRow,
+} from "@/services/notifications";
 
 /**
  * Two overlays that are closed on arrival but were being bundled into every
@@ -25,7 +32,9 @@ const NotificationsDrawer = dynamic(
 
 /**
  * Admin application frame: fixed header, responsive sidebar,
- * global search palette, and the notifications drawer.
+ * global search palette, the notifications drawer, and (Lot K2) the
+ * enrolment gate that holds a session the policy requires an authenticator
+ * app of until one is set up.
  */
 export function AdminShell({ children }: { children: React.ReactNode }) {
     const [collapsed, setCollapsed] = React.useState(false);
@@ -37,16 +46,43 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     const [searchUsed, setSearchUsed] = React.useState(false);
     const [notificationsUsed, setNotificationsUsed] = React.useState(false);
 
-    React.useEffect(() => {
-        if (searchOpen) setSearchUsed(true);
-    }, [searchOpen]);
-    React.useEffect(() => {
-        if (notificationsOpen) setNotificationsUsed(true);
-    }, [notificationsOpen]);
-    const [notifications, setNotifications] =
-        React.useState<AppNotification[]>(seedNotifications);
+    const openSearch = () => {
+        setSearchUsed(true);
+        setSearchOpen(true);
+    };
+    /* The operator's feed — `GET /notifications`, scoped to the caller by
+       the server. Read once on arrival for the bell's count and again each
+       time the drawer opens, so the number is never older than the last
+       look. With the API off there is nothing to read and the bell is quiet. */
+    const live = notificationsReadApi();
+    const feed = useApiResource<NotificationFeed>(`shell:notifications:${live}`, () =>
+        live
+            ? notificationService.list({ limit: 20 })
+            : Promise.resolve({ items: [], unreadCount: 0, readCount: null })
+    );
+    const notifications = feed.data?.items ?? [];
+    const unreadCount = feed.data?.unreadCount ?? 0;
 
-    const unreadCount = notifications.filter((notification) => !notification.read).length;
+    const openNotifications = () => {
+        setNotificationsUsed(true);
+        setNotificationsOpen(true);
+        if (live) feed.reload();
+    };
+
+    const markAllRead = async () => {
+        try {
+            await notificationService.markAllRead();
+            feed.reload();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not mark the feed read.");
+        }
+    };
+
+    /** A row opened from the drawer is read; a failure is not worth a toast on the way to the record. */
+    const markOpened = (notification: NotificationRow) => {
+        if (notification.read) return;
+        void notificationService.markRead(notification.id).then(feed.reload, () => undefined);
+    };
 
     const handleToggleSidebar = () => {
         if (window.matchMedia("(min-width: 768px)").matches) {
@@ -60,8 +96,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="min-h-screen bg-canvas">
             <Header
                 onToggleSidebar={handleToggleSidebar}
-                onOpenSearch={() => setSearchOpen(true)}
-                onOpenNotifications={() => setNotificationsOpen(true)}
+                onOpenSearch={openSearch}
+                onOpenNotifications={openNotifications}
                 unreadCount={unreadCount}
             />
 
@@ -88,17 +124,20 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <div className="mx-auto max-w-[1680px] p-4 sm:p-6">{children}</div>
             </main>
 
+            <EnrolmentGate />
+
             {searchUsed && <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />}
             {notificationsUsed && (
                 <NotificationsDrawer
                     open={notificationsOpen}
                     onOpenChange={setNotificationsOpen}
                     notifications={notifications}
-                    onMarkAllRead={() =>
-                        setNotifications((items) =>
-                            items.map((item) => ({ ...item, read: true }))
-                        )
-                    }
+                    unreadCount={unreadCount}
+                    loading={feed.loading}
+                    error={feed.error}
+                    live={live}
+                    onMarkAllRead={() => void markAllRead()}
+                    onOpen={markOpened}
                 />
             )}
         </div>

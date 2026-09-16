@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { BookingsTable } from "./bookings-table";
+import { BookingsLoader } from "./bookings-loader";
 
 export const metadata: Metadata = { title: "Bookings" };
 
-export default async function BookingsPage() {
-    const bookings = await api.bookings.list();
-    return <BookingsTable bookings={bookings} />;
+/**
+ * A client loader rather than an async server fetch: the API client keeps its
+ * token in the browser, so the orders have to be read from there.
+ */
+export default function BookingsPage() {
+    return <BookingsLoader />;
 }

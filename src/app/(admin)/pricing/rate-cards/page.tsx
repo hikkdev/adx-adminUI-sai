@@ -1,5 +1,8 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import { RateCardsLoader } from "./rate-cards-loader";
 
-export default function RedirectToPricingModel() {
-    redirect("/pricing/model");
+export const metadata: Metadata = { title: "Rate cards" };
+
+export default function RateCardsPage() {
+    return <RateCardsLoader />;
 }

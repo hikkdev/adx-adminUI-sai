@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
-import { api } from "@/services";
-import { ScheduleView } from "./schedule-view";
+import { ScheduleLoader } from "./schedule-loader";
 
 export const metadata: Metadata = { title: "Schedule" };
 
-export default async function SchedulePage() {
-    const [entries, log] = await Promise.all([api.schedule.entries(), api.schedule.log()]);
-
-    return <ScheduleView initialEntries={entries} initialLog={log} />;
+/** The DR 10 frame `Schedule · /schedule`, over Lot E's `schedule` module. */
+export default function SchedulePage() {
+    return <ScheduleLoader />;
 }

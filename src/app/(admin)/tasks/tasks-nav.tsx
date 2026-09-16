@@ -8,6 +8,7 @@ export function TasksNav() {
                 { label: "Overview", href: "/tasks", exact: true },
                 { label: "Board", href: "/tasks/board" },
                 { label: "Risk & issues", href: "/tasks/issues" },
+                { label: "Projects", href: "/tasks/projects" },
             ]}
         />
     );

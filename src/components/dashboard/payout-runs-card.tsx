@@ -2,32 +2,48 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { formatINR } from "@/lib/format";
-import { PAYOUT_BATCH_STATUS_META, type PayoutBatch } from "@/types";
+import { formatMoney } from "@/lib/format";
+import { useApiResource } from "@/lib/use-api-resource";
+import {
+    PAYOUT_BATCH_STATUS_META,
+    financeReadsApi,
+    financeService,
+    type PayoutBatch,
+} from "@/services/finance";
 
-interface PayoutRunsCardProps {
-    batches: PayoutBatch[];
-}
+/** Three rows, as the frame draws. */
+const SHOWN = 3;
 
-/** Dashboard "Payout runs" widget, the last few payout batches. */
-export function PayoutRunsCard({ batches }: PayoutRunsCardProps) {
+/**
+ * Dashboard "Payout runs" widget — the last few payout batches, read from
+ * `GET /finance/payout-batches`.
+ *
+ * The frame's layout is kept: title, one-line subtitle, the filter box, a
+ * three-row table, "View all" bottom right. A draft is not a run and is not
+ * listed. The row's "…" menu is gone: it offered "Download report", which
+ * called nothing, and "View batch", which is what the row itself now links
+ * to. The footer's "Runs weekly · Fridays 6 PM IST" is gone too — no schedule
+ * runs a batch; a person builds one and a second person approves it.
+ */
+export function PayoutRunsCard() {
+    const live = financeReadsApi();
     const [filter, setFilter] = React.useState("");
 
-    const visible = batches
-        .filter((batch) => batch.status !== "draft")
-        .filter((batch) => `#${batch.number}`.includes(filter.trim().toLowerCase()))
-        .slice(0, 3);
+    const resource = useApiResource<PayoutBatch[]>(`dashboard:payout-runs:${live}`, async () => {
+        if (!live) return [];
+        // A handful more than shown, so hiding the drafts still leaves three.
+        const page = await financeService.payoutBatches({ pageSize: 10 });
+        return page.items.filter((batch) => batch.status !== "DRAFT");
+    });
+
+    const needle = filter.trim().toLowerCase();
+    const visible = (resource.data ?? [])
+        .filter((batch) => !needle || batch.reference.toLowerCase().includes(needle))
+        .slice(0, SHOWN);
 
     return (
         <Card className="flex flex-col rounded-lg border-border p-5 shadow-none">
@@ -42,58 +58,58 @@ export function PayoutRunsCard({ batches }: PayoutRunsCardProps) {
                     onChange={(event) => setFilter(event.target.value)}
                     placeholder="Filter batches…"
                     className="h-9"
+                    disabled={!live}
                 />
             </div>
 
-            <div className="mt-3 overflow-hidden rounded-md border">
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
-                            <th className="px-3 py-2">Status</th>
-                            <th className="px-3 py-2">Batch</th>
-                            <th className="px-3 py-2 text-right">Amount</th>
-                            <th className="w-8 px-2 py-2" />
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {visible.map((batch) => (
-                            <tr key={batch.id} className="border-b last:border-0">
-                                <td className="px-3 py-2.5">
-                                    <StatusBadge status={PAYOUT_BATCH_STATUS_META[batch.status]} />
-                                </td>
-                                <td className="px-3 py-2.5">
-                                    <span className="font-medium text-foreground">#{batch.number}</span>{" "}
-                                    <span className="text-muted-foreground">{batch.payouts} payouts</span>
-                                </td>
-                                <td className="px-3 py-2.5 text-right font-medium">
-                                    {formatINR(batch.amount)}
-                                </td>
-                                <td className="px-2 py-2.5">
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="size-7">
-                                                <MoreHorizontal className="size-4" />
-                                                <span className="sr-only">Batch actions</span>
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem asChild>
-                                                <Link href="/finance/payouts">View batch</Link>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild>
-                                                <Link href="/finance/payouts">Download report</Link>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                </td>
+            {!live ? (
+                <p className="mt-4 text-sm text-muted-foreground">
+                    Payout batches are read from the API. Nothing to show while it is off.
+                </p>
+            ) : resource.error ? (
+                <p className="mt-4 text-sm text-muted-foreground">{resource.error}</p>
+            ) : resource.data && visible.length === 0 ? (
+                <p className="mt-4 text-sm text-muted-foreground">
+                    {needle ? "No batch matches that." : "No batch has been run yet."}
+                </p>
+            ) : (
+                <div className="mt-3 overflow-hidden rounded-md border">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
+                                <th className="px-3 py-2">Status</th>
+                                <th className="px-3 py-2">Batch</th>
+                                <th className="px-3 py-2 text-right">Amount</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody>
+                            {visible.map((batch) => (
+                                <tr key={batch.id} className="border-b last:border-0">
+                                    <td className="px-3 py-2.5">
+                                        <StatusBadge status={PAYOUT_BATCH_STATUS_META[batch.status]} />
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                        <Link
+                                            href={`/finance/payouts/batch/${batch.id}`}
+                                            className="font-medium text-foreground hover:underline"
+                                        >
+                                            {batch.reference}
+                                        </Link>{" "}
+                                        <span className="text-muted-foreground">
+                                            {batch.lineCount} {batch.lineCount === 1 ? "payout" : "payouts"}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                                        {formatMoney(batch.totalNet)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
 
-            <div className="mt-auto flex items-center justify-between pt-4">
-                <p className="text-xs text-muted-foreground">Runs weekly · Fridays 6 PM IST</p>
+            <div className="mt-auto flex items-center justify-end pt-4">
                 <Button variant="outline" size="sm" className="h-8" asChild>
                     <Link href="/finance/payouts">View all</Link>
                 </Button>
