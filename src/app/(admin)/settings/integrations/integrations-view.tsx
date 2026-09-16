@@ -27,6 +27,7 @@ import { EmailDoorCard, SmsRoutingCard, ThirdRailCard, railBadges } from "./mess
 import { AudienceSection } from "./audience-section";
 import { MapsSection } from "./maps-section";
 import { PushSection } from "./push-section";
+import { QrEngineSection } from "./qr-engine-section";
 import { StaffToolsSection } from "./staff-tools-section";
 
 interface IntegrationsViewProps {
@@ -254,6 +255,9 @@ export function IntegrationsView({ settings, sms, onChanged }: IntegrationsViewP
 
             {/* G7 (Q109) / Y-C: the audience vendors — both switches off until ops choose — and the policy that blends them. */}
             <AudienceSection stored={settings.audience} onChanged={onChanged} />
+
+            {/* QR-1: the QR engine — Local, or GenQR for styled print artwork and hosted hoarding codes. */}
+            <QrEngineSection stored={settings.qrEngine} onChanged={onChanged} />
 
             {/* G6 (Q103/133): push through FCM — the configured state as far as any read carries it. */}
             <PushSection push={settings.push} />

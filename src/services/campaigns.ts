@@ -211,6 +211,14 @@ export const campaignService = {
     /** The codes minted at authorisation, with their scan and click counts. */
     trackingCodes: (id: string) => http.get<TrackingCode[]>(`/campaigns/${id}/tracking-codes`),
 
+    /**
+     * QR-1: puts the QR engine's hosted short code in front of every code
+     * not yet hosted — for a campaign paid for while the engine was down or
+     * before it was configured. Ops only; idempotent; the engine's own
+     * refusal comes back as it is.
+     */
+    syncTrackingCodesWithEngine: (id: string) => http.post<{ linked: number; codes: TrackingCode[] }>(`/campaigns/${id}/tracking-codes/sync-engine`, {}),
+
     /** What the campaign did — scans, clicks and the landing-page interactions (Lot D, Q7). */
     analytics: (id: string) => http.get<CampaignAnalytics>(`/campaigns/${id}/analytics`),
 
@@ -225,6 +233,10 @@ export const campaignService = {
  */
 export const trackingCodeImageUrl = (campaignId: string, code: string, size = 240): string =>
     `/campaigns/${campaignId}/tracking-codes/${encodeURIComponent(code)}/image.png?size=${size}`;
+
+/** QR-1: the same code as the vector a print designer wants — the engine's styled artwork when it hosts the code. */
+export const trackingCodeSvgUrl = (campaignId: string, code: string): string =>
+    `/campaigns/${campaignId}/tracking-codes/${encodeURIComponent(code)}/image.svg`;
 
 /**
  * `POST /campaigns/:id/submit-for-payment` — an envelope, not the campaign:
@@ -248,8 +260,19 @@ export interface TrackingCode {
     id: string;
     spotId: string | null;
     code: string;
-    /** The public `/t/:code` URL the QR encodes. */
+    /** ADX's own `/t/:code` URL — where every scan is counted. */
     url: string;
+    /**
+     * QR-1: what the hoarding actually carries — the engine's short URL
+     * (`/r/XXXX` on the ADX short origin, which 302s to `url`) when the
+     * engine hosts the code, else `url` itself. Absent on a backend older
+     * than QR-1, in which case it is `url`.
+     */
+    printedUrl?: string;
+    /** QR-1: who hosts the code in front of `/t/` — GENQR, or LOCAL for a code the hoarding carries as `/t/` itself. */
+    engine?: "LOCAL" | "GENQR";
+    shortUrl?: string | null;
+    engineLinkedAt?: string | null;
     method: string;
     destination: string | null;
     promoCode: string | null;
@@ -266,10 +289,37 @@ export interface ContentCategory {
     isActive: boolean;
 }
 
+/**
+ * QR-1: the QR engine's log of the same scans — folded over the hosted
+ * codes. Drawn BESIDE ADX's measured number, never in its place: the
+ * engine sees the phone's country, city, browser and OS that ADX does not
+ * read. Null when no engine hosts any of the campaign's codes.
+ */
+export interface CampaignEngineView {
+    provenance: "ENGINE";
+    engine: "GENQR";
+    basis: string;
+    codesLinked: number;
+    codesTotal: number;
+    codesUnanswered: number;
+    days: number;
+    totalScans: number;
+    scansInWindow: number;
+    scansByDay: { date: string; count: number }[];
+    hourlyBreakdown: { hour: number; count: number }[];
+    deviceBreakdown: { label: string; count: number }[];
+    browserBreakdown: { label: string; count: number }[];
+    osBreakdown: { label: string; count: number }[];
+    countryBreakdown: { label: string; code: string | null; count: number }[];
+    cityBreakdown: { label: string; count: number }[];
+}
+
 /** `GET /campaigns/:id/analytics` — read loosely; the page draws the interactions block. */
 export interface CampaignAnalytics {
     scans?: { value: number; provenance: string };
     clicks?: { value: number; provenance: string };
+    /** QR-1: the engine's panel, or null / absent. */
+    engine?: CampaignEngineView | null;
     /** Lot D (Q7): what happened on the landing page after the scan. MEASURED, never invented. */
     interactions?: {
         provenance: "MEASURED";

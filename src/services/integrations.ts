@@ -40,7 +40,8 @@ export type IntegrationSection =
     | "hrms"
     | "workTool"
     | "maps"
-    | "audience";
+    | "audience"
+    | "qrEngine";
 
 /**
  * A rail as the server names it. The names — MSG91 and Twilio wired, `third`
@@ -567,6 +568,88 @@ export interface IntegrationsSettings {
     audience?: AudienceSettings;
     /** G11-2: the push verdict — read-only, never a section the PUT accepts. */
     push?: PushStatus;
+    /** QR-1: the QR engine — LOCAL, or GenQR over its public API. */
+    qrEngine?: QrEngineSettings;
+}
+
+/* ------------------------------------------------------------------ */
+/* QR-1: the QR engine                                                 */
+/* ------------------------------------------------------------------ */
+
+export const QR_ENGINE_PROVIDERS = ["LOCAL", "GENQR"] as const;
+export type QrEngineProvider = (typeof QR_ENGINE_PROVIDERS)[number];
+
+export const QR_ENGINE_LABEL: Record<QrEngineProvider, string> = {
+    LOCAL: "Local (house style)",
+    GENQR: "GenQR",
+};
+
+export const QR_DOT_STYLES = ["square", "rounded", "dots"] as const;
+export const QR_FRAME_STYLES = ["none", "simple", "label-below", "label-above"] as const;
+export type QrDotStyle = (typeof QR_DOT_STYLES)[number];
+export type QrFrameStyle = (typeof QR_FRAME_STYLES)[number];
+
+export const QR_DOT_STYLE_LABEL: Record<QrDotStyle, string> = { square: "Square", rounded: "Rounded", dots: "Dots" };
+export const QR_FRAME_STYLE_LABEL: Record<QrFrameStyle, string> = {
+    none: "No frame",
+    simple: "Simple border",
+    "label-below": "Caption below",
+    "label-above": "Caption above",
+};
+
+/** The style every printed code is drawn with on GenQR. Sent with each render; nothing is stored there for a static code. */
+export interface QrEngineStyle {
+    foregroundColor?: string;
+    backgroundColor?: string;
+    dotStyle?: QrDotStyle;
+    frameStyle?: QrFrameStyle;
+    frameCaption?: string;
+    logoUrl?: string;
+}
+
+/**
+ * QR-1: `GET /integrations` → `qrEngine`. The key masked; the host, the
+ * short origin printed on hoardings and the style as-is; `hostsDynamic`
+ * is the backend's verdict that GenQR is chosen AND has credentials — what
+ * the campaign screens read to know whether a hoarding carries the short
+ * URL or ADX's own `/t/` link.
+ */
+export interface QrEngineSettings {
+    provider: QrEngineProvider;
+    baseUrl: string | null;
+    apiKey: string | null;
+    shortBaseUrl: string | null;
+    style: QrEngineStyle;
+    hostsDynamic: boolean;
+}
+
+/**
+ * QR-1: `POST /integrations/qr-engine/test` — one read of the GenQR account
+ * on the stored key. Never a 5xx for what GenQR did, never the key.
+ */
+export interface QrEngineTest {
+    engine: QrEngineProvider;
+    configured: boolean;
+    reachable: boolean;
+    authorized: boolean;
+    status: number | null;
+    message: string;
+    account: { email: string; plan: string; apiAccess: boolean; scope: string; redirectBase: string } | null;
+    /** What the key lacks for the whole integration — add them to the key on GenQR. */
+    scopesMissing: string[];
+    /** Whether GenQR prints the same short origin ADX expects; null when ADX has none on file. */
+    shortBaseMatches: boolean | null;
+}
+
+/** The four scopes the integration needs on its GenQR key. */
+export const GENQR_REQUIRED_SCOPES = ["qrcodes:read", "qrcodes:write", "analytics:read", "render"] as const;
+
+/** Why the test button is disabled, or null when it can run. */
+export function qrEngineTestBlocker(engine: QrEngineSettings | undefined): string | null {
+    if (!engine || engine.provider === "LOCAL") return null;
+    if (!engine.baseUrl) return "Set the GenQR base URL first.";
+    if (!engine.apiKey) return "Set the GenQR API key first.";
+    return null;
 }
 
 /**
@@ -599,6 +682,7 @@ export const SECRET_FIELDS: Record<IntegrationSection, readonly string[]> = {
     workTool: [],
     maps: ["googleBrowserKey", "googleServerKey", "mapboxPublicToken", "mapboxSecretToken"],
     audience: ["geoiqApiKey", "aziraApiKey"],
+    qrEngine: ["apiKey"],
 };
 
 /** A value the server masked — never something to send back. */
@@ -751,4 +835,12 @@ export const integrationsService = {
      * the address or a secret.
      */
     testEmailDoor: (to: string) => http.post<EmailDoorVerdict>("/integrations/email/test", { to }),
+
+    /**
+     * QR-1: reads the GenQR account ONCE on the stored key and answers a
+     * verdict — the account and plan, the scopes the key lacks, whether the
+     * printed origin matches. A refused key or a dead host is a verdict,
+     * never a 5xx. Audited INTEGRATION_TESTED, never with the key.
+     */
+    testQrEngine: () => http.post<QrEngineTest>("/integrations/qr-engine/test", {}),
 };

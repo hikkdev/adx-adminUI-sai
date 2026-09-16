@@ -35,7 +35,7 @@ import {
 import { ORDER_STATUS_META, type Order } from "@/types";
 import { COMMISSION_SOURCE_LABEL, type CommissionSource } from "@/types/revenue";
 import { AuthorizeDialog } from "../authorize-dialog";
-import { CreativesCard, InsertionOrderCard, InteractionsCard, RefundRow, TrackingCard } from "./campaign-cards";
+import { CreativesCard, EngineCard, InsertionOrderCard, InteractionsCard, RefundRow, TrackingCard } from "./campaign-cards";
 
 /** A fraction on the wire, a percentage on screen: "0.1500" → "15%". */
 const formatCommissionPct = (fraction: string) =>
@@ -329,8 +329,10 @@ export function CampaignLoader({ id }: { id: string }) {
                                     label: "Tracking",
                                     content: (
                                         <div className="grid gap-4 lg:grid-cols-2">
-                                            <TrackingCard campaign={campaign} codes={codes} />
+                                            <TrackingCard campaign={campaign} codes={codes} onChanged={resource.reload} />
                                             <InteractionsCard analytics={analytics} />
+                                            {/* QR-1: the engine's log of the same scans, beside ADX's — only when GenQR hosts codes. */}
+                                            <EngineCard analytics={analytics} />
                                         </div>
                                     ),
                                 },

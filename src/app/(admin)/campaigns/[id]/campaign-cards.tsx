@@ -6,13 +6,16 @@ import { AlertTriangle, CheckCircle2, CircleDashed, Upload } from "lucide-react"
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { PrivateFile } from "@/components/adx/private-file";
+import { PrivateFile, fetchPrivateBlob } from "@/components/adx/private-file";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
 import type { AgreementAcceptance } from "@/services/agreements";
 import {
+    campaignService,
     trackingCodeImageUrl,
+    trackingCodeSvgUrl,
     type CampaignAnalytics,
     type CampaignCreativeRow,
     type CampaignDetail,
@@ -181,13 +184,82 @@ function imageSize(file: File): Promise<{ width: number; height: number } | null
 /* Tracking codes and the interactions                                 */
 /* ------------------------------------------------------------------ */
 
-export function TrackingCard({ campaign, codes }: { campaign: CampaignDetail; codes: TrackingCode[] }) {
+/** QR-1: what the hoarding carries — the engine's short URL when hosted, ADX's own /t/ otherwise. */
+export const printedUrlOf = (code: TrackingCode): string => code.printedUrl ?? code.url;
+
+/** QR-1: the code as the vector a print designer wants — fetched behind the bearer token, then saved. */
+function SvgDownload({ campaignId, code, fileName }: { campaignId: string; code: string; fileName: string }) {
+    const [busy, setBusy] = React.useState(false);
+    const save = async () => {
+        setBusy(true);
+        try {
+            const blob = await fetchPrivateBlob(trackingCodeSvgUrl(campaignId, code));
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = fileName;
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not fetch the SVG.");
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <button
+            type="button"
+            onClick={save}
+            disabled={busy}
+            className="mt-1 text-xs text-primary underline underline-offset-2 disabled:opacity-60"
+            data-testid={`download-svg-${code}`}
+        >
+            {busy ? "Fetching…" : "Download SVG for print"}
+        </button>
+    );
+}
+
+export function TrackingCard({ campaign, codes, onChanged }: { campaign: CampaignDetail; codes: TrackingCode[]; onChanged?: () => void }) {
+    const { user } = useAuth();
+    const [syncing, setSyncing] = React.useState(false);
+    const isAdmin = user?.roles?.includes("ADMIN") ?? false;
+    // QR-1: codes the hoarding carries as /t/ — the engine has not taken them yet.
+    const unhosted = codes.filter((code) => code.method === "QR_OR_DEEPLINK" && code.engine !== "GENQR");
+    const hosted = codes.filter((code) => code.engine === "GENQR");
+
+    const sync = async () => {
+        setSyncing(true);
+        try {
+            const result = await campaignService.syncTrackingCodesWithEngine(campaign.id);
+            toast.success(
+                result.linked === 0 ? "Nothing to link — GenQR hosts every code already, or no engine hosts codes." : `GenQR now hosts ${result.linked} code${result.linked === 1 ? "" : "s"}`,
+            );
+            onChanged?.();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Could not sync the codes with the QR engine.");
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     return (
         <Card className="rounded-lg border-border p-5 shadow-none">
-            <h3 className="text-base font-semibold text-foreground">Tracking codes</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-                Minted at authorisation so the artwork can embed them. The QR is drawn by the API.
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h3 className="text-base font-semibold text-foreground">Tracking codes</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        Minted at authorisation so the artwork can embed them.
+                        {hosted.length > 0
+                            ? ` GenQR hosts ${hosted.length} of ${codes.length}: the hoarding carries the short URL, which sends the scan through ADX.`
+                            : " The QR is drawn by the API and the hoarding carries ADX's own /t/ link."}
+                    </p>
+                </div>
+                {isAdmin && unhosted.length > 0 && (
+                    <Button size="sm" variant="outline" className="h-8" disabled={syncing} onClick={sync} data-testid="button-sync-engine">
+                        {syncing ? "Syncing…" : `Host ${unhosted.length} on GenQR`}
+                    </Button>
+                )}
+            </div>
             {codes.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
                     {campaign.status === "DRAFT" || campaign.status === "PENDING_PAYMENT"
@@ -207,12 +279,18 @@ export function TrackingCard({ campaign, codes }: { campaign: CampaignDetail; co
                                     frameClassName="size-24 shrink-0 rounded"
                                 />
                                 <div className="min-w-0 flex-1 text-sm">
-                                    <p className="truncate font-medium text-foreground">
-                                        {spot?.listing?.title ?? "Whole campaign"}
+                                    <p className="flex items-center gap-2 truncate font-medium text-foreground">
+                                        <span className="truncate">{spot?.listing?.title ?? "Whole campaign"}</span>
+                                        {code.engine === "GENQR" && <StatusBadge status={{ label: "GenQR", tone: "info" }} />}
                                     </p>
-                                    <p className="truncate font-mono text-xs text-muted-foreground" title={code.url}>
-                                        {code.url}
+                                    <p className="truncate font-mono text-xs text-muted-foreground" title={printedUrlOf(code)}>
+                                        {printedUrlOf(code)}
                                     </p>
+                                    {code.engine === "GENQR" && (
+                                        <p className="truncate text-[11px] text-muted-foreground" title={code.url}>
+                                            → {code.url}
+                                        </p>
+                                    )}
                                     <p className="mt-1 text-xs text-muted-foreground">
                                         {code.scans} scan{code.scans === 1 ? "" : "s"} · {code.clicks} click{code.clicks === 1 ? "" : "s"}
                                         {code.promoCode ? ` · ${code.promoCode} (${code.redemptions} redeemed)` : ""}
@@ -220,12 +298,85 @@ export function TrackingCard({ campaign, codes }: { campaign: CampaignDetail; co
                                     <p className="mt-1 truncate text-xs text-muted-foreground">
                                         {code.destination ?? "No destination — the plain thanks page"}
                                     </p>
+                                    <SvgDownload campaignId={campaign.id} code={code.code} fileName={`${campaign.reference ?? campaign.id}-${code.code}.svg`} />
                                 </div>
                             </li>
                         );
                     })}
                 </ul>
             )}
+        </Card>
+    );
+}
+
+/**
+ * QR-1: the QR engine's log of the same scans, folded over the hosted
+ * codes — the phone's country, city, browser and OS that ADX itself does
+ * not read. Beside the measured number, labelled as the engine's; absent
+ * when nothing is hosted.
+ */
+export function EngineCard({ analytics }: { analytics: CampaignAnalytics | null }) {
+    const engine = analytics?.engine ?? null;
+    if (!engine) return null;
+
+    const block = (title: string, rows: { label: string; count: number }[]) => (
+        <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
+            {rows.length === 0 ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">Nothing yet.</p>
+            ) : (
+                <ul className="mt-1.5 space-y-1 text-sm">
+                    {rows.slice(0, 6).map((row) => (
+                        <li key={row.label} className="flex items-center justify-between gap-3">
+                            <span className="truncate text-foreground">{row.label}</span>
+                            <span className="tabular-nums text-muted-foreground">{row.count}</span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+
+    const busiest = engine.hourlyBreakdown.reduce<{ hour: number; count: number } | null>(
+        (best, row) => (row.count > 0 && (!best || row.count > best.count) ? row : best),
+        null,
+    );
+
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="engine-card">
+            <div className="flex items-center justify-between gap-3">
+                <div>
+                    <h3 className="text-base font-semibold text-foreground">As GenQR saw it</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{engine.basis}</p>
+                </div>
+                <StatusBadge status={{ label: "Engine", tone: "info" }} />
+            </div>
+            <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                <div>
+                    <dt className="text-xs text-muted-foreground">Scans, all time</dt>
+                    <dd className="text-lg font-semibold tabular-nums text-foreground">{engine.totalScans}</dd>
+                </div>
+                <div>
+                    <dt className="text-xs text-muted-foreground">Last {engine.days} days</dt>
+                    <dd className="text-lg font-semibold tabular-nums text-foreground">{engine.scansInWindow}</dd>
+                </div>
+                <div>
+                    <dt className="text-xs text-muted-foreground">Busiest hour</dt>
+                    <dd className="text-lg font-semibold tabular-nums text-foreground">{busiest ? `${String(busiest.hour).padStart(2, "0")}:00` : "—"}</dd>
+                </div>
+            </dl>
+            {engine.codesUnanswered > 0 && (
+                <p className="mt-2 text-xs text-warning">
+                    GenQR did not answer for {engine.codesUnanswered} of {engine.codesLinked} hosted codes on this read; the figures fold the rest.
+                </p>
+            )}
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {block("City", engine.cityBreakdown)}
+                {block("Country", engine.countryBreakdown)}
+                {block("Device", engine.deviceBreakdown)}
+                {block("Browser", engine.browserBreakdown)}
+                {block("OS", engine.osBreakdown)}
+            </div>
         </Card>
     );
 }
