@@ -79,6 +79,55 @@ export interface Publisher extends SuspensionColumns {
     onboardingStatus: string | null;
     createdAt: string;
     activatedAt: string | null;
+    /** QR-13: the address the ladder collects, its state and its pin. */
+    address: string | null;
+    state: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    /** QR-13: the person behind the account — what the desk's Edit details drawer prefills from. Null while no account backs the profile. */
+    person: PublisherPerson | null;
+    /** QR-14: who onboarded them, and how. */
+    onboarding: OnboardingFacts | null;
+}
+
+/** QR-14: who onboarded a party, and how — the stamp every door writes, with the person named. */
+export type OnboardingSource = "SELF" | "AGENT" | "QR" | "DESK" | "IMPORT";
+
+export const ONBOARDING_SOURCE_LABEL: Record<OnboardingSource, string> = {
+    SELF: "Self-serve",
+    AGENT: "Agent",
+    QR: "Agent (QR scan)",
+    DESK: "Desk",
+    IMPORT: "Import",
+};
+
+export interface OnboardingFacts {
+    via: OnboardingSource | null;
+    viaLabel: string | null;
+    byId: string | null;
+    byName: string | null;
+    /** The person's console role or kind at the time — a snapshot. */
+    byRole: string | null;
+    at: string | null;
+}
+
+/** "Desk · Asha Rao (Ops manager)", "Agent (QR scan) · Ravi", "Self-serve" — or "Not recorded" on a row older than the stamp. */
+export function onboardingLine(facts: OnboardingFacts | null | undefined): string {
+    if (!facts || !facts.via) return "Not recorded";
+    const who = facts.byName ? ` · ${facts.byName}${facts.byRole ? ` (${facts.byRole})` : ""}` : "";
+    return `${facts.viaLabel ?? facts.via}${who}`;
+}
+
+/** QR-13/15: the person's fields on their account, as `GET /publishers/:id` and `GET /advertisers/:id` carry them. */
+export interface PublisherPerson {
+    displayId: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    /** YYYY-MM-DD. */
+    dateOfBirth: string | null;
+    gender: string | null;
+    avatarUrl: string | null;
+    consentAcceptedAt: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -143,7 +192,16 @@ export interface Advertiser extends SuspensionColumns {
     /** Both gates passed. Null until then. */
     activatedAt: string | null;
     joinedAt: string;
+    /** QR-15: the billing address the app's profile gate collects. */
+    billingAddress?: string | null;
+    /** QR-15: the person behind the account, off `GET /advertisers/:id` — what the desk's Edit details drawer prefills from. Null while no account backs the profile; absent on a list row. */
+    person?: PartyPerson | null;
+    /** QR-14/15: who onboarded them, and how. Absent on a row older than the stamp. */
+    onboarding?: OnboardingFacts | null;
 }
+
+/** QR-15: the same person block on both parties. */
+export type PartyPerson = PublisherPerson;
 
 /* ------------------------------------------------------------------ */
 /* Agents                                                              */

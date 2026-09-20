@@ -22,6 +22,8 @@ export type UploadPurpose =
     | "LISTING_PHOTO"
     | "VERIFICATION"
     | "AVATAR"
+    /** QR-9: a brand file — the wordmark, the mark, the icon — uploaded from Settings › Branding. Public. */
+    | "BRANDING"
     | "CAMPAIGN_CREATIVE"
     /** Lot B (Q118): the bank slip or cheque image behind a structured top-up. */
     | "TOPUP_PROOF"

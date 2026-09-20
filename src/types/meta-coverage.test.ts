@@ -59,7 +59,7 @@ describe("the *_META / *_LABEL records closed in R-C, against the backend's enum
         expect(KYC_CASE_STATUS_META.REJECTED.tone).toBe("danger");
     });
 
-    run("PARTY_LABELS names all thirteen series of PartyType, and PARTY_ORDER lists each once", () => {
+    run("PARTY_LABELS names all eighteen series of PartyType, and PARTY_ORDER lists each once", () => {
         coversWhole(PARTY_LABELS, "PartyType");
         expect([...PARTY_ORDER].sort()).toEqual([...values("PartyType")].sort());
         expect(new Set(PARTY_ORDER).size).toBe(PARTY_ORDER.length);

@@ -471,9 +471,15 @@
         "settings/ai"
       ]
     },
+    "system.brand-manager": {
+      "paths": [
+        "settings/brand"
+      ]
+    },
     "reports.catalogue": {
       "paths": [
-        "settings/reports"
+        "settings/reports",
+        "settings/reports/onboarding-board"
       ]
     },
     "console.import-formats": {

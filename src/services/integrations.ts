@@ -41,7 +41,8 @@ export type IntegrationSection =
     | "workTool"
     | "maps"
     | "audience"
-    | "qrEngine";
+    | "qrEngine"
+    | "branding";
 
 /**
  * A rail as the server names it. The names — MSG91 and Twilio wired, `third`
@@ -570,6 +571,30 @@ export interface IntegrationsSettings {
     push?: PushStatus;
     /** QR-1: the QR engine — LOCAL, or GenQR over its public API. */
     qrEngine?: QrEngineSettings;
+    /** QR-9: the brand overrides, as stored — null is DR 11's default. */
+    branding?: BrandingSettings;
+}
+
+/** QR-9: what Settings › Branding stores; every field null means "DR 11". */
+export interface BrandingSettings {
+    platformName: string | null;
+    tagline: string | null;
+    headerLogoUrl?: string | null;
+    authLogoUrl?: string | null;
+    primaryColor: string | null;
+    deepColor: string | null;
+    inkColor: string | null;
+    groundColor: string | null;
+    wordmarkUrl: string | null;
+    wordmarkInverseUrl: string | null;
+    markUrl: string | null;
+    markInverseUrl: string | null;
+    iconUrl: string | null;
+    /** QR-11: the website kit, edited on Settings › Brand & theme. */
+    taglines?: string[] | null;
+    heroImageUrl?: string | null;
+    ogImageUrl?: string | null;
+    faviconUrl?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -683,6 +708,8 @@ export const SECRET_FIELDS: Record<IntegrationSection, readonly string[]> = {
     maps: ["googleBrowserKey", "googleServerKey", "mapboxPublicToken", "mapboxSecretToken"],
     audience: ["geoiqApiKey", "aziraApiKey"],
     qrEngine: ["apiKey"],
+    // QR-9: nothing in the brand is secret.
+    branding: [],
 };
 
 /** A value the server masked — never something to send back. */

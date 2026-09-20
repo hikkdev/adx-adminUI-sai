@@ -259,6 +259,8 @@ export function IntegrationsView({ settings, sms, onChanged }: IntegrationsViewP
             {/* QR-1: the QR engine — Local, or GenQR for styled print artwork and hosted hoarding codes. */}
             <QrEngineSection stored={settings.qrEngine} onChanged={onChanged} />
 
+            {/* QR-9: DR 11's brand — the wordmark, the mark, the reds — retuned here, drawn everywhere. */}
+
             {/* G6 (Q103/133): push through FCM — the configured state as far as any read carries it. */}
             <PushSection push={settings.push} />
 

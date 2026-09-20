@@ -382,3 +382,47 @@ export const reportsService = {
     /** Audited `REPORT_SCHEDULE_DELETED`; past runs keep their files with the schedule id cleared. */
     deleteSchedule: (id: string) => http.delete<{ id: string; deleted: boolean }>(`/reports/schedules/${encodeURIComponent(id)}`),
 };
+
+/* ── QR-14: the team onboarding board ─────────────────────────────────────── */
+
+export type OnboardingDoor = "SELF" | "AGENT" | "QR" | "DESK" | "IMPORT";
+
+/** One person on the board — or "organic" (self-signups), which has no actor and no rank. */
+export interface OnboardingBoardRow {
+    rank: number | null;
+    actorId: string | null;
+    actorName: string | null;
+    actorRole: string | null;
+    via: Record<OnboardingDoor, number>;
+    publishers: number;
+    advertisers: number;
+    onboarded: number;
+    completed: number;
+    liveWithin7d: number;
+    verified: number;
+    firstBooking: number;
+}
+
+export interface OnboardingBoard {
+    window: { from: string; to: string; label: string };
+    rows: OnboardingBoardRow[];
+}
+
+export type OnboardingBoardQuery = ({ preset: WindowPreset } | { from: string; to: string }) & { via?: OnboardingDoor; role?: string };
+
+export function onboardingBoardSearch(query: OnboardingBoardQuery): string {
+    const params = new URLSearchParams();
+    if ("preset" in query) params.set("preset", query.preset);
+    else {
+        params.set("from", query.from);
+        params.set("to", query.to);
+    }
+    if (query.via) params.set("via", query.via);
+    if (query.role) params.set("role", query.role);
+    return params.toString();
+}
+
+export const onboardingBoardService = {
+    /** `GET /reports/boards/onboarding` — the same rows the 'onboarding-board' report exports, ranked. */
+    read: (query: OnboardingBoardQuery): Promise<OnboardingBoard> => http.get<OnboardingBoard>(`/reports/boards/onboarding?${onboardingBoardSearch(query)}`),
+};

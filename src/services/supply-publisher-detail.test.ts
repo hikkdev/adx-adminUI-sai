@@ -55,6 +55,14 @@ describe("shapePublisherDetail", () => {
             suspensionScopes: [],
             suspensionReason: null,
             suspendedAt: null,
+            // QR-13: the address, its pin and the person — null on a row the desk opened without them.
+            address: null,
+            state: null,
+            latitude: null,
+            longitude: null,
+            person: null,
+            // QR-14: no stamp on a fresh desk row from an older server.
+            onboarding: null,
             // N3-B: a row with nothing submitted is awaiting documents — derived from the mirror when the read predates `state`.
             kyc: { state: "AWAITING_DOCUMENTS", kycId: null, submittedAt: null, requestedAt: null, requestedChannel: null, method: null },
         });

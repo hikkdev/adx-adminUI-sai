@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { FileDropzone } from "@/components/adx/file-dropzone";
 import { DetailShell } from "@/components/adx/detail-shell";
+import { VerifiedTick } from "@/components/adx/verified-tick";
 import { PrivateFile, openPrivateFile } from "@/components/adx/private-file";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
@@ -201,6 +202,7 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
                 backHref="/print-partners/roster"
                 backLabel="Print partners"
                 title={partner.name}
+                titleAdornment={<VerifiedTick kycStatus={partner.kycStatus} size={18} />}
                 subtitle={[partner.displayId, partner.legalName, partner.city].filter(Boolean).join(" · ") || undefined}
                 kpis={kpis}
                 actions={

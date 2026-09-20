@@ -9,6 +9,8 @@ export type PartyType =
     | "PARTNER"
     | "EMPLOYEE"
     | "AGENT"
+    | "USER"
+    | "LISTING"
     | "TICKET"
     | "FEEDBACK"
     | "DISPUTE"
@@ -21,13 +23,19 @@ export type PartyType =
     | "ISSUE"
     | "PROJECT";
 
-/** The sixteen series of the backend's `PartyType`: the five parties, the eight numbered records (R-C) and the three work series (Lot AA). */
+/**
+ * The eighteen series of the backend's `PartyType`: the five parties, the
+ * person's own id (QR-4, ADX-…), the listing reference (QR-8, LST-…), the
+ * eight numbered records (R-C) and the three work series (Lot AA).
+ */
 export const PARTY_LABELS: Record<PartyType, string> = {
     PUBLISHER: "Publishers",
     ADVERTISER: "Advertisers",
     PARTNER: "Print partners",
     EMPLOYEE: "Employees",
     AGENT: "Field agents",
+    USER: "People (every account)",
+    LISTING: "Listings",
     TICKET: "Support tickets",
     FEEDBACK: "Feedback",
     DISPUTE: "Disputes",
@@ -47,6 +55,8 @@ export const PARTY_ORDER: PartyType[] = [
     "PARTNER",
     "AGENT",
     "EMPLOYEE",
+    "USER",
+    "LISTING",
     "TICKET",
     "FEEDBACK",
     "DISPUTE",

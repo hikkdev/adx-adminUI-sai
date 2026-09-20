@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Wordmark } from "@/components/adx/brand";
 import { useRouter } from "next/navigation";
 import { Bell, ChevronDown, PanelLeft, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,8 +50,9 @@ export function Header({
                 <PanelLeft className="size-4" />
             </Button>
 
-            <Link href="/dashboard" className="flex shrink-0 items-center">
-                <span className="text-base font-semibold tracking-tight text-foreground">ADX.</span>
+            <Link href="/dashboard" className="flex shrink-0 items-center" aria-label="Dashboard">
+                {/* QR-9: DR 11's wordmark, or the one Settings › Branding uploaded. */}
+                <Wordmark height={18} />
             </Link>
 
             <div className="pointer-events-none absolute inset-x-0 mx-auto hidden w-full max-w-[512px] md:block">

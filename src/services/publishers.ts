@@ -25,8 +25,26 @@ export const PUBLISHER_TYPE_LABEL: Record<PublisherType, string> = {
     POLITICAL: "Political",
 };
 
+/** QR-13: the person behind the account and the ladder's other fields, as the desk sends them. */
+export interface PublisherDeskFields {
+    firstName?: string;
+    lastName?: string;
+    /** YYYY-MM-DD, 18 or over. */
+    dateOfBirth?: string;
+    gender?: "MALE" | "FEMALE" | "OTHER" | "PREFER_NOT_TO_SAY";
+    address?: string;
+    state?: string;
+    /** Both or neither; null clears. */
+    latitude?: number | null;
+    longitude?: number | null;
+    gstin?: string;
+    contactName?: string;
+    contactMobile?: string;
+    contactEmail?: string;
+}
+
 /** `createPublisherSchema`. Mobile is the identity and the only required contact. */
-export interface CreatePublisherInput {
+export interface CreatePublisherInput extends PublisherDeskFields {
     name: string;
     mobile: string;
     email?: string;
@@ -38,6 +56,25 @@ export interface CreatePublisherInput {
      * agent has to exist, or the API answers 404.
      */
     attributeToAgentId?: string;
+}
+
+/** `updatePublisherSchema`, as the desk sends it (QR-13): everything the ladder collects; blank fields are left out. */
+export type UpdatePublisherInput = PublisherDeskFields & { name?: string; email?: string; type?: PublisherType; city?: string };
+
+const DESK_TEXT_KEYS = ["firstName", "lastName", "dateOfBirth", "gender", "address", "state", "gstin", "contactName", "contactMobile", "contactEmail"] as const;
+
+/** The desk's fields onto a body: trimmed text where given, the pin as numbers (both or neither). */
+export function deskFieldsBody(input: PublisherDeskFields): Record<string, unknown> {
+    const body: Record<string, unknown> = {};
+    for (const key of DESK_TEXT_KEYS) {
+        const value = input[key];
+        if (typeof value === "string" && value.trim() !== "") body[key] = value.trim();
+    }
+    if (input.latitude !== undefined && input.longitude !== undefined) {
+        body.latitude = input.latitude;
+        body.longitude = input.longitude;
+    }
+    return body;
 }
 
 /** What comes back: the row, with the identifier the server minted. */
@@ -55,14 +92,26 @@ export interface CreatedPublisher {
 }
 
 /** Only the keys with a value go up; the schema treats an absent key and an empty string differently. */
-export function createPublisherBody(input: CreatePublisherInput): Record<string, string> {
-    const body: Record<string, string> = { name: input.name.trim(), mobile: input.mobile.trim() };
+export function createPublisherBody(input: CreatePublisherInput): Record<string, unknown> {
+    const body: Record<string, unknown> = { name: input.name.trim(), mobile: input.mobile.trim(), ...deskFieldsBody(input) };
     const email = input.email?.trim();
     if (email) body.email = email;
     if (input.type) body.type = input.type;
     const city = input.city?.trim();
     if (city) body.city = city;
     if (input.attributeToAgentId) body.attributeToAgentId = input.attributeToAgentId;
+    return body;
+}
+
+export function updatePublisherBody(input: UpdatePublisherInput): Record<string, unknown> {
+    const body: Record<string, unknown> = deskFieldsBody(input);
+    const name = input.name?.trim();
+    if (name) body.name = name;
+    const email = input.email?.trim();
+    if (email) body.email = email;
+    if (input.type) body.type = input.type;
+    const city = input.city?.trim();
+    if (city) body.city = city;
     return body;
 }
 
@@ -75,6 +124,9 @@ export const publishersService = {
     /** Opens the account. 409 CONFLICT when the number already has one. */
     create: (input: CreatePublisherInput): Promise<CreatedPublisher> =>
         live().post<CreatedPublisher>("/publishers", createPublisherBody(input)),
+    /** QR-13: the desk's edit — `PATCH /publishers/:id`, everything the ladder collects. */
+    update: (id: string, input: UpdatePublisherInput): Promise<CreatedPublisher> =>
+        live().patch<CreatedPublisher>(`/publishers/${encodeURIComponent(id)}`, updatePublisherBody(input)),
 };
 
 /* ------------------------------------------------------------------ */
@@ -269,6 +321,13 @@ export const IMPORT_COLUMNS = [
     "contactMobile",
     "contactEmail",
     "panNumber",
+    // QR-13: the person behind the account and the address pin.
+    "firstName",
+    "lastName",
+    "dateOfBirth",
+    "gender",
+    "latitude",
+    "longitude",
 ] as const;
 
 export interface PublisherImportRow {

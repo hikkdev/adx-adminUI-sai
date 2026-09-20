@@ -62,6 +62,40 @@ export const REMOVABILITY_META: Record<Removability, { label: string; cadenceDay
     REMOVABLE: { label: "Removable", cadenceDays: 90 },
 };
 
+/* QR-24: the right to sell a space, and its term. */
+export type RightsBasis = "OWNED" | "LEASED" | "LICENSED" | "PERMIT";
+export type RightsState = "OWNED" | "CURRENT" | "ENDING" | "LAPSED";
+
+export const RIGHTS_BASIS_LABEL: Record<RightsBasis, string> = {
+    OWNED: "Owned",
+    LEASED: "Lease",
+    LICENSED: "Licence",
+    PERMIT: "Permit",
+};
+
+export const RIGHTS_STATE_META: Record<RightsState, StatusMeta> = {
+    OWNED: { label: "Owned", tone: "neutral" },
+    CURRENT: { label: "Current", tone: "success" },
+    ENDING: { label: "Ending soon", tone: "warning" },
+    LAPSED: { label: "Lapsed", tone: "danger" },
+};
+
+/** One row of `GET /supply/rights-queue`: a term-holding spot ending within the horizon, or ended. */
+export interface RightsQueueRow {
+    id: string;
+    title: string;
+    publisherId: string | null;
+    publisherName: string | null;
+    status: ListingLifecycleStatus;
+    availableNow: boolean;
+    rightsBasis: RightsBasis;
+    rightsValidUntil: string | null;
+    rightsLapsedAt: string | null;
+    rightsRemindedAt: string | null;
+    state: RightsState;
+    daysLeft: number | null;
+}
+
 export const VERIFICATION_STATE_META: Record<VerificationState, StatusMeta> = {
     UNVERIFIED: { label: "Never verified", tone: "neutral" },
     FRESH: { label: "Verified", tone: "success" },

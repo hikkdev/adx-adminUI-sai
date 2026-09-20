@@ -1,5 +1,7 @@
 "use client";
 
+import { ONBOARDING_SOURCE_LABEL, onboardingLine, type OnboardingSource } from "@/types";
+
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -25,6 +27,7 @@ import { EmptyState } from "@/components/adx/empty-state";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { VerifiedTick } from "@/components/adx/verified-tick";
 import { SuspendedChip } from "@/components/adx/suspended-chip";
 import { KYC_TONE, kycLabel, type RosterPublisher } from "@/services/supply";
 import { CreatePublisherDialog } from "./create-publisher-dialog";
@@ -41,13 +44,15 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
     const router = useRouter();
     const [createOpen, setCreateOpen] = React.useState(false);
     const [kycFilter, setKycFilter] = React.useState<string>("all");
+    // QR-14: the door a row came through.
+    const [doorFilter, setDoorFilter] = React.useState<string>("all");
 
     const filtered = React.useMemo(
         () =>
-            kycFilter === "all"
-                ? publishers
-                : publishers.filter((publisher) => publisher.kycStatus === kycFilter),
-        [publishers, kycFilter]
+            (kycFilter === "all" ? publishers : publishers.filter((publisher) => publisher.kycStatus === kycFilter)).filter(
+                (publisher) => doorFilter === "all" || (publisher.onboarding?.via ?? (publisher.onboardedByAgent ? "AGENT" : "SELF")) === doorFilter,
+                ),
+        [publishers, kycFilter, doorFilter]
     );
 
     const columns = React.useMemo<ColumnDef<RosterPublisher>[]>(
@@ -61,7 +66,10 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
                     <div className="flex items-center gap-2.5">
                         <InitialsAvatar name={row.original.name} size="sm" />
                         <div className="min-w-0">
-                            <span className="font-medium text-foreground">{row.original.name}</span>
+                            <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                                {row.original.name}
+                                <VerifiedTick kycStatus={row.original.kycStatus} />
+                            </span>
                             <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
                                 {row.original.displayId ?? "No identifier yet"}
                             </p>
@@ -89,13 +97,13 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
             },
             {
                 id: "arrived",
-                accessorFn: (publisher) => (publisher.onboardedByAgent ? "Agent" : "Self-serve"),
-                header: "Arrived",
+                accessorFn: (publisher) => onboardingLine(publisher.onboarding) ?? (publisher.onboardedByAgent ? "Agent" : "Self-serve"),
+                header: "Onboarded",
                 cell: ({ row }) => (
-                    // DR 08 lets a publisher sign up with no agent at all, and
-                    // which way they arrived decides who chases their paperwork.
-                    <span className="text-muted-foreground">
-                        {row.original.onboardedByAgent ? "Onboarded by agent" : "Self-serve"}
+                    // QR-14: the door and the person — "Desk · Asha Rao (Ops manager)"; a row
+                    // older than the stamp falls back to what the agent link says.
+                    <span className="text-muted-foreground" data-testid={`onboarded-${row.original.id}`}>
+                        {row.original.onboarding?.via ? onboardingLine(row.original.onboarding) : row.original.onboardedByAgent ? "Onboarded by agent" : "Self-serve"}
                     </span>
                 ),
             },
@@ -172,7 +180,7 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
                         </Button>
                         <Button onClick={() => setCreateOpen(true)}>
                             <Plus className="mr-1.5 size-4" />
-                            Add publisher
+                            Onboard a publisher
                         </Button>
                     </>
                 }
@@ -185,6 +193,20 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
                 initialPageSize={10}
                 onRowClick={(publisher) => router.push(`/publishers/${publisher.id}`)}
                 toolbar={
+                    <div className="flex items-center gap-2">
+                    <Select value={doorFilter} onValueChange={setDoorFilter}>
+                        <SelectTrigger className="h-9 w-[190px]" aria-label="Onboarded via">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Every door</SelectItem>
+                            {(Object.keys(ONBOARDING_SOURCE_LABEL) as OnboardingSource[]).map((door) => (
+                                <SelectItem key={door} value={door}>
+                                    {ONBOARDING_SOURCE_LABEL[door]}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                     <Select value={kycFilter} onValueChange={setKycFilter}>
                         <SelectTrigger className="h-9 w-[190px] bg-card">
                             <SelectValue />
@@ -198,6 +220,7 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
                             ))}
                         </SelectContent>
                     </Select>
+                    </div>
                 }
                 emptyState={
                     <EmptyState
@@ -207,7 +230,7 @@ export function PublishersTable({ publishers, onChanged }: PublishersTableProps)
                         action={
                             <Button onClick={() => setCreateOpen(true)}>
                                 <Plus className="mr-1.5 size-4" />
-                                Add publisher
+                                Onboard a publisher
                             </Button>
                         }
                     />

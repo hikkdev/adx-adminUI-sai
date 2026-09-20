@@ -136,6 +136,10 @@ export function shapeAdvertiser(raw: WireAdvertiser): Advertiser {
         suspensionScopes: raw.suspensionScopes ?? [],
         suspensionReason: raw.suspensionReason ?? null,
         suspendedAt: raw.suspendedAt ?? null,
+        // QR-15: the billing address, the person behind the account (the by-id read) and who onboarded them.
+        billingAddress: raw.billingAddress ?? null,
+        person: raw.person ?? null,
+        onboarding: raw.onboarding ?? null,
     };
 }
 
@@ -163,7 +167,7 @@ const mutable = live;
  * The mobile is required here precisely because there is no session to
  * take it from.
  */
-export interface CreateAdvertiserInput {
+export interface CreateAdvertiserInput extends AdvertiserDeskFields {
     name: string;
     /** Ten digits, 6–9 first. */
     mobile: string;
@@ -176,14 +180,46 @@ export interface CreateAdvertiserInput {
     state?: string;
 }
 
-/** `PATCH /advertisers/:id` — `updateProfileSchema`: the profile fields; `industry: null` clears it. */
-export interface UpdateAdvertiserInput {
+/**
+ * QR-15: what the desk types beyond the bare account — the person (opened
+ * on the sign-in account with the number, ADVERTISER role, when a first
+ * name is given) and the billing details the app's profile gate collects.
+ * Blank strings are left off the wire: the schema's `min()` would refuse
+ * them, and a blank is "not said", never "clear".
+ */
+export interface AdvertiserDeskFields {
+    firstName?: string;
+    lastName?: string;
+    /** YYYY-MM-DD, 18 or over. */
+    dateOfBirth?: string;
+    gender?: "MALE" | "FEMALE" | "OTHER" | "PREFER_NOT_TO_SAY";
+    billingAddress?: string;
+    gstin?: string;
+}
+
+/** `PATCH /advertisers/:id` — `updateProfileSchema`: the profile fields and the person's (QR-15); `industry: null` clears it. */
+export interface UpdateAdvertiserInput extends AdvertiserDeskFields {
     name?: string;
     email?: string;
+    type?: AdvertiserType;
     companyName?: string;
     industry?: string | null;
     city?: string;
     state?: string;
+}
+
+const TEXT_KEYS = ["name", "email", "companyName", "city", "state", "firstName", "lastName", "dateOfBirth", "gender", "billingAddress", "gstin"] as const;
+
+/** The desk's fields onto a body: trimmed text where given, blanks left off, the industry as sent (null clears it). */
+export function advertiserBody(input: UpdateAdvertiserInput): Record<string, unknown> {
+    const body: Record<string, unknown> = {};
+    for (const key of TEXT_KEYS) {
+        const value = input[key];
+        if (typeof value === "string" && value.trim() !== "") body[key] = value.trim();
+    }
+    if (input.type) body.type = input.type;
+    if (input.industry === null || (typeof input.industry === "string" && input.industry.trim() !== "")) body.industry = input.industry;
+    return body;
 }
 
 /**
@@ -227,13 +263,13 @@ export const advertiserService = {
     /** Lot G (Q119): the industry picklist — a constant list in code, so a new one is a line there, not a free string. */
     industries: async (): Promise<string[]> => (await live().get<string[]>("/advertisers/industries")) ?? [],
 
-    /** The profile fields. 400 for an industry off the list. */
+    /** The profile fields — and the person's, QR-15. 400 for an industry off the list. */
     update: async (id: string, patch: UpdateAdvertiserInput): Promise<Advertiser> =>
-        shapeAdvertiser(await mutable().patch<WireAdvertiser>(`/advertisers/${encodeURIComponent(id)}`, patch)),
+        shapeAdvertiser(await mutable().patch<WireAdvertiser>(`/advertisers/${encodeURIComponent(id)}`, advertiserBody(patch))),
 
-    /** Opens an account held for its owner (201). 409 when the number already has one. */
+    /** Opens an account held for its owner (201) — with a first name, the sign-in account too (QR-15). 409 when the number already has one. */
     create: async (input: CreateAdvertiserInput): Promise<Advertiser> =>
-        shapeAdvertiser(await mutable().post<WireAdvertiser>("/advertisers", { ...input, onBehalf: true })),
+        shapeAdvertiser(await mutable().post<WireAdvertiser>("/advertisers", { ...advertiserBody(input), mobile: input.mobile.trim(), onBehalf: true })),
 
     list: async (): Promise<Advertiser[]> => {
         const page = await live().get<Paged<WireAdvertiser>>("/advertisers?limit=200");

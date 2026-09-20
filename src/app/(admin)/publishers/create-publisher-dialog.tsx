@@ -9,7 +9,8 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { AddPublisherForm, CreatedState } from "@/components/adx/add-publisher-form";
+import { CreatedState } from "@/components/adx/add-publisher-form";
+import { PublisherOnboardingForm } from "@/components/adx/publisher-onboarding-form";
 import { isLive } from "@/lib/api-config";
 import type { CreatedPublisher } from "@/services/publishers";
 
@@ -37,11 +38,11 @@ export function CreatePublisherDialog({ open, onOpenChange }: CreatePublisherDia
                 if (!next) setCreated(null);
             }}
         >
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>Add publisher</DialogTitle>
+                    <DialogTitle>Onboard a publisher</DialogTitle>
                     <DialogDescription>
-                        Opens the account now; the owner claims it by signing in with their number.
+                        Everything the app&apos;s onboarding asks, entered here (QR-13). The account is opened on the number; the owner signs in, agrees to the platform terms, and carries on — nothing is asked twice.
                     </DialogDescription>
                 </DialogHeader>
                 {!live ? (
@@ -55,7 +56,7 @@ export function CreatePublisherDialog({ open, onOpenChange }: CreatePublisherDia
                 ) : created ? (
                     <CreatedState publisher={created} onAnother={() => setCreated(null)} />
                 ) : (
-                    <AddPublisherForm onCreated={setCreated} />
+                    <PublisherOnboardingForm mode="create" onCreated={setCreated} />
                 )}
             </DialogContent>
         </Dialog>

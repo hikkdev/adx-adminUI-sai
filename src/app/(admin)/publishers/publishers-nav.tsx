@@ -17,6 +17,7 @@ export function PublishersNav() {
                 { label: "Directory", href: "/publishers/directory" },
                 { label: "Activation funnel", href: "/publishers/activation" },
                 { label: "Import", href: "/publishers/import" },
+                { label: "Onboarding board", href: "/settings/reports/onboarding-board" },
             ]}
         />
     );

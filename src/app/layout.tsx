@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans_Condensed, Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/lib/auth";
+import { BrandProvider } from "@/components/adx/brand";
 import "./globals.css";
 
 const inter = Inter({
@@ -29,7 +30,10 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body className={`${inter.variable} ${plexCondensed.variable} font-sans`}>
-                <AuthProvider>{children}</AuthProvider>
+                {/* QR-9: the brand — DR 11, or Settings › Branding's — on every surface, before sign-in too. */}
+                <BrandProvider>
+                    <AuthProvider>{children}</AuthProvider>
+                </BrandProvider>
                 <Toaster position="bottom-right" richColors closeButton />
             </body>
         </html>

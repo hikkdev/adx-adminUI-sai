@@ -270,7 +270,54 @@ export interface RepriceLogEntry {
     by: { id: string | null; name: string | null };
 }
 
+/**
+ * QR-8 (17 Sep 2026): a listing saved half-way on a publisher's phone, as
+ * `GET /listings/drafts/desk` lists it for the sales and onboarding teams —
+ * the publisher's name and number beside each, and how many days it has sat
+ * untouched. The answers themselves stay on the phone's side.
+ */
+export interface ListingDraftRow {
+    id: string;
+    displayId: string;
+    category: string | null;
+    title: string | null;
+    stepIndex: number;
+    stepKey: string | null;
+    createdAt: string;
+    updatedAt: string;
+    idleDays: number;
+    publisher: { id: string; displayId: string | null; name: string; mobile: string; city: string | null; kycStatus: string };
+}
+
+export interface ListingDraftsPage {
+    items: ListingDraftRow[];
+    total: number;
+    page: number;
+    pageSize: number;
+}
+
+export interface ListingDraftsQuery {
+    idleDays?: number;
+    q?: string;
+    category?: string;
+    sort?: "IDLE" | "NEWEST";
+    page?: number;
+    pageSize?: number;
+}
+
 export const listingsService = {
+    /** QR-8: every publisher's half-written spots — the call list. */
+    drafts: (query: ListingDraftsQuery = {}): Promise<ListingDraftsPage> => {
+        const params = new URLSearchParams();
+        if (query.idleDays !== undefined) params.set("idleDays", String(query.idleDays));
+        if (query.q) params.set("q", query.q);
+        if (query.category) params.set("category", query.category);
+        if (query.sort) params.set("sort", query.sort);
+        params.set("page", String(query.page ?? 1));
+        params.set("pageSize", String(query.pageSize ?? 50));
+        return http.get<ListingDraftsPage>(`/listings/drafts/desk?${params.toString()}`);
+    },
+
     /**
      * The table's page. No fixture fallback: the previous version drew seeded
      * listings with ids the backend has never heard of, so a row click opened

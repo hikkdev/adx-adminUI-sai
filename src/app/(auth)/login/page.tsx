@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Wordmark, useBrand } from "@/components/adx/brand";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AtSign, Eye, EyeOff, Lock } from "lucide-react";
@@ -30,6 +31,8 @@ export default function LoginPage() {
     const [submitting, setSubmitting] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
+    // QR-12: the heading names the console as Settings › Brand & theme titles it.
+    const consoleTitle = useBrand().brand.console.title;
     const [googleBusy, setGoogleBusy] = React.useState(false);
     /* A cold backend can legitimately take tens of seconds on the first
        request. Without this the button just says "Signing in…" the whole time
@@ -87,10 +90,11 @@ export default function LoginPage() {
 
     return (
         <Card className="w-full max-w-[424px] rounded-lg border-border p-8 shadow-none">
-            <span className="text-lg font-semibold tracking-tight">ADX.</span>
+            {/* QR-9: the wordmark, DR 11's or the console's own. */}
+            <Wordmark height={22} />
 
             <h1 className="mt-8 text-xl font-semibold tracking-tight text-foreground">
-                Sign in to ADX Admin
+                {`Sign in to ${consoleTitle}`}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">Use your @adx.co work email</p>
 

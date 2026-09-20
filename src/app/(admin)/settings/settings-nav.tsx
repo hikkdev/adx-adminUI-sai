@@ -9,6 +9,7 @@ export function SettingsNav() {
                 { label: "Identifiers", href: "/settings/identifiers" },
                 { label: "Geographies", href: "/settings/geographies" },
                 { label: "Integrations", href: "/settings/integrations" },
+                { label: "Brand & theme", href: "/settings/brand" },
                 { label: "AI", href: "/settings/ai" },
                 { label: "Reports", href: "/settings/reports" },
                 { label: "Import formats", href: "/settings/import-formats" },

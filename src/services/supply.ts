@@ -14,7 +14,10 @@ import type {
     SuspensionColumns,
     SuspensionScope,
     VerificationQueueRow,
+    RightsQueueRow,
     WireKycSummary,
+    PublisherPerson,
+    OnboardingFacts,
 } from "@/types";
 
 /**
@@ -110,6 +113,8 @@ export interface WirePublisher {
     listings?: { id: string }[];
     /** N2-B: the account behind the profile, on every roster row (the bare `?q=` array and the `?page=` list alike); null until somebody registers against it. */
     userId?: string | null;
+    /** QR-14: who onboarded them; absent on a server older than the stamp. */
+    onboarding?: OnboardingFacts | null;
     /* Lot A. Optional on the wire for rows older than the columns. */
     suspensionScopes?: SuspensionScope[];
     suspensionReason?: string | null;
@@ -137,6 +142,8 @@ export interface RosterPublisher extends SuspensionColumns {
     onboardingStatus: string | null;
     listingCount: number;
     onboardedByAgent: boolean;
+    /** QR-14: who onboarded them, and how — null on a row older than the stamp. */
+    onboarding: OnboardingFacts | null;
     createdAt: string;
 }
 
@@ -164,6 +171,7 @@ export function shapePublisher(wire: WirePublisher): RosterPublisher {
         // DR 08 lets a publisher sign up with no agent at all; the roster says
         // which arrived that way rather than leaving the column blank.
         onboardedByAgent: wire.agentId !== null,
+        onboarding: wire.onboarding ?? null,
         createdAt: wire.createdAt,
         suspensionScopes: wire.suspensionScopes ?? [],
         suspensionReason: wire.suspensionReason ?? null,
@@ -182,6 +190,12 @@ export interface WirePublisherDetail extends WirePublisher {
     contactName?: string | null;
     contactMobile?: string | null;
     contactEmail?: string | null;
+    /** QR-13. */
+    address?: string | null;
+    state?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    person?: PublisherPerson | null;
     /**
      * The `PublisherKyc` row's facts — N3-B: `state` and `kycId` beside the
      * record's columns, and never null before a record (the six-column
@@ -227,6 +241,13 @@ export function shapePublisherDetail(wire: WirePublisherDetail): Publisher {
         suspensionScopes: wire.suspensionScopes ?? [],
         suspensionReason: wire.suspensionReason ?? null,
         suspendedAt: wire.suspendedAt ?? null,
+        // QR-13: the address, its pin and the person, for the desk's Edit details.
+        address: wire.address ?? null,
+        state: wire.state ?? null,
+        latitude: wire.latitude ?? null,
+        longitude: wire.longitude ?? null,
+        person: wire.person ?? null,
+        onboarding: wire.onboarding ?? null,
     };
 }
 
@@ -392,6 +413,13 @@ export const supplyService = {
 
     verificationQueue: async (): Promise<VerificationQueueRow[]> =>
         live().get<VerificationQueueRow[]>("/supply/verification-queue"),
+
+    /** QR-24: `GET /supply/rights-queue?horizonDays=` — terms ending within the horizon, and ended ones, soonest first. */
+    rightsQueue: async (horizonDays = 60): Promise<RightsQueueRow[]> =>
+        live().get<RightsQueueRow[]>(`/supply/rights-queue?horizonDays=${horizonDays}`),
+
+    /** QR-24: `POST /supply/rights/sweep` — the reminders and lapses the job would do at its next tick, now. */
+    runRightsSweep: () => http.post<{ considered: number; lapsed: number; reminded: number }>("/supply/rights/sweep"),
 
     /** `GET /supply/attempts` — one cursor page of the largest size, shaped; `cursor` reads the page after it. */
     attempts: async (cursor: string | null = null): Promise<CursorPage<ListingAttempt>> => {

@@ -16,6 +16,8 @@ interface DetailShellProps {
     backHref: string;
     backLabel: string;
     title: string;
+    /** QR-3: drawn inline after the title — the verified tick, a chip. */
+    titleAdornment?: React.ReactNode;
     subtitle?: string;
     actions?: React.ReactNode;
     kpis?: KpiStat[];
@@ -31,6 +33,7 @@ export function DetailShell({
     backHref,
     backLabel,
     title,
+    titleAdornment,
     subtitle,
     actions,
     kpis,
@@ -49,8 +52,9 @@ export function DetailShell({
                 </Link>
                 <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
-                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
                             {title}
+                            {titleAdornment}
                         </h1>
                         {subtitle && (
                             <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>

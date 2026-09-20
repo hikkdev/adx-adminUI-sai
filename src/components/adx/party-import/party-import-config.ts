@@ -121,6 +121,13 @@ const PUBLISHER_COLUMN_META: Record<(typeof PUBLISHER_COLUMNS)[number], Omit<Imp
     contactMobile: { label: "Contact mobile", hint: "Ten digits.", example: "9876500000" },
     contactEmail: { label: "Contact email", hint: "Lower-cased.", example: "kumar@example.in" },
     panNumber: { label: "PAN", hint: "ABCDE1234F, upper-cased; one already on another publisher is a warning.", example: "ABCDE1234F" },
+    // QR-13: a row naming the person opens (or adopts) their account with the publisher; with the basics in it lands complete.
+    firstName: { label: "First name", hint: "Opens the owner's account with the row; the app never asks their name again.", example: "Rakesh" },
+    lastName: { label: "Last name", hint: "With the first name.", example: "Sharma" },
+    dateOfBirth: { label: "Date of birth", hint: "YYYY-MM-DD, 18 or over — one of the four readiness basics.", example: "1980-05-14" },
+    gender: { label: "Gender", hint: "MALE, FEMALE, OTHER or PREFER_NOT_TO_SAY — any casing; optional.", example: "MALE" },
+    latitude: { label: "Latitude", hint: "The address pin, with the longitude; decimal degrees.", example: "13.0604" },
+    longitude: { label: "Longitude", hint: "With the latitude.", example: "80.2496" },
 };
 
 export const PUBLISHER_IMPORT_CONFIG: PartyImportConfig = {
@@ -194,6 +201,11 @@ export const PARTY_IMPORT_CONFIGS: Record<ImportParty, PartyImportConfig> = {
             CITY,
             STATE,
             { key: "contactName", label: "Contact name", hint: "Validated and kept on the report, not written: the profile has no contact column.", example: "A. Rao" },
+            /* QR-15: the person — given a first name, the row opens the sign-in account up front, as the desk does. */
+            { key: "firstName", label: "First name", hint: "Given, the row opens the sign-in account with the number (lastName, address and city needed too; companyName unless INDIVIDUAL).", example: "Priya" },
+            { key: "lastName", label: "Last name", hint: "The person's last name.", example: "Menon" },
+            { key: "dateOfBirth", label: "Date of birth", hint: "YYYY-MM-DD, 18 or over; on the account, not the profile.", example: "1988-02-14" },
+            { key: "gender", label: "Gender", hint: "MALE, FEMALE, OTHER or PREFER_NOT_TO_SAY — any casing; on the account.", example: "FEMALE" },
         ],
         grid: [
             { key: "name", label: "Name" },

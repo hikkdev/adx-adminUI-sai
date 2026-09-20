@@ -53,9 +53,11 @@ export function CreatedState({ publisher, onAnother }: { publisher: CreatedPubli
                     {publisher.displayId ? <span className="font-mono text-xs">{publisher.displayId}</span> : null}
                 </p>
                 <p className="mt-1.5 text-foreground">
-                    The owner claims the account by signing in to the publisher app with{" "}
-                    <span className="font-mono">{publisher.mobile}</span>. There is nothing to send them: the number is
-                    the invitation.
+                    {publisher.userId
+                        ? "The account is open. "
+                        : "The owner claims the account by signing in. "}
+                    They sign in to the publisher app with <span className="font-mono">{publisher.mobile}</span>, agree to the platform terms, and carry
+                    on — nothing here is asked of them again. There is nothing to send them: the number is the invitation.
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                     {publisher.agentId ? "Attributed to the agent you named." : "On nobody's book — no agent is credited."}
@@ -217,7 +219,7 @@ export function AddPublisherForm({ onCreated }: { onCreated: (publisher: Created
  * and a publisher opened at the desk goes on nobody's book unless ops says
  * whose. Once picked, the agent is shown as a chip with a clear.
  */
-function AgentPicker({ value, onChange }: { value: AgentSummary | null; onChange: (agent: AgentSummary | null) => void }) {
+export function AgentPicker({ value, onChange }: { value: AgentSummary | null; onChange: (agent: AgentSummary | null) => void }) {
     const [query, setQuery] = React.useState("");
     const q = useDebounced(query.trim(), 350);
     const matches = useApiResource<AgentSummary[]>(`dashboard:agent-search:${q}`, () =>

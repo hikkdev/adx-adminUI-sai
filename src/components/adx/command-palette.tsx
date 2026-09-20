@@ -23,7 +23,7 @@ interface CommandPaletteProps {
 }
 
 const quickActions = [
-    { title: "Add publisher", href: "/publishers/directory", icon: Plus },
+    { title: "Onboard a publisher", href: "/publishers/directory", icon: Plus },
     { title: "Review KYC queue", href: "/kyc", icon: FileCheck },
     { title: "Open withdrawal approvals", href: "/finance", icon: Wallet },
 ];

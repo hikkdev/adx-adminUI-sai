@@ -33,7 +33,10 @@ const PAGE_SIZE = 100;
 
 export function ListingsLoader() {
     const live = isLive("listings");
-    const [status, setStatus] = React.useState<ListingLifecycle | "ALL">("PENDING_REVIEW");
+    // QR-21 (the owner, 17 Sep 2026): the page opens on every listing, the
+    // review queue one chip away — a desk that opened on the queue read as
+    // "one listing" to a reader who had just seeded twenty live ones.
+    const [status, setStatus] = React.useState<ListingLifecycle | "ALL">("ALL");
 
     const resource = useApiResource<AdminListingsPage>(
         `listings:list:${status}:${live}`,

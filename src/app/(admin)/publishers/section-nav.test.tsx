@@ -50,7 +50,7 @@ describe("the rail after the fold", () => {
 });
 
 describe("the two SubNavs", () => {
-    it("PublishersNav: Overview | Directory | Activation funnel | Import, the current page marked", () => {
+    it("PublishersNav: Overview | Directory | Activation funnel | Import | Onboarding board, the current page marked", () => {
         location.pathname = "/publishers/activation";
         render(<PublishersNav />);
         const links = screen.getAllByRole("link");
@@ -58,7 +58,7 @@ describe("the two SubNavs", () => {
             "Overview→/publishers",
             "Directory→/publishers/directory",
             "Activation funnel→/publishers/activation",
-            "Import→/publishers/import",
+            "Import→/publishers/import", "Onboarding board→/settings/reports/onboarding-board",
         ]);
         expect(screen.getByRole("link", { name: "Activation funnel" })).toHaveAttribute("aria-current", "page");
         expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");

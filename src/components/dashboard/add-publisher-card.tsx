@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { PlugZap } from "lucide-react";
+import { PlugZap, UserPlus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AddPublisherForm, CreatedState } from "@/components/adx/add-publisher-form";
+import { CreatePublisherDialog } from "@/app/(admin)/publishers/create-publisher-dialog";
 import { isLive } from "@/lib/api-config";
-import type { CreatedPublisher } from "@/services/publishers";
 
 /**
  * The dashboard's "Add a publisher" card — `POST /publishers` from the desk.
@@ -24,14 +24,15 @@ import type { CreatedPublisher } from "@/services/publishers";
  */
 export function AddPublisherCard() {
     const live = isLive("supply");
-    const [created, setCreated] = React.useState<CreatedPublisher | null>(null);
+    // QR-13: the card opens the full onboarding — the desk collects what the app's ladder does, so the owner is never asked twice.
+    const [open, setOpen] = React.useState(false);
 
     return (
         <Card className="flex flex-col rounded-lg border-border p-5 shadow-none">
             <div>
-                <h2 className="text-base font-semibold text-foreground">Add a publisher</h2>
+                <h2 className="text-base font-semibold text-foreground">Onboard a publisher</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                    Opens the account now; the owner claims it by signing in with their number
+                    Everything the app&apos;s onboarding asks, entered here; the owner signs in, agrees to the terms, and carries on
                 </p>
             </div>
 
@@ -43,10 +44,22 @@ export function AddPublisherCard() {
                         and point the console at the ADX backend to use this card.
                     </p>
                 </div>
-            ) : created ? (
-                <CreatedState publisher={created} onAnother={() => setCreated(null)} />
             ) : (
-                <AddPublisherForm onCreated={setCreated} />
+                <div className="mt-4 flex flex-1 flex-col justify-between gap-4">
+                    <ul className="space-y-1 text-sm text-muted-foreground">
+                        <li>1 · Account type</li>
+                        <li>2 · The person — name, number, email, date of birth</li>
+                        <li>3 · The address, off the map, with its pin</li>
+                        <li>4 · Business and contact person, for a business or organisation</li>
+                    </ul>
+                    <div className="flex justify-end">
+                        <Button onClick={() => setOpen(true)} data-testid="dashboard-onboard-publisher">
+                            <UserPlus className="mr-1.5 size-4" aria-hidden />
+                            Onboard a publisher
+                        </Button>
+                    </div>
+                    <CreatePublisherDialog open={open} onOpenChange={setOpen} />
+                </div>
             )}
         </Card>
     );

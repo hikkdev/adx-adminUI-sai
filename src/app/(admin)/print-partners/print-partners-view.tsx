@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/adx/empty-state";
 import { FilterChips } from "@/components/adx/filter-chips";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { VerifiedTick } from "@/components/adx/verified-tick";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -148,7 +149,10 @@ export function PrintPartnersView({
                 header: ({ column }) => <SortableHeader column={column}>Shop</SortableHeader>,
                 cell: ({ row }) => (
                     <div className="min-w-0">
-                        <p className="truncate font-medium text-foreground">{row.original.name}</p>
+                        <p className="flex items-center gap-1.5 truncate font-medium text-foreground">
+                            {row.original.name}
+                            <VerifiedTick kycStatus={row.original.kycStatus} />
+                        </p>
                         <p className="truncate text-xs text-muted-foreground">
                             {[row.original.displayId, row.original.legalName].filter(Boolean).join(" · ") || "—"}
                         </p>

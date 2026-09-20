@@ -28,7 +28,7 @@ export function PublishersOverviewView() {
                 <Button variant="outline" className="h-9 bg-card" asChild>
                     <Link href={meta.directory}>
                         <Plus className="size-4" />
-                        Add publisher
+                        Onboard a publisher
                     </Link>
                 </Button>
             }

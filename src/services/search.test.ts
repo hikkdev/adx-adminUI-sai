@@ -63,6 +63,7 @@ const publisher = (over: Partial<RosterPublisher> = {}): RosterPublisher => ({
     onboardingStatus: null,
     listingCount: 2,
     onboardedByAgent: true,
+    onboarding: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     suspensionScopes: [],
     suspensionReason: null,

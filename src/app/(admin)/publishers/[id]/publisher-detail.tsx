@@ -21,6 +21,7 @@ import { DataTable, SortableHeader } from "@/components/adx/data-table";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { KpiCard } from "@/components/adx/kpi-card";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { VerifiedTick } from "@/components/adx/verified-tick";
 import { ScanForSignalsButton } from "@/components/adx/scan-for-signals";
 import { SuspensionActions } from "@/components/adx/suspend-dialog";
 import { SuspensionCard } from "@/components/adx/suspension-card";
@@ -35,6 +36,8 @@ import { PUBLISHER_TYPE_LABEL, feedKindLabel, subscriptionLine, type PublisherSu
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
 import { RecordAtDeskDialog } from "@/app/(admin)/kyc/_shared/record-at-desk-dialog";
 import type { SuspensionView } from "@/services/suspension";
+import { onboardingLine } from "@/types";
+import { EditPublisherDrawer } from "./edit-publisher-drawer";
 import { PublisherActivityLog } from "./publisher-activity-log";
 import { SubscriptionCard, type PublisherSubscriptionFacts } from "./subscription-card";
 import { kycStatusMeta, type KpiStat, type KycCase, type Publisher } from "@/types";
@@ -246,8 +249,9 @@ export function PublisherDetail({
                 </Link>
                 <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
                     <div>
-                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
                             {publisher.name}
+                            <VerifiedTick kycStatus={publisher.kycStatus} size={18} />
                         </h1>
                         {publisher.displayId && (
                             <p className="mt-1 font-mono text-xs tracking-wide text-muted-foreground">
@@ -258,6 +262,10 @@ export function PublisherDetail({
                             {publisher.sites} sites, KYC {kyc.label.toLowerCase()}
                             {publisher.city ? ` · ${publisher.city}` : ""}
                         </p>
+                        {/* QR-14: who onboarded them, and how. */}
+                        <p className="mt-0.5 text-sm text-muted-foreground" data-testid="onboarded-line">
+                            {`Onboarded: ${onboardingLine(publisher.onboarding)}${publisher.onboarding?.at ? ` · ${formatDate(publisher.onboarding.at)}` : ""}`}
+                        </p>
                         {/* P-C: the plan the bookings carry, off the summary's running subscription. */}
                         {tierLine && (
                             <p className="mt-0.5 text-sm text-muted-foreground" data-testid="subscription-line">
@@ -266,6 +274,8 @@ export function PublisherDetail({
                         )}
                     </div>
                     <div className="flex items-center gap-2">
+                        {/* QR-13: the desk edits everything the app's onboarding collects. */}
+                        <EditPublisherDrawer publisher={publisher} onChanged={onChanged} />
                         {/* Package U: the publisher's listings or rate card, imported
                             on their behalf — the kit opens with this publisher set. */}
                         <DropdownMenu>

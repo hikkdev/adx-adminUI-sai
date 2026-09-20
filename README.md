@@ -429,6 +429,37 @@ Tokens are defined in `src/app/globals.css` and mapped to Tailwind in
 `tailwind.config.ts`. The accent (`#8d0b0c`), canvas (`#f5f5f5`), 8px radius and
 the status tints match the Figma `ADX Control Ledger` variable collection.
 
+**The brand (QR-9, 17 Sep 2026).** `src/components/adx/brand.tsx` reads
+`GET /app/branding` once on load (`BrandProvider` in `app/layout.tsx`; DR 11
+from `public/brand/*.svg` until it answers) and writes the primary colour to
+`--primary` / `--ring` / `--primary-foreground`, so a published colour
+recolours every button and focus ring without a build. `Wordmark` (the
+header, the login page) and `Mark` draw the brand's logo URLs.
+
+**Settings › Brand & theme (QR-11)** — `src/app/(admin)/settings/brand/` —
+is the one place the brand is managed for every surface. The page edits a
+DRAFT (`PUT /branding/draft`) in four sections (QR-12): **Shared
+identity** — the name, the four colours (a picker on each swatch, a reset
+per colour, presets — DR 11's set, DR 09's dark red, the deep colour as
+primary — and the four legibility checks) and the five logo files, each
+slot stating the format, the size, the proportions and where every surface
+draws it; **Apps** — the sign-in tagline and the 1024 × 1024 launcher icon
+for the next build; **Admin panel** — the console title (the tab title's
+suffix, swapped in by `BrandProvider`, and the login heading); **Website**
+— the site title, the meta description, the hero lines, the hero image
+(≥ 1920 × 1080), the share card (exactly 1200 × 630) and the favicon. Each
+surface section carries a "what it draws" table and its own preview
+(`previews.tsx`); the checks (`brandChecks` in `services/branding.ts`, the
+backend's maths repeated) redraw from the form as you type, and a raster
+file of the wrong size is refused before it uploads (`image-size.ts`). **Publish**
+freezes the draft as the next release (`POST /branding/publish`, with a
+note and the flagged checks shown first) and re-reads the brand so the
+console recolours at once; **History** lists every release with **Restore**
+(`POST /branding/releases/:n/restore`), which republishes an old one. The
+phones follow one launch behind (QR-10): they cache the brand at launch
+and boot on it next time. `src/app/icon.svg` and `apple-icon.png` are the
+DR 11 tile and are baked, like the phones' launcher icons.
+
 Two known gaps, both worth closing before anyone generates code from Figma:
 
 - **The neutral ramp has drifted.** The code ships shadcn's cool zinc neutrals;
@@ -440,6 +471,56 @@ Two known gaps, both worth closing before anyone generates code from Figma:
   hex and raw type — no bound variables, no applied text styles — so Dev Mode
   inspection and codegen emit hardcoded values rather than tokens. Substitute
   tokens by hand when working from a frame.
+
+## Publishers onboarded at the desk (QR-13, 17 Sep 2026)
+
+The desk and the app's ladder are one onboarding. "Onboard a publisher"
+(the publishers page's dialog and the dashboard card) is
+`src/components/adx/publisher-onboarding-form.tsx` — the ladder's sections
+in the ladder's order (account type; the person: first and last name, the
+number, email, date of birth, gender; the address off the map with a
+draggable pin, through the same `/geo/autocomplete`, `/geo/places` and the
+`MapSurface` seam; the business's GSTIN; the contact person) with the app's
+required fields per account type (`problemsOf`, mirrored by the backend's
+`deskOnboarding`). `POST /publishers` opens the account on the number with
+the PUBLISHER role, links it, and with the four readiness basics in marks
+the onboarding complete — the owner's first sign-in is OTP → platform terms
+→ home. The party page's **Edit details** (`edit-publisher-drawer.tsx`,
+`supply.edit`) is the same form over `PATCH /publishers/:id`, prefilled
+from the row and the person (`publisher.person` off the detail read). The
+bulk import takes the same person and pin columns (`firstName, lastName,
+dateOfBirth, gender, latitude, longitude`).
+
+## Who onboarded whom (QR-14, 17 Sep 2026)
+
+Every party page says how the account arrived and who opened it — "Onboarded:
+Desk · Asha Rao (Ops manager) · 17 Sep" — off `onboarding` on the detail
+read (`onboardingLine` in `types/directory.ts`); the publisher roster's
+"Onboarded" column says the same, with an "Onboarded via" filter beside the
+KYC one. **Settings › Reports › Onboarding board** (also a tab on the
+publishers pages) is the team's view: `GET /reports/boards/onboarding` for a
+window preset or a from/to, cut by door or role, ranked by parties
+onboarded with the milestones each reached; self-signups sit apart as
+"organic". "Export as report" leads to the `onboarding-board` report kind,
+which prints the same rows as CSV.
+
+## The desk onboards an advertiser the way the app does (QR-15, 17 Sep 2026)
+
+The publisher's QR-13/14 pieces, on the advertiser side. **Advertisers ›
+Onboard an advertiser** is one form in the app's order — account type,
+the person, billing — with the app's required set (first and last name,
+the number, the billing address, the city; a company name for anyone but
+an individual) and the rest optional; the server opens the sign-in account
+with the number and the ADVERTISER role up front, so the owner signs in,
+agrees to the terms and carries on. The advertiser page has **Edit
+details** (`demand.edit`): the same form, prefilled from the row and the
+person behind it (`person` on `GET /advertisers/:id`), saved with
+`PATCH /advertisers/:id` — a profile nobody has claimed that is given a
+first name gets its account opened. The page prints "Person", "Billing
+address" and "Onboarded"; the roster has an "Onboarded" column and an
+"Onboarded via" filter. The advertiser import takes the four person
+columns. Files: `app/(admin)/advertisers/advertiser-onboarding-form.tsx`,
+`create-advertiser-dialog.tsx`, `[id]/edit-advertiser-drawer.tsx`.
 
 ## Known gaps
 

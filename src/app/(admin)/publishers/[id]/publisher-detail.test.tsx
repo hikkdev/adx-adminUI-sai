@@ -36,6 +36,8 @@ vi.mock("@/components/adx/suspend-dialog", () => ({ SuspensionActions: () => nul
 vi.mock("@/components/adx/scan-for-signals", () => ({ ScanForSignalsButton: () => null }));
 vi.mock("@/components/adx/activity-timeline", () => ({ ActivityTimeline: () => null }));
 vi.mock("./subscription-card", () => ({ SubscriptionCard: () => null }));
+// QR-13: the desk's Edit details drawer reads the session; the page test is about the page.
+vi.mock("./edit-publisher-drawer", () => ({ EditPublisherDrawer: () => null }));
 /* R-C: the action log reads and writes on its own; tested in publisher-activity-log.test.tsx. */
 vi.mock("./publisher-activity-log", () => ({ PublisherActivityLog: () => null }));
 
@@ -87,6 +89,12 @@ const fresh: Publisher = {
     onboardingStatus: "PENDING_ONBOARDING",
     createdAt: "2026-09-14T15:00:00.000Z",
     activatedAt: null,
+    address: null,
+    state: null,
+    latitude: null,
+    longitude: null,
+    person: null,
+    onboarding: null,
     suspensionScopes: [],
     suspensionReason: null,
     suspendedAt: null,

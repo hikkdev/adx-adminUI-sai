@@ -10,6 +10,7 @@ import { ActivityTimeline } from "@/components/adx/activity-timeline";
 import { DetailShell } from "@/components/adx/detail-shell";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { VerifiedTick } from "@/components/adx/verified-tick";
 import { isLive } from "@/lib/api-config";
 import { formatDate, formatINR, formatMoney, formatNumber } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -38,7 +39,8 @@ import {
     type InvoiceRow,
 } from "@/services/invoices";
 import { AdvertiserMoney } from "./advertiser-money";
-import { ADVERTISER_STATUS_META, ADVERTISER_TYPE_LABELS, type Advertiser, type AdvertiserKycCase } from "@/types";
+import { EditAdvertiserDrawer } from "./edit-advertiser-drawer";
+import { ADVERTISER_STATUS_META, ADVERTISER_TYPE_LABELS, onboardingLine, type Advertiser, type AdvertiserKycCase } from "@/types";
 
 interface AdvertiserDetailProps {
     advertiser: Advertiser;
@@ -114,8 +116,11 @@ export function AdvertiserDetail({
             backHref="/advertisers/directory"
             backLabel="Advertisers"
             title={advertiser.name}
+            titleAdornment={<VerifiedTick kycStatus={advertiser.kycStatus} size={18} />}
             actions={
                 <>
+                    {/* QR-15: the desk edits everything the app collects, on the same form it onboards with. */}
+                    <EditAdvertiserDrawer advertiser={advertiser} onChanged={onChanged} />
                     <Button variant="outline" className="bg-card" asChild>
                         <Link href={`/campaigns?advertiserId=${encodeURIComponent(advertiser.id)}`}>
                             View campaign queue
@@ -200,6 +205,15 @@ export function AdvertiserDetail({
                                     items={[
                                         ["Mobile", advertiser.contact],
                                         ["Email", advertiser.email ?? "—"],
+                                        /* QR-15: the person behind the account — what the Edit details drawer edits. */
+                                        [
+                                            "Person",
+                                            advertiser.person
+                                                ? [advertiser.person.firstName, advertiser.person.lastName].filter(Boolean).join(" ") || "—"
+                                                : advertiser.userId
+                                                  ? "—"
+                                                  : "No app account yet",
+                                        ],
                                         ["Registered name", advertiser.companyName ?? "—"],
                                         [
                                             "Industry",
@@ -224,6 +238,7 @@ export function AdvertiserDetail({
                                             </span>,
                                         ],
                                         ["GSTIN", advertiser.gstin ?? "—"],
+                                        ["Billing address", advertiser.billingAddress ?? "—"],
                                         [
                                             "Location",
                                             [advertiser.city, advertiser.state]
@@ -231,6 +246,8 @@ export function AdvertiserDetail({
                                                 .join(", ") || "—",
                                         ],
                                         ["Joined", formatDate(advertiser.joinedAt)],
+                                        /* QR-14/15: the door the account came through, and who opened it. */
+                                        ["Onboarded", onboardingLine(advertiser.onboarding)],
                                         [
                                             "Activated",
                                             advertiser.activatedAt
