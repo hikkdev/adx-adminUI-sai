@@ -34,7 +34,7 @@ import type { CityFacet } from "@/lib/city-facet";
 
 export type ActiveFilter = "ACTIVE" | "INACTIVE" | "ALL";
 /** Lot H: the app state, cut on the page in hand — the list route has no facet for it. */
-export type SignInFilter = "ACTIVE" | "INVITED" | "ALL";
+export type SignInFilter = "ACTIVE" | "INVITED" | "APPLIED" | "ALL";
 
 interface PrintPartnersViewProps {
     page: PrintPartnerPage;
@@ -72,10 +72,10 @@ export function PrintPartnersView({
     const router = useRouter();
     /* Lot H: counted over the page in hand, which is the whole roster up to a hundred shops. */
     const signInCounts = React.useMemo(() => {
-        const out: Record<SignInFilter, number> = { ACTIVE: 0, INVITED: 0, ALL: page.items.length };
+        const out: Record<SignInFilter, number> = { ACTIVE: 0, INVITED: 0, APPLIED: 0, ALL: page.items.length };
         for (const partner of page.items) {
             const state = signInState(partner);
-            if (state === "ACTIVE" || state === "INVITED") out[state] += 1;
+            if (state === "ACTIVE" || state === "INVITED" || state === "APPLIED") out[state] += 1;
         }
         return out;
     }, [page.items]);
@@ -223,9 +223,11 @@ export function PrintPartnersView({
                             <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
                                 {state === "ACTIVE" && row.original.activatedAt
                                     ? `since ${formatDate(row.original.activatedAt)}`
-                                    : state === "INVITED"
-                                      ? "account not switched on"
-                                      : "sessions ended"}
+                                    : state === "APPLIED" && row.original.appliedAt
+                                      ? `applied ${formatDate(row.original.appliedAt)} — review`
+                                      : state === "INVITED"
+                                        ? "account not switched on"
+                                        : "sessions ended"}
                             </p>
                         </div>
                     );
@@ -321,6 +323,7 @@ export function PrintPartnersView({
                     chips={[
                         { value: "ALL", label: "Any app state" },
                         { value: "ACTIVE", label: "Active", count: signInCounts.ACTIVE },
+                        { value: "APPLIED", label: "Applications", count: signInCounts.APPLIED },
                         { value: "INVITED", label: "Invited", count: signInCounts.INVITED },
                     ]}
                 />

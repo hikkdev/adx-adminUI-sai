@@ -384,7 +384,7 @@ export function DisputesView({ page, summary, facets, onFacetsChange, onChanged 
                                             {selected.resolutionNote && <p className="mt-1 text-sm text-muted-foreground">{selected.resolutionNote}</p>}
                                             {selected.creditedAmount && (
                                                 <p className="mt-2 text-sm text-foreground">
-                                                    ₹{formatMoney(selected.creditedAmount)}{" "}
+                                                    {formatMoney(selected.creditedAmount)}{" "}
                                                     {selected.creditStatus === "RELEASED" ? "released to the wallet" : "credit approved — pending finance release"}
                                                 </p>
                                             )}

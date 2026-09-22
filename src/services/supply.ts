@@ -103,6 +103,8 @@ export interface WirePublisher {
     name: string;
     mobile: string;
     email?: string | null;
+    /** AG-5: the importance band ops set; absent on a server older than the routing. */
+    sizeBand?: string | null;
     city: string | null;
     type: string | null;
     kycStatus: string;
@@ -233,6 +235,7 @@ export function shapePublisherDetail(wire: WirePublisherDetail): Publisher {
         pan: wire.kyc?.panNumber ?? null,
         // N3-B: the party's KYC state as the server derives it — the same word the queue row carries.
         kyc: shapeKycSummary(wire.kyc, wire.kycStatus),
+        sizeBand: wire.sizeBand ?? null,
         sites: wire.listings?.length ?? 0,
         agentId: wire.agentId,
         onboardingStatus: wire.onboardingStatus ?? null,

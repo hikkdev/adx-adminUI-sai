@@ -33,6 +33,13 @@ import { agentLabel, type AgentSummary } from "@/services/agents";
 import {
     LEAD_SIDE_LABEL,
     LEAD_STATUSES,
+    LEAD_TEMPERATURES,
+    STAGE_META,
+    TEMPERATURE_META,
+    daysInStage,
+    stageRank,
+    temperatureMeta,
+    type LeadTemperature,
     assignedLabel,
     isUnassigned,
     leadStatusLabel,
@@ -43,11 +50,15 @@ import {
     type LeadsPage,
 } from "@/services/leads";
 import { ConvertLeadDialog, CreateLeadDialog, ImportLeadsDialog } from "./leads-dialogs";
+import { LostDialog } from "./lost-dialog";
 
 interface LeadsTableProps {
     page: LeadsPage;
     status: LeadStatus | "ALL";
     onStatusChange: (status: LeadStatus | "ALL") => void;
+    /** LH1: the temperature facet. */
+    temperature: LeadTemperature | "ALL";
+    onTemperatureChange: (temperature: LeadTemperature | "ALL") => void;
     unassignedOnly: boolean;
     onUnassignedOnlyChange: (value: boolean) => void;
     /** The roster, for naming the assignee and filling the Assign dialog. */
@@ -68,6 +79,8 @@ export function LeadsTable({
     page,
     status,
     onStatusChange,
+    temperature,
+    onTemperatureChange,
     unassignedOnly,
     onUnassignedOnlyChange,
     agents,
@@ -202,6 +215,44 @@ export function LeadsTable({
                 ),
             },
             {
+                id: "temperature",
+                accessorFn: (lead) => lead.score ?? -1,
+                header: ({ column }) => <SortableHeader column={column}>Temperature</SortableHeader>,
+                cell: ({ row }) => {
+                    // LH1: the computed temperature with its score; the value
+                    // under it is what the business is worth to ADX, not the fee.
+                    const meta = temperatureMeta(row.original.temperature);
+                    return (
+                        <div className="min-w-[120px]">
+                            <div className="flex items-center gap-1.5">
+                                <StatusBadge status={meta} />
+                                {typeof row.original.score === "number" && <span className="text-xs tabular-nums text-muted-foreground">{row.original.score}</span>}
+                            </div>
+                            {row.original.estimatedValue && (
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">Worth {formatINR(Number(row.original.estimatedValue))}</p>
+                            )}
+                        </div>
+                    );
+                },
+            },
+            {
+                id: "stage",
+                accessorFn: (lead) => (lead.stage ? stageRank(lead.stage) : -1),
+                header: ({ column }) => <SortableHeader column={column}>Stage</SortableHeader>,
+                cell: ({ row }) => {
+                    // LH2: where the deal is, and how long it has sat there.
+                    const stage = row.original.stage;
+                    if (!stage) return <span className="text-muted-foreground">—</span>;
+                    const days = daysInStage(row.original.stageChangedAt);
+                    return (
+                        <div className="min-w-[110px]">
+                            <StatusBadge status={STAGE_META[stage]} />
+                            {days !== null && <p className="mt-0.5 text-[11px] text-muted-foreground">{days === 0 ? "today" : `${days} d here`}</p>}
+                        </div>
+                    );
+                },
+            },
+            {
                 id: "status",
                 accessorKey: "status",
                 header: "Status",
@@ -317,6 +368,19 @@ export function LeadsTable({
                                 ))}
                             </SelectContent>
                         </Select>
+                        <Select value={temperature} onValueChange={(value) => onTemperatureChange(value as LeadTemperature | "ALL")}>
+                            <SelectTrigger className="h-9 w-[190px] bg-card" aria-label="Temperature">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">Temperature: All</SelectItem>
+                                {LEAD_TEMPERATURES.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                        {TEMPERATURE_META[value].label} ({page.temperatureCounts?.[value] ?? 0})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <div className="flex h-9 items-center gap-2 rounded-md border bg-card px-3">
                             <Switch
                                 id="leads-unassigned-only"
@@ -400,28 +464,8 @@ export function LeadsTable({
                 onConverted={onChanged}
             />
 
-            <ConfirmDialog
-                open={lostTarget !== null}
-                onOpenChange={(open) => !open && setLostTarget(null)}
-                title={lostTarget ? `Close ${lostTarget.businessName} as lost?` : "Close as lost"}
-                description="Nothing is deleted. The lead stays on record so the next agent knows this business has already been approached, and it drops out of the queues agents work from."
-                confirmLabel="Close as lost"
-                destructive
-                onConfirm={async () => {
-                    const target = lostTarget;
-                    setLostTarget(null);
-                    if (!target) return;
-                    try {
-                        await leadsService.closeAsLost(target.id);
-                        toast.success(`${target.businessName} closed as lost`);
-                        onChanged();
-                    } catch (error) {
-                        toast.error(
-                            error instanceof Error ? error.message : "Could not close this lead",
-                        );
-                    }
-                }}
-            />
+            {/* LH2 (D11): a loss carries its reason. */}
+            <LostDialog lead={lostTarget} onOpenChange={(open) => !open && setLostTarget(null)} onLost={onChanged} />
         </div>
     );
 }

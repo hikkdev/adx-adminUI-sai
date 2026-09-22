@@ -47,6 +47,8 @@ export interface AccountClosureFacts {
  */
 export interface Publisher extends SuspensionColumns {
     id: string;
+    /** AG-5: the importance band — INDIVIDUAL, SMALL_AGENCY or LARGE_AGENCY; null from an older server. */
+    sizeBand?: string | null;
     /** Human-readable identifier, e.g. PUB-1909-2601. Issued once at signup. */
     displayId: string | null;
     /** The sign-in account behind the profile. Null until the owner claims it by signing in with the number. */
@@ -166,6 +168,8 @@ export const ADVERTISER_STATUS_META: Record<AdvertiserStatus, StatusMeta> = {
  */
 export interface Advertiser extends SuspensionColumns {
     id: string;
+    /** AG-5: the importance band — INDIVIDUAL, SMALL_AGENCY or LARGE_AGENCY; null from an older server. */
+    sizeBand?: string | null;
     name: string;
     /** ADV-1909-2601. Issued once at account creation, never reissued. */
     displayId: string | null;
@@ -279,4 +283,26 @@ export interface Agent extends SuspensionColumns {
      * profile; undefined on the listing, which does not join them.
      */
     user?: AccountClosureFacts | null;
+    /**
+     * AG-1: where the profile is on the application ladder and, once
+     * activated, the engagement the desk set. Null on a server older than
+     * the columns; an old row reads ACTIVE.
+     */
+    engagement: AgentEngagement | null;
+}
+
+/** AG-1: the ladder stage, the grade and the engagement as `GET /agents/:id` carries them. */
+export interface AgentEngagement {
+    stage: string;
+    grade: string | null;
+    type: string | null;
+    startAt: string | null;
+    endAt: string | null;
+    probationEndsAt: string | null;
+    reportingManagerId: string | null;
+    weeklyHours: number | null;
+    activatedAt: string | null;
+    exitedAt: string | null;
+    exitReason: string | null;
+    rehireEligible: boolean;
 }

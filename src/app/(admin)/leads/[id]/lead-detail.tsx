@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { FieldList } from "@/components/adx/simple-table";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
@@ -21,7 +20,13 @@ import {
     whereLabel,
     type LeadDetail,
 } from "@/services/leads";
+import { openPrivateFile, privateFileUrl } from "@/components/adx/private-file";
 import { ConvertLeadDialog } from "../leads-dialogs";
+import { LostDialog } from "../lost-dialog";
+import { LeadConversation } from "./lead-conversation";
+import { LeadInviteCard } from "./lead-invite";
+import { LeadScoreCard } from "./lead-score-card";
+import { LeadStageCard } from "./lead-stage-card";
 
 interface LeadDetailViewProps {
     lead: LeadDetail;
@@ -112,11 +117,39 @@ export function LeadDetailView({ lead, agents, onChanged }: LeadDetailViewProps)
                             ["Est. commission", lead.estimatedCommission === null ? "—" : formatMoney(lead.estimatedCommission)],
                             ["Visit", lead.visitBooked ? "Booked" : "Not booked"],
                             ["First contact", lead.firstContactedAt ? formatDateTime(lead.firstContactedAt) : "Not yet"],
+                            // LH4: spotted in the street — when, and by whom.
+                            ...(lead.capturedAt ? [["Spotted", `${formatDateTime(lead.capturedAt)} by ${agentName(lead.capturedByAgentId ?? null)}`] as [string, string]] : []),
                         ]}
                     />
+                    {lead.photoFileIds && lead.photoFileIds.length > 0 && (
+                        <div className="mt-4" data-testid="lead-photos">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Photos from the street</h4>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                {lead.photoFileIds.map((fileId, index) => (
+                                    <button
+                                        key={fileId}
+                                        type="button"
+                                        className="rounded-md border px-2.5 py-1 text-xs text-primary hover:underline"
+                                        onClick={() => {
+                                            void openPrivateFile(privateFileUrl(fileId)).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not open the photo."));
+                                        }}
+                                    >
+                                        Photo {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">Kept on the lead for the listing draft when it converts.</p>
+                        </div>
+                    )}
                 </Card>
 
                 <div className="space-y-4 lg:col-span-2">
+                    {/* LH2: where the deal is, and what moves it forward. */}
+                    <LeadStageCard lead={lead} onChanged={onChanged} />
+                    {/* LH7 (D6): the invite link and the proposals. */}
+                    <LeadInviteCard lead={lead} onChanged={onChanged} />
+                    {/* LH1: why it is hot, warm or cold. */}
+                    <LeadScoreCard lead={lead} onChanged={onChanged} />
                     <Card className="rounded-lg border-border p-5 shadow-none">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Who is on this</h3>
                         <p className="mt-2 text-sm text-foreground">{agentName(lead.assignedAgentId)}</p>
@@ -181,23 +214,13 @@ export function LeadDetailView({ lead, agents, onChanged }: LeadDetailViewProps)
                 </div>
             </div>
 
+            {/* LH6: the unified conversation — every channel, the composer, the call, the sequence. */}
+            <LeadConversation lead={lead} onChanged={onChanged} />
+
             <ConvertLeadDialog lead={converting ? lead : null} onOpenChange={setConverting} onConverted={onChanged} />
 
-            <ConfirmDialog
-                open={closing}
-                onOpenChange={setClosing}
-                title={`Close ${lead.businessName} as lost?`}
-                description="Nothing is deleted. The lead stays on record so the next agent knows this business has already been approached, and it drops out of the queues agents work from."
-                confirmLabel="Close as lost"
-                destructive
-                busy={busy}
-                onConfirm={() =>
-                    void run(`${lead.businessName} closed as lost`, async () => {
-                        await leadsService.closeAsLost(lead.id);
-                        setClosing(false);
-                    })
-                }
-            />
+            {/* LH2 (D11): a loss carries its reason. */}
+            <LostDialog lead={closing ? lead : null} onOpenChange={setClosing} onLost={onChanged} />
         </div>
     );
 }

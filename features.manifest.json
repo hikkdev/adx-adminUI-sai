@@ -32,7 +32,8 @@
         "agents",
         "print-partners",
         "employees",
-        "users"
+        "users",
+        "leads"
       ]
     },
     "publisher.onboarding": {
@@ -76,9 +77,66 @@
         "agents/[id]"
       ]
     },
+    "agent.application": {
+      "paths": [
+        "agents/applications"
+      ]
+    },
+    "agent.routing": {
+      "paths": [
+        "settings/agent-routing"
+      ]
+    },
+    "agent.fleets": {
+      "paths": [
+        "agents/fleets"
+      ]
+    },
     "agent.leads": {
       "paths": [
-        "leads"
+        "leads/list",
+        "leads/[id]"
+      ]
+    },
+    "leads.scoring": {
+      "paths": [
+        "settings/leads-scoring"
+      ]
+    },
+    "leads.pipeline": {
+      "paths": [
+        "leads/board",
+        "leads/funnel"
+      ]
+    },
+    "leads.map": {
+      "paths": [
+        "leads/map",
+        "leads/territories",
+        "leads/priority-zones"
+      ]
+    },
+    "leads.outreach": {
+      "paths": [
+        "leads/inbox",
+        "leads/tele-queue",
+        "leads/sequences"
+      ]
+    },
+    "leads.integrity": {
+      "paths": [
+        "leads/integrity"
+      ]
+    },
+    "leads.invites": {
+      "paths": [
+        "public/j"
+      ]
+    },
+    "leads.sources": {
+      "paths": [
+        "leads/sources",
+        "leads/import"
       ]
     },
     "agent.field-visits": {
@@ -149,6 +207,12 @@
     "orders.ops-moves": {
       "paths": [
         "orders/pipeline"
+      ]
+    },
+    "ops.live-map": {
+      "paths": [
+        "live-map",
+        "settings/tracking"
       ]
     },
     "publisher.kyc-desk": {

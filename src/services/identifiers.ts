@@ -28,11 +28,13 @@ export type IdentifierParty =
     | "PARTNER"
     | "EMPLOYEE"
     | "AGENT"
+    | "LISTING"
     | "TICKET"
     | "FEEDBACK"
     | "DISPUTE"
     | "SAFETY"
     | "LEAD"
+    | "USER"
     | "VISIT"
     | "CERTIFICATE"
     | "FRAUD_CASE"
@@ -47,11 +49,15 @@ export const PARTY_LABEL: Record<IdentifierParty, string> = {
     PARTNER: "Print partners",
     EMPLOYEE: "Employees",
     AGENT: "Field agents",
+    /* QR-8: LST-DDMM-YYNN, the listing's reference. */
+    LISTING: "Listings",
     TICKET: "Support tickets",
     FEEDBACK: "Feedback",
     DISPUTE: "Disputes",
     SAFETY: "Safety reports",
     LEAD: "Leads",
+    /* QR-4: ADX-…, the person's own id. */
+    USER: "People",
     VISIT: "Field visits",
     CERTIFICATE: "Certificates",
     FRAUD_CASE: "Fraud cases",
@@ -68,6 +74,8 @@ export const PARTY_ORDER: readonly IdentifierParty[] = [
     "PARTNER",
     "AGENT",
     "EMPLOYEE",
+    "LISTING",
+    "USER",
     "TICKET",
     "FEEDBACK",
     "DISPUTE",

@@ -323,6 +323,10 @@ describe("New module", () => {
             unlockAfterOrdinal: 3,
             passPercent: 80,
             isActive: false,
+            // AG-4: a lesson for every agent, untimed, unless the desk says otherwise.
+            audience: "ALL",
+            kind: "LESSON",
+            timeLimitMins: null,
         });
         expect(toast.success.mock.calls[0][0]).toBe("Pricing a wall created");
     });

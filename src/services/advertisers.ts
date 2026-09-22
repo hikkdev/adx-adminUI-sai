@@ -115,6 +115,7 @@ export function advertiserStatus(row: {
 export function shapeAdvertiser(raw: WireAdvertiser): Advertiser {
     return {
         id: raw.id,
+        sizeBand: raw.sizeBand ?? null,
         name: raw.name,
         displayId: raw.displayId ?? null,
         userId: raw.userId ?? null,

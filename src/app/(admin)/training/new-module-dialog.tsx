@@ -16,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api-client";
 import { trainingService, type CreateModuleInput } from "@/services/training";
-import { Field, draftProblems, toDraft, type ModuleFormValues } from "./module-fields";
+import { Field, KindAudienceFields, draftProblems, toDraft, type ModuleFormValues } from "./module-fields";
 
 interface NewModuleDialogProps {
     open: boolean;
@@ -69,6 +69,9 @@ function ModuleForm({
         unlockAfterOrdinal: "",
         passPercent: "80",
         isActive: false,
+        audience: "ALL",
+        kind: "LESSON",
+        timeLimitMins: "",
     });
     const [touched, setTouched] = React.useState<Partial<Record<keyof ModuleFormValues, boolean>>>({});
     const [fieldErrors, setFieldErrors] = React.useState<Record<string, string[]>>({});
@@ -104,6 +107,9 @@ function ModuleForm({
             unlockAfterOrdinal: draft.unlockAfterOrdinal,
             passPercent: draft.passPercent,
             isActive: draft.isActive,
+            audience: draft.audience,
+            kind: draft.kind,
+            timeLimitMins: draft.timeLimitMins,
         };
 
         setBusy(true);
@@ -175,6 +181,8 @@ function ModuleForm({
                     <Input id="md-unlock" type="number" min={1} inputMode="numeric" value={values.unlockAfterOrdinal} onChange={set("unlockAfterOrdinal")} placeholder="—" />
                 </Field>
             </div>
+
+            <KindAudienceFields values={values} onChange={(patch) => setValues((current) => ({ ...current, ...patch }))} error={errorFor("timeLimitMins")} />
 
             <label className="flex items-center justify-between gap-4 border-t pt-4">
                 <span>

@@ -5,6 +5,8 @@ import { useApiResource } from "@/lib/use-api-resource";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { isLive } from "@/lib/api-config";
 import { agentService, type AgentOffers, type AgentRating } from "@/services/agents";
+// LH10: the agent's quality score comes off the leads domain, beside the rating.
+import { integrityService, type AgentQuality } from "@/services/leads";
 import { orderService } from "@/services/orders";
 import { financeReadsApi, financeService, type Incentive, type PayoutMethod } from "@/services/finance";
 import { accessService, type GrantView, type ScanView } from "@/services/access";
@@ -35,6 +37,8 @@ interface Loaded {
     leaderboard: LeaderboardView | null;
     /** DR 05: the milestone board. Null when the API is off. */
     milestones: MilestoneBoard | null;
+    /** LH10: the quality score off the sampled field work. Null when the leads API is off or the read failed. */
+    quality: AgentQuality | null;
     /** Lot A: the sections stopped and the history. Null when the API is off or the read failed. */
     suspension: SuspensionView | null;
 }
@@ -74,11 +78,12 @@ export function AgentLoader({ id }: { id: string }) {
                 tier: null,
                 leaderboard: null,
                 milestones: null,
+                quality: null,
                 suspension: null,
             };
         }
 
-        const [orders, incentives, grants, scans, kyc, methods, offers, rating, tier, leaderboard, milestones, suspension] = await Promise.all([
+        const [orders, incentives, grants, scans, kyc, methods, offers, rating, tier, leaderboard, milestones, quality, suspension] = await Promise.all([
             orderService.list(),
             financeReadsApi()
                 ? financeService.incentives({ agentId: agent.id })
@@ -99,6 +104,9 @@ export function AgentLoader({ id }: { id: string }) {
                 ? growthService.leaderboard(agent.city, "WEEK").catch(() => null)
                 : Promise.resolve<LeaderboardView | null>(null),
             live ? agentService.milestones(agent.id).catch(() => null) : Promise.resolve<MilestoneBoard | null>(null),
+            /* LH10: the quality score, off the leads domain — a failed read
+               (no sampled work yet, the domain off) leaves the card saying so. */
+            isLive('leads') ? integrityService.quality(agent.id).catch(() => null) : Promise.resolve<AgentQuality | null>(null),
             /* Lot A: the case beside the row, because the card draws its
                history. A failed read leaves the card saying so. */
             isLive("suspension")
@@ -119,6 +127,7 @@ export function AgentLoader({ id }: { id: string }) {
             tier,
             leaderboard,
             milestones,
+            quality,
             suspension,
         };
     });
@@ -141,6 +150,7 @@ export function AgentLoader({ id }: { id: string }) {
                         tier={data.tier}
                         leaderboard={data.leaderboard}
                         milestones={data.milestones}
+                        quality={data.quality}
                         suspension={data.suspension}
                         onChanged={resource.reload}
                     />

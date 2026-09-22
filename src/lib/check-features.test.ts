@@ -80,9 +80,12 @@ describe("pagesUnder", () => {
 });
 
 describe("the shipped manifest", () => {
-    it("covers every page under src/app/(admin) today", async () => {
+    it("covers every page under src/app/(admin) — and, as public/…, src/app/(public) — today", async () => {
         const admin = join(process.cwd(), "src", "app", "(admin)");
+        const pub = join(process.cwd(), "src", "app", "(public)");
         const manifest = (await import("../../features.manifest.json")).default;
-        expect(checkFeatures(pagesUnder(admin), manifest).problems).toEqual([]);
+        // LH7: the invite landing is a public page; the manifest names it as `public/j`.
+        const pages = [...pagesUnder(admin), ...pagesUnder(pub).map((page: string) => `public/${page}`)];
+        expect(checkFeatures(pages, manifest).problems).toEqual([]);
     });
 });

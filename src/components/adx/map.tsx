@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { AdvancedMarker, APIProvider, Map as GoogleMap, type MapCameraChangedEvent } from "@vis.gl/react-google-maps";
+import { AdvancedMarker, APIProvider, Map as GoogleMap, useMap, type MapCameraChangedEvent, type MapMouseEvent } from "@vis.gl/react-google-maps";
 import type { DivIcon, Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -59,6 +59,42 @@ import { browserKeyOf, vendorSentence, type MapsClientConfig } from "@/services/
  * owns the coordinates, so the pin only moves when they are written back.
  */
 
+/*
+ * LH5 (the Lead Hunt, 22 Sep 2026): the hunting map needs three more
+ * things from the seam, all optional so every earlier screen is untouched:
+ * `polygons` (territories, priority zones, the ring being drawn) as filled
+ * outlines; `cells` (the heat — demand over supply) as tinted squares;
+ * `onMapClick` (a corner dropped) and `onBoundsChange` (the viewport the
+ * server is asked for). Both vendors draw them the same.
+ */
+
+/** A ring the surface draws: GeoJSON order, `[longitude, latitude]`. */
+export interface MapPolygon {
+    id: string;
+    ring: readonly (readonly [number, number])[];
+    tone: MarkerTone;
+    title?: string;
+    /** A ring still being drawn, or a zone (an intent, not a boundary). */
+    dashed?: boolean;
+}
+
+/** One tinted square of the heat: centred on a point, `sizeDeg` across, `weight` 0..1. */
+export interface MapCell {
+    id: string;
+    latitude: number;
+    longitude: number;
+    sizeDeg: number;
+    weight: number;
+    title?: string;
+}
+
+export interface MapBounds {
+    south: number;
+    west: number;
+    north: number;
+    east: number;
+}
+
 /** Google's documented hook for an authorisation failure (a bad, restricted or unbilled key). */
 type WindowWithAuthFailure = Window & { gm_authFailure?: () => void };
 
@@ -92,7 +128,35 @@ export interface MapSurfaceProps<T extends MapPoint> {
     className?: string;
     /** AD-C: given, every lone marker is draggable and reports where it was let go. Clusters never drag. */
     onPointDragEnd?: (point: T, at: { latitude: number; longitude: number }) => void;
+    /** LH5: rings to outline — territories, zones, the one being drawn. */
+    polygons?: readonly MapPolygon[];
+    /** LH5: the heat's squares. */
+    cells?: readonly MapCell[];
+    /** LH5: a click on the map itself (not a marker) — the polygon tool's corner. */
+    onMapClick?: (at: { latitude: number; longitude: number }) => void;
+    /** LH5: the viewport after every move, for a screen that asks the server for what is in view. */
+    onBoundsChange?: (bounds: MapBounds) => void;
 }
+
+/** The stroke and fill a ring or a square takes, by tone — the same hues the dots use. */
+const SHAPE_COLOURS: Record<MarkerTone, string> = {
+    success: "#16a34a",
+    warning: "#d97706",
+    danger: "#dc2626",
+    info: "#2563eb",
+    neutral: "#6b7280",
+};
+
+/** The heat's fill: the warmer the cell, the more of the tone shows. */
+const cellOpacity = (weight: number): number => 0.08 + Math.max(0, Math.min(1, weight)) * 0.5;
+
+/** A cell's corners as a bounds box. */
+const cellBounds = (cell: MapCell): MapBounds => ({
+    south: cell.latitude - cell.sizeDeg / 2,
+    west: cell.longitude - cell.sizeDeg / 2,
+    north: cell.latitude + cell.sizeDeg / 2,
+    east: cell.longitude + cell.sizeDeg / 2,
+});
 
 const DOT_CLASSES: Record<MarkerTone, string> = {
     success: "bg-success",
@@ -133,6 +197,10 @@ export function MapSurface<T extends MapPoint>({
     caption,
     className,
     onPointDragEnd,
+    polygons,
+    cells,
+    onMapClick,
+    onBoundsChange,
 }: MapSurfaceProps<T>) {
     const key = browserKeyOf(config);
     const provider = config?.provider ?? null;
@@ -152,7 +220,7 @@ export function MapSurface<T extends MapPoint>({
     }, [key, provider]);
 
     if (!config || !key || provider === "MAPBOX" || refusal) {
-        return <MapPlaceholder points={points} provider={provider} configured={Boolean(config)} refusal={refusal} caption={caption} className={className} />;
+        return <MapPlaceholder points={points} polygons={polygons} provider={provider} configured={Boolean(config)} refusal={refusal} caption={caption} className={className} />;
     }
 
     if (config.provider === "OSM") {
@@ -169,6 +237,10 @@ export function MapSurface<T extends MapPoint>({
                     onSelect={onSelect as ((point: MapPoint) => void) | undefined}
                     onClusterClick={onClusterClick as ((cluster: MarkerCluster<MapPoint>) => void) | undefined}
                     onPointDragEnd={onPointDragEnd as ((point: MapPoint, at: { latitude: number; longitude: number }) => void) | undefined}
+                    polygons={polygons}
+                    cells={cells}
+                    onMapClick={onMapClick}
+                    onBoundsChange={onBoundsChange}
                 />
             </div>
         );
@@ -183,14 +255,17 @@ export function MapSurface<T extends MapPoint>({
                     zoom={camera.zoom}
                     minZoom={MIN_ZOOM}
                     maxZoom={MAX_ZOOM}
-                    onCameraChanged={(event: MapCameraChangedEvent) =>
-                        onCameraChange({ latitude: event.detail.center.lat, longitude: event.detail.center.lng, zoom: event.detail.zoom })
-                    }
+                    onCameraChanged={(event: MapCameraChangedEvent) => {
+                        onCameraChange({ latitude: event.detail.center.lat, longitude: event.detail.center.lng, zoom: event.detail.zoom });
+                        if (onBoundsChange && event.detail.bounds) onBoundsChange(event.detail.bounds);
+                    }}
+                    onClick={onMapClick ? (event: MapMouseEvent) => event.detail.latLng && onMapClick({ latitude: event.detail.latLng.lat, longitude: event.detail.latLng.lng }) : undefined}
                     disableDefaultUI
                     gestureHandling="greedy"
                     clickableIcons={false}
                     className="size-full"
                 >
+                    {((polygons && polygons.length > 0) || (cells && cells.length > 0)) && <GoogleShapes polygons={polygons ?? []} cells={cells ?? []} />}
                     {clusters.map((cluster) =>
                         cluster.points.length === 1 ? (
                             <PointMarker
@@ -244,6 +319,49 @@ function ClusterMarker<T extends MapPoint>({ cluster, onClick }: { cluster: Mark
     );
 }
 
+/**
+ * LH5: the rings and the heat on Google, drawn imperatively — the library
+ * ships no Polygon or Rectangle component. The shapes are rebuilt when
+ * their props change and cleared when the surface goes.
+ */
+function GoogleShapes({ polygons, cells }: { polygons: readonly MapPolygon[]; cells: readonly MapCell[] }) {
+    const map = useMap();
+    React.useEffect(() => {
+        if (!map || typeof google === "undefined") return;
+        const drawn: { setMap(map: null): void }[] = [];
+        for (const polygon of polygons) {
+            drawn.push(
+                new google.maps.Polygon({
+                    map,
+                    paths: polygon.ring.map(([lng, lat]) => ({ lat, lng })),
+                    strokeColor: SHAPE_COLOURS[polygon.tone],
+                    strokeOpacity: 0.9,
+                    strokeWeight: 2,
+                    fillColor: SHAPE_COLOURS[polygon.tone],
+                    fillOpacity: polygon.dashed ? 0.08 : 0.18,
+                    clickable: false,
+                }),
+            );
+        }
+        for (const cell of cells) {
+            drawn.push(
+                new google.maps.Rectangle({
+                    map,
+                    bounds: cellBounds(cell),
+                    strokeWeight: 0,
+                    fillColor: SHAPE_COLOURS.danger,
+                    fillOpacity: cellOpacity(cell.weight),
+                    clickable: false,
+                }),
+            );
+        }
+        return () => {
+            for (const shape of drawn) shape.setMap(null);
+        };
+    }, [map, polygons, cells]);
+    return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Z-C: the OpenStreetMap branch, over react-leaflet                   */
 /* ------------------------------------------------------------------ */
@@ -259,6 +377,10 @@ interface OsmSurfaceProps {
     onSelect?: (point: MapPoint) => void;
     onClusterClick?: (cluster: MarkerCluster<MapPoint>) => void;
     onPointDragEnd?: (point: MapPoint, at: { latitude: number; longitude: number }) => void;
+    polygons?: readonly MapPolygon[] | undefined;
+    cells?: readonly MapCell[] | undefined;
+    onMapClick?: ((at: { latitude: number; longitude: number }) => void) | undefined;
+    onBoundsChange?: ((bounds: MapBounds) => void) | undefined;
 }
 
 /** A Next static image import in the app, a plain URL under Vite's test transform. */
@@ -330,14 +452,38 @@ const OsmSurface = dynamic(
              * scrolls. `MapContainer` only reads `center` and `zoom` once, so
              * the follow is an effect on the live map.
              */
-            function CameraSync({ camera, onCameraChange }: { camera: Camera; onCameraChange: (camera: Camera) => void }) {
+            function CameraSync({
+                camera,
+                onCameraChange,
+                onMapClick,
+                onBoundsChange,
+            }: {
+                camera: Camera;
+                onCameraChange: (camera: Camera) => void;
+                onMapClick?: ((at: { latitude: number; longitude: number }) => void) | undefined;
+                onBoundsChange?: ((bounds: MapBounds) => void) | undefined;
+            }) {
+                const reportBounds = (map: LeafletMap) => {
+                    if (!onBoundsChange || typeof map.getBounds !== "function") return;
+                    const bounds = map.getBounds();
+                    onBoundsChange({ south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast() });
+                };
                 const report = (map: LeafletMap) => {
                     const centre = map.getCenter();
                     onCameraChange({ latitude: centre.lat, longitude: centre.lng, zoom: map.getZoom() });
+                    reportBounds(map);
                 };
                 const map = RL.useMapEvents({
                     moveend: (event) => report(event.target as LeafletMap),
                     zoomend: (event) => report(event.target as LeafletMap),
+                    ...(onMapClick ? { click: (event: { latlng: { lat: number; lng: number } }) => onMapClick({ latitude: event.latlng.lat, longitude: event.latlng.lng }) } : {}),
+                });
+                /* The first viewport, before anyone moves: the screen asks the server for it right away. */
+                const first = React.useRef(true);
+                React.useEffect(() => {
+                    if (!first.current) return;
+                    first.current = false;
+                    reportBounds(map);
                 });
                 React.useEffect(() => {
                     const centre = map.getCenter();
@@ -350,7 +496,7 @@ const OsmSurface = dynamic(
                 return null;
             }
 
-            function OsmMap({ tileUrlTemplate, tileAttribution, tileMaxZoom, clusters, camera, onCameraChange, selectedId, onSelect, onClusterClick, onPointDragEnd }: OsmSurfaceProps) {
+            function OsmMap({ tileUrlTemplate, tileAttribution, tileMaxZoom, clusters, camera, onCameraChange, selectedId, onSelect, onClusterClick, onPointDragEnd, polygons, cells, onMapClick, onBoundsChange }: OsmSurfaceProps) {
                 return (
                     <RL.MapContainer
                         center={[camera.latitude, camera.longitude]}
@@ -361,7 +507,29 @@ const OsmSurface = dynamic(
                         className="size-full"
                     >
                         <RL.TileLayer url={tileUrlTemplate} attribution={tileAttribution} maxZoom={tileMaxZoom} />
-                        <CameraSync camera={camera} onCameraChange={onCameraChange} />
+                        <CameraSync camera={camera} onCameraChange={onCameraChange} onMapClick={onMapClick} onBoundsChange={onBoundsChange} />
+                        {cells?.map((cell) => {
+                            const box = cellBounds(cell);
+                            return (
+                                <RL.Rectangle
+                                    key={cell.id}
+                                    bounds={[
+                                        [box.south, box.west],
+                                        [box.north, box.east],
+                                    ]}
+                                    pathOptions={{ stroke: false, fillColor: SHAPE_COLOURS.danger, fillOpacity: cellOpacity(cell.weight) }}
+                                    interactive={false}
+                                />
+                            );
+                        })}
+                        {polygons?.map((polygon) => (
+                            <RL.Polygon
+                                key={polygon.id}
+                                positions={polygon.ring.map(([lng, lat]) => [lat, lng] as [number, number])}
+                                pathOptions={{ color: SHAPE_COLOURS[polygon.tone], weight: 2, opacity: 0.9, fillColor: SHAPE_COLOURS[polygon.tone], fillOpacity: polygon.dashed ? 0.08 : 0.18, dashArray: polygon.dashed ? "6 6" : undefined }}
+                                interactive={false}
+                            />
+                        ))}
                         {clusters.map((cluster) => {
                             if (cluster.points.length === 1) {
                                 const point = cluster.points[0];
@@ -415,6 +583,7 @@ const OsmSurface = dynamic(
  */
 function MapPlaceholder({
     points,
+    polygons,
     provider,
     configured,
     refusal,
@@ -422,6 +591,7 @@ function MapPlaceholder({
     className,
 }: {
     points: readonly MapPoint[];
+    polygons?: readonly MapPolygon[] | undefined;
     provider: MapsClientConfig["provider"] | null;
     configured: boolean;
     /** The vendor's refusal of the key, when there was one — printed instead of the "key to come" sentence. */
@@ -445,6 +615,7 @@ function MapPlaceholder({
             <MapPinned className="size-6 text-muted-foreground" aria-hidden />
             <p className="text-sm font-medium text-foreground">
                 {points.length === 0 ? "Nothing to plot" : `${points.length} ${points.length === 1 ? "marker" : "markers"} would be drawn here`}
+                {polygons && polygons.length > 0 ? ` · ${polygons.length} ${polygons.length === 1 ? "area" : "areas"}` : ""}
             </p>
             {caption && <p className="max-w-md text-xs text-muted-foreground">{caption}</p>}
             <p className="max-w-md text-xs text-muted-foreground">{sentence}</p>

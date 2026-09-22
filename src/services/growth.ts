@@ -1,6 +1,6 @@
 import { api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
-import { compareMoney, formatINR } from "@/lib/format";
+import { compareMoney, formatINR, formatMoney } from "@/lib/format";
 import type { StatusMeta, Tone } from "@/types";
 
 /**
@@ -41,9 +41,10 @@ import type { StatusMeta, Tone } from "@/types";
 /* Milestone templates                                                 */
 /* ------------------------------------------------------------------ */
 
-export type AgentMilestoneType = "ONBOARDING" | "ACTIVITY" | "REVENUE" | "QUALITY";
+export type AgentMilestoneType = "ONBOARDING" | "ACTIVITY" | "REVENUE" | "QUALITY" | "LEAD_CONVERSIONS" | "LEAD_CONTACTS";
 
-export const AGENT_MILESTONE_TYPES: readonly AgentMilestoneType[] = ["ONBOARDING", "ACTIVITY", "REVENUE", "QUALITY"];
+// LH8: the two lead types — conversions and first contacts in the window.
+export const AGENT_MILESTONE_TYPES: readonly AgentMilestoneType[] = ["ONBOARDING", "ACTIVITY", "REVENUE", "QUALITY", "LEAD_CONVERSIONS", "LEAD_CONTACTS"];
 
 export interface MilestoneTypeMeta {
     label: string;
@@ -84,6 +85,18 @@ export const MILESTONE_TYPE_META: Record<AgentMilestoneType, MilestoneTypeMeta> 
         counts: "On-time arrivals, judged the way the agent's rating judges them.",
         unit: "on-time arrivals",
         unitOne: "on-time arrival",
+    },
+    LEAD_CONVERSIONS: {
+        label: "Lead conversions",
+        counts: "Leads the agent holds that became accounts inside the window — the same conversions the hunt pays LEAD_CONVERTED on.",
+        unit: "lead conversions",
+        unitOne: "lead conversion",
+    },
+    LEAD_CONTACTS: {
+        label: "First contacts",
+        counts: "Leads the agent holds whose first contact was logged inside the window. A first contact is stamped once, so it counts in one window only.",
+        unit: "first contacts",
+        unitOne: "first contact",
     },
 };
 
@@ -411,11 +424,31 @@ export interface PublicRow {
     name: string;
     locality: string | null;
     you: boolean;
+    /** LH8: leads held that converted in the window — a count, so every row carries it. */
+    conversions: number;
 }
 
 /** The podium: the only rows that carry a figure. Decimal string. */
 export interface PodiumRow extends PublicRow {
     earnings: string;
+    /** LH8: how much of `earnings` the hunt paid (LEAD_CONVERTED / ACTIVATED / RETAINED). Decimal string. */
+    fromLeads: string;
+}
+
+/** LH8: "4 conversions", "1 conversion", "—" for none. */
+export function conversionsLabel(count: number): string {
+    if (count <= 0) return "—";
+    return `${count} ${count === 1 ? "conversion" : "conversions"}`;
+}
+
+/** LH8: "₹1,200.00 from leads · 4 conversions" under a podium figure; "Nothing from leads yet" when both are nil. */
+export function fromLeadsLine(row: Pick<PodiumRow, "fromLeads" | "conversions">): string {
+    const paid = Number(row.fromLeads) > 0;
+    if (!paid && row.conversions <= 0) return "Nothing from leads yet";
+    const parts: string[] = [];
+    if (paid) parts.push(`${formatMoney(row.fromLeads)} from leads`);
+    if (row.conversions > 0) parts.push(conversionsLabel(row.conversions));
+    return parts.join(" · ");
 }
 
 export interface LeaderboardView {
@@ -425,6 +458,7 @@ export interface LeaderboardView {
     me: {
         rank: number;
         earnings: string;
+        fromLeads: string;
         delta: number | null;
         behind: { rank: number; gap: string } | null;
         ahead: { rank: number; gap: string } | null;

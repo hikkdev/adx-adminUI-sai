@@ -40,5 +40,17 @@ export default defineConfig({
         // The Next build output and node_modules are not tests, and scanning
         // them makes a two-second run take twenty.
         exclude: ["node_modules/**", ".next/**"],
+        /*
+         * Vitest's default is five seconds, which is ample for one file and
+         * not for 179 of them: a jsdom is created per file and the run spends
+         * ~40% of its time doing that, so under a full-suite load the heaviest
+         * screens (the listing creator's pin picker, the employees overview)
+         * drift past five seconds and fail as timeouts — a different file each
+         * run, which is the signature of load rather than of a broken test.
+         * Fifteen seconds is the same answer the two phone suites already
+         * carry (`jest.setTimeout(20_000)` on the deep ones) and it keeps a
+         * genuinely hung test from hanging the run.
+         */
+        testTimeout: 15_000,
     },
 });

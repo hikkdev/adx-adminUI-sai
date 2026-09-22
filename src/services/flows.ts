@@ -45,11 +45,15 @@ export const LISTING_FLOW_KEY = "listing";
 export const ONBOARDING_FLOW_KEY = "onboarding";
 export const AGENT_JOB_FLOW_KEY = "agent-job";
 export const EMPLOYEE_INTAKE_FLOW_KEY = "employee-intake";
+/** LH7: the invite landing's copy per side. */
+export const LEAD_LANDING_FLOW_KEY = "lead-landing";
 
 /** The two keys whose flow is a step ladder, and where the code's fallback ladder is read from. */
-export const STEP_LADDER_SOURCES: Record<string, { route: string; domain: "orders" | "kyc"; noun: string }> = {
+export const STEP_LADDER_SOURCES: Record<string, { route: string; domain: "orders" | "kyc" | "leads"; noun: string }> = {
     [AGENT_JOB_FLOW_KEY]: { route: "/orders/job-ladder", domain: "orders", noun: "the agent job checklist" },
     [EMPLOYEE_INTAKE_FLOW_KEY]: { route: "/employee-kyc/ladder", domain: "kyc", noun: "the employee intake ladder" },
+    // LH7: the invite landing's copy per side — one step per side, its "proofs" the blocks the page shows.
+    [LEAD_LANDING_FLOW_KEY]: { route: "/leads/landing-copy", domain: "leads", noun: "the invite landing copy" },
 };
 
 /** `GET /orders/job-ladder` and `GET /employee-kyc/ladder`: the ladder in force, and whether it is the row's or the code's. */
@@ -430,8 +434,10 @@ export function stepLadderIssues(ladder: StepLadder, vocabulary: StepLadderVocab
                 return;
             }
             const earlier = collectedBy.get(proof.key);
-            if (earlier !== undefined) {
+            if (earlier !== undefined && !vocabulary.repeatable) {
                 issues.push({ where: "steps", message: `Proof "${proof.key}" is already collected by step "${earlier}".`, path, pointer: pointerOf(path) });
+            } else if (vocabulary.repeatable && earlier === step.key) {
+                issues.push({ where: "steps", message: `Block "${proof.key}" is on this step twice.`, path, pointer: pointerOf(path) });
             } else {
                 collectedBy.set(proof.key, step.key);
             }

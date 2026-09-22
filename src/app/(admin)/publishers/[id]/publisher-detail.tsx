@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountClosure } from "@/components/adx/account-closure";
+import { PartyBandControl } from "@/components/adx/party-band-control";
 import { ActivityTimeline } from "@/components/adx/activity-timeline";
 import { DataTable, SortableHeader } from "@/components/adx/data-table";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
@@ -404,6 +405,8 @@ export function PublisherDetail({
                                     </div>
                                 ))}
                             </dl>
+                            {/* AG-5: the band that decides which grade of agent this publisher's work goes to. */}
+                            <PartyBandControl party="publishers" partyId={publisher.id} value={publisher.sizeBand} onChanged={onChanged} className="mt-4 border-t pt-4" />
                         </Card>
                         <Card className="rounded-lg border-border p-5 shadow-none">
                             <div className="flex flex-wrap items-center justify-between gap-2">

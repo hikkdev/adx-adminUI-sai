@@ -192,8 +192,8 @@ describe("before anything is written", () => {
 
         // The rail opens on the first stalled kind — publisher platform terms.
         expect(rail().getByRole("button", { name: /Publisher platform terms/ })).toHaveAttribute("aria-current", "page");
-        // Six kinds since Lot D: the package terms and the agent's job terms joined the four.
-        expect(rail().getAllByText("Nothing live")).toHaveLength(6);
+        // Eleven kinds: the four, Lot D's two, AG-1's two engagement terms, and DS-1's three signed-only documents.
+        expect(rail().getAllByText("Nothing live")).toHaveLength(11);
 
         expect(screen.getByText("Nothing is live")).toBeInTheDocument();
         expect(screen.getByText(/Publishers cannot get past their agreement gate/)).toBeInTheDocument();

@@ -67,6 +67,8 @@ export interface StepLadderVocabulary {
     proofs: string[];
     requiredProofs: string[];
     rules: string[];
+    /** LH7: true when an entry may sit on several steps (the invite landing's blocks, one per side). Absent from a server one release behind. */
+    repeatable?: boolean;
     /** G11-1: each proof's name — 'Check in', 'Government ID front', … — in the order of the keys, so the board prints a name, not a column. Absent from a server one release behind. */
     proofOptions?: { key: string; label: string }[];
 }

@@ -26,6 +26,7 @@ import {
     type AgentOffers,
     type AgentRating,
 } from "@/services/agents";
+import type { AgentQuality } from "@/services/leads";
 import { type GrantView, type ScanView } from "@/services/access";
 import { agentKycService, type AgentKycCase } from "@/services/agent-kyc";
 import { requestOf } from "@/services/kyc";
@@ -33,10 +34,12 @@ import { KYC_STATE_META } from "@/services/kyc-state";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
 import type { LeaderboardView, MilestoneBoard, TierView } from "@/services/growth";
 import { AgentAccessTab } from "./agent-access-tab";
+import { AgentEngagementCard } from "./agent-engagement-card";
 import { AssignedTasksCard } from "@/app/(admin)/tasks/assigned-tasks-card";
 import { AgentMilestoneProgressCard, AgentMilestonesTab } from "./agent-milestones-tab";
 import { AgentPayoutsTab } from "./agent-payouts-tab";
 import { AgentPromotionHistory, AgentTierCard } from "./agent-tier-card";
+import { AgentQualityCard } from "./agent-quality-card";
 import { EditAgentDialog } from "./edit-agent-dialog";
 import { ScanForSignalsButton } from "@/components/adx/scan-for-signals";
 import { SuspensionActions } from "@/components/adx/suspend-dialog";
@@ -74,6 +77,8 @@ interface AgentDetailProps {
     leaderboard: LeaderboardView | null;
     /** DR 05: the agent's milestone board. Null when the API is off. */
     milestones: MilestoneBoard | null;
+    /** LH10: the quality score off the sampled field work. Null when the leads API is off or the read failed. */
+    quality: AgentQuality | null;
     /** Lot A: the case and its history. Null when the API is off or the read failed. */
     suspension: SuspensionView | null;
     /** Re-read after a withdrawal, a profile save, a suspension, or a payout-method change. */
@@ -91,6 +96,8 @@ const INCENTIVE_STATUS_META: Record<IncentiveStatus, StatusMeta> = {
     PENDING_VERIFICATION: { label: "Awaiting verification", tone: "warning" },
     CREDITED: { label: "Credited", tone: "success" },
     REJECTED: { label: "Rejected", tone: "danger" },
+    // LH10: the activation reward that came back when the account did not last.
+    REVERSED: { label: "Clawed back", tone: "danger" },
 };
 
 /**
@@ -124,6 +131,7 @@ export function AgentDetail({
     tier,
     leaderboard,
     milestones,
+    quality,
     suspension,
     onChanged,
 }: AgentDetailProps) {
@@ -277,6 +285,16 @@ export function AgentDetail({
                                     />
                                 )}
                             </Card>
+                            {/* AG-3: the ladder stage, the grade and the engagement the desk set; grade changes and the exit live on the card. */}
+                            {agent.engagement && (
+                                <AgentEngagementCard
+                                    agentId={agent.id}
+                                    name={agent.name ?? agent.mobile}
+                                    facts={agent.engagement}
+                                    applicationHref={`/agents/applications/${agent.id}`}
+                                    onChanged={() => onChanged?.()}
+                                />
+                            )}
                             <Card className="rounded-lg border-border p-5 shadow-none" data-testid="agent-rating-card">
                                 <h3 className="text-base font-semibold text-foreground">Rating</h3>
                                 {rating === null ? (
@@ -358,6 +376,8 @@ export function AgentDetail({
                                 onChanged={onChanged}
                             />
                             <AgentMilestoneProgressCard board={milestones} />
+                            {/* LH10: what the sampled field work says, beside the rating. */}
+                            <AgentQualityCard quality={quality} />
                             {/* Lot D (Q112): the publishers' stars — the rating's fourth driver. */}
                             <ReviewsCard
                                 subjectType="AGENT"

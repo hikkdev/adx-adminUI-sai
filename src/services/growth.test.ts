@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
     AGENT_MILESTONE_TYPES,
+    conversionsLabel,
+    fromLeadsLine,
     AGENT_TIERS,
     LEADERBOARD_PERIODS,
     MILESTONE_TYPE_META,
@@ -87,9 +89,12 @@ describe("shapeTemplate — money and the three nullables", () => {
     });
 });
 
-describe("the four types", () => {
+describe("the six types", () => {
     it("has a label and a one-line explanation of what each type counts", () => {
-        expect(AGENT_MILESTONE_TYPES).toEqual(["ONBOARDING", "ACTIVITY", "REVENUE", "QUALITY"]);
+        // LH8 added the two lead types to DR 05's four.
+        expect(AGENT_MILESTONE_TYPES).toEqual(["ONBOARDING", "ACTIVITY", "REVENUE", "QUALITY", "LEAD_CONVERSIONS", "LEAD_CONTACTS"]);
+        expect(MILESTONE_TYPE_META.LEAD_CONVERSIONS.label).toBe("Lead conversions");
+        expect(MILESTONE_TYPE_META.LEAD_CONTACTS.label).toBe("First contacts");
         expect(MILESTONE_TYPE_META.ONBOARDING.label).toBe("Onboarding");
         expect(MILESTONE_TYPE_META.ACTIVITY.label).toBe("Activity");
         expect(MILESTONE_TYPE_META.REVENUE.label).toBe("Revenue");
@@ -113,6 +118,12 @@ describe("the four types", () => {
         expect(targetLabel("ONBOARDING", 1)).toBe("1 account");
         expect(targetLabel("ACTIVITY", 25)).toBe("25 visits & verifications");
         expect(targetLabel("QUALITY", 20)).toBe("20 on-time arrivals");
+        // LH8: the two lead types the hunt seeds.
+        expect(targetLabel("LEAD_CONVERSIONS", 5)).toBe("5 lead conversions");
+        expect(targetLabel("LEAD_CONTACTS", 10)).toBe("10 first contacts");
+        expect(targetLabel("LEAD_CONTACTS", 1)).toBe("1 first contact");
+        expect(AGENT_MILESTONE_TYPES).toContain("LEAD_CONVERSIONS");
+        expect(MILESTONE_TYPE_META.LEAD_CONTACTS.counts).toMatch(/first contact/i);
         // A revenue target is a whole-rupee count, printed as rupees.
         expect(targetLabel("REVENUE", 5000)).toBe("₹5,000 credited");
         expect(targetLabel("SOMETHING_NEW", 3)).toBe("3");
@@ -283,13 +294,13 @@ const board = (over: Partial<LeaderboardView> = {}): LeaderboardView => ({
     cohort: { city: "Bengaluru", size: 14, minimum: 10, enough: true },
     me: null,
     top: [
-        { rank: 1, agentId: "a1", name: "Asha", locality: "Jayanagar", you: false, earnings: "12000.00" },
-        { rank: 2, agentId: "a2", name: "Bala", locality: null, you: false, earnings: "9000.00" },
-        { rank: 3, agentId: "a3", name: "Charu", locality: "Indiranagar", you: false, earnings: "8500.00" },
+        { rank: 1, agentId: "a1", name: "Asha", locality: "Jayanagar", you: false, earnings: "12000.00", fromLeads: "1200.00", conversions: 4 },
+        { rank: 2, agentId: "a2", name: "Bala", locality: null, you: false, earnings: "9000.00", fromLeads: "0.00", conversions: 0 },
+        { rank: 3, agentId: "a3", name: "Charu", locality: "Indiranagar", you: false, earnings: "8500.00", fromLeads: "0.00", conversions: 0 },
     ],
     window: [
-        { rank: 4, agentId: "a4", name: "Dev", locality: null, you: false },
-        { rank: 5, agentId: "a5", name: "Esha", locality: "HSR", you: false },
+        { rank: 4, agentId: "a4", name: "Dev", locality: null, you: false, conversions: 2 },
+        { rank: 5, agentId: "a5", name: "Esha", locality: "HSR", you: false, conversions: 0 },
     ],
     around: [],
     prize: null,
@@ -305,6 +316,14 @@ describe("the leaderboard", () => {
 
     it("knows the three periods", () => {
         expect(LEADERBOARD_PERIODS).toEqual(["WEEK", "MONTH", "ALL"]);
+    });
+
+    it("LH8: words the hunt's share as money and conversions as a count, and says when there is neither", () => {
+        expect(fromLeadsLine({ fromLeads: "1200.00", conversions: 4 })).toBe("₹1,200.00 from leads · 4 conversions");
+        expect(fromLeadsLine({ fromLeads: "100.00", conversions: 0 })).toBe("₹100.00 from leads");
+        expect(fromLeadsLine({ fromLeads: "0.00", conversions: 1 })).toBe("1 conversion");
+        expect(fromLeadsLine({ fromLeads: "0.00", conversions: 0 })).toBe("Nothing from leads yet");
+        expect(conversionsLabel(0)).toBe("—");
     });
 
     it("finds an agent's rank on the podium or below it, and has none for an agent who is not ranked", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INCENTIVE_EVENTS, INCENTIVE_EVENT_LABEL, incentiveEventLabel } from "./finance";
+import { INCENTIVE_EVENTS, INCENTIVE_EVENT_LABEL, incentiveEventLabel, incentiveTierLabel } from "./finance";
 
 /**
  * D12 — the incentive queue's vocabulary.
@@ -24,5 +24,15 @@ describe("what an incentive was for", () => {
         expect(incentiveEventLabel("TIER_BONUS")).toBe("Tier bonus");
         expect(incentiveEventLabel("SOMETHING_NEW")).toBe("Something new");
         expect(incentiveEventLabel("")).toBe("—");
+    });
+
+    it("LH8 (D1): words a side-qualified tier — the advertiser figure of LEAD_ACTIVATED sits at `*:ADVERTISER`", () => {
+        expect(INCENTIVE_EVENT_LABEL.LEAD_CONVERTED).toBe("Lead converted");
+        expect(INCENTIVE_EVENT_LABEL.LEAD_ACTIVATED).toBe("Lead activated");
+        expect(INCENTIVE_EVENT_LABEL.LEAD_RETAINED).toBe("Lead retained");
+        expect(incentiveTierLabel("*")).toBe("Every tier");
+        expect(incentiveTierLabel("*:ADVERTISER")).toBe("Every tier · advertiser side");
+        expect(incentiveTierLabel("GOLD:PUBLISHER")).toBe("GOLD · publisher side");
+        expect(incentiveTierLabel("GOLD")).toBe("GOLD");
     });
 });

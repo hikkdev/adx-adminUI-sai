@@ -54,6 +54,7 @@ import {
     WalletCards,
     Workflow,
     type LucideIcon,
+    Navigation,
 } from "lucide-react";
 
 export interface NavItem {
@@ -188,6 +189,10 @@ export const navigation: NavSection[] = [
                    depends on. */
                 children: [{ title: "Order pipeline", href: "/orders/pipeline", icon: KanbanSquare }],
             },
+            /* LT-1: where every working agent is — the agent app's position on a
+               job, states, alerts, trails, the order timeline. Beside Orders
+               because that is the work it watches. */
+            { title: "Live map", href: "/live-map", icon: Navigation },
             /* Lot H's partner floor. A rail row of its own rather than a
                Settings child (the owner, 14 September): the roster and the
                quote requests are a desk ops work at daily, beside the orders

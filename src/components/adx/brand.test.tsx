@@ -99,9 +99,20 @@ describe("BrandProvider", () => {
         await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("ADX|#F5D400|abc12345"), { timeout: 4000 });
         expect(screen.getByTestId("brand-wordmark").getAttribute("src")).toBe("https://api/brand/adx-wordmark-red.svg");
         expect(screen.getByTestId("brand-mark").getAttribute("src")).toBe("https://api/brand/adx-mark-white.svg");
-        expect(document.documentElement.style.getPropertyValue("--primary")).toBe(hexToHslTriple("#F5D400"));
-        // A pale primary: the ink is written on it, and the theme's foreground follows.
-        expect(document.documentElement.style.getPropertyValue("--primary-foreground")).toBe(hexToHslTriple("#0F0F0F"));
+        /*
+         * The variables are written by a `useEffect`, and a passive effect
+         * flushes after the commit that changed the text — so the probe can
+         * already read the served brand while the theme still holds DR 11's
+         * red. Reading them the instant the text changes is a race the full
+         * suite loses about one run in three (the reported value is exactly
+         * `hexToHslTriple("#E40209")`, the brand of the commit before). An
+         * effect's output is awaited, like any other asynchronous write.
+         * A pale primary also carries its ink: the foreground follows.
+         */
+        await waitFor(() => {
+            expect(document.documentElement.style.getPropertyValue("--primary")).toBe(hexToHslTriple("#F5D400"));
+            expect(document.documentElement.style.getPropertyValue("--primary-foreground")).toBe(hexToHslTriple("#0F0F0F"));
+        });
         expect(backend.calls[0]).toEqual({ method: "GET", path: "/app/branding" });
     });
 
@@ -131,7 +142,10 @@ describe("BrandProvider", () => {
         );
         await waitFor(() => expect(backend.calls.length).toBe(1));
         expect(screen.getByTestId("probe").textContent).toBe("ADX|#E40209|bundled");
-        expect(document.documentElement.style.getPropertyValue("--primary")).toBe(hexToHslTriple("#E40209"));
-        expect(document.documentElement.style.getPropertyValue("--primary-foreground")).toBe(hexToHslTriple("#FFFFFF"));
+        // Written by the same effect, so awaited for the same reason.
+        await waitFor(() => {
+            expect(document.documentElement.style.getPropertyValue("--primary")).toBe(hexToHslTriple("#E40209"));
+            expect(document.documentElement.style.getPropertyValue("--primary-foreground")).toBe(hexToHslTriple("#FFFFFF"));
+        });
     });
 });

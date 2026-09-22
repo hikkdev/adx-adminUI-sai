@@ -4,17 +4,11 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import { CityCombobox } from "@/components/adx/city-combobox";
 import { ApiError } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
@@ -47,10 +41,12 @@ const EMPTY = { name: "", mobile: "", email: "", city: "", state: "" };
 /**
  * Bringing an agent into existence.
  *
- * There is no self-signup for agents: ops creates them here, in person, and the
- * person then signs in to the field app with the number typed at this desk.
- * The button used to say the opposite — "Agents are onboarded through the ADX
- * field app" — as a toast over nothing.
+ * Ops creates them here, in person, and the person then signs in to the
+ * field app with the number typed at this desk. AG-3: by default they start
+ * as an application — the same ladder a rider who applied from the app
+ * climbs (details, papers, payout account, terms, then the desk's review) —
+ * and the dialog lands on their workbench. The switch off is the pre-AG-1
+ * shortcut: active at once, for someone whose papers ADX already holds.
  *
  * The form asks for exactly what `POST /agents` takes and nothing more. The
  * identifier is minted server-side. A 400 comes back with per-field messages
@@ -64,13 +60,13 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
     const [fields, setFields] = React.useState(EMPTY);
     const [side, setSide] = React.useState<Side>("PUBLISHER");
+    const [asApplication, setAsApplication] = React.useState(true);
     const [fieldErrors, setFieldErrors] = React.useState<Record<string, string[]>>({});
     const [formError, setFormError] = React.useState<string | null>(null);
     const [busy, setBusy] = React.useState(false);
 
-    const set =
-        (key: keyof typeof EMPTY) => (event: React.ChangeEvent<HTMLInputElement>) =>
-            setFields((current) => ({ ...current, [key]: event.target.value }));
+    const set = (key: keyof typeof EMPTY) => (event: React.ChangeEvent<HTMLInputElement>) =>
+        setFields((current) => ({ ...current, [key]: event.target.value }));
 
     // The server normalises the number (ten digits become +91…), but it will
     // not strip the spaces people type between groups.
@@ -81,6 +77,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
     function reset() {
         setFields(EMPTY);
         setSide("PUBLISHER");
+        setAsApplication(true);
         setFieldErrors({});
         setFormError(null);
     }
@@ -100,6 +97,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
             name: fields.name.trim(),
             mobile,
             side,
+            asApplication,
             ...(fields.email.trim() ? { email: fields.email.trim() } : {}),
             ...(fields.city.trim() ? { city: fields.city.trim() } : {}),
             ...(fields.state.trim() ? { state: fields.state.trim() } : {}),
@@ -110,16 +108,19 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
         setFormError(null);
         try {
             const agent = await agentService.create(input);
-            toast.success(
-                `${agent.name ?? agent.mobile} is now an agent${
-                    agent.displayId ? ` — ${agent.displayId}` : ""
-                }`,
-                { description: `They can sign in to the field app with ${agent.mobile}.` }
-            );
+            if (asApplication) {
+                toast.success(`${agent.name ?? agent.mobile} is applying${agent.displayId ? ` — ${agent.displayId}` : ""}`, {
+                    description: `Fill in the rest at the desk, or they finish it in the field app with ${agent.mobile}.`,
+                });
+            } else {
+                toast.success(`${agent.name ?? agent.mobile} is now an agent${agent.displayId ? ` — ${agent.displayId}` : ""}`, {
+                    description: `They can sign in to the field app with ${agent.mobile}.`,
+                });
+            }
             reset();
             onOpenChange(false);
             onCreated();
-            router.push(`/agents/${agent.id}`);
+            router.push(asApplication ? `/agents/applications/${agent.id}` : `/agents/${agent.id}`);
         } catch (cause) {
             if (cause instanceof ApiError) {
                 setFieldErrors(cause.fieldErrors);
@@ -139,35 +140,22 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                     <DialogHeader>
                         <DialogTitle>Add an agent</DialogTitle>
                         <DialogDescription>
-                            Agents are created here, in person — they never sign up in an app.
-                            The number you enter is the one they will sign in with; ADX issues
-                            their AGT identifier.
+                            The number you enter is the one they will sign in with; ADX issues their AGT identifier. They start as an application — the desk or
+                            the field app finishes the rest — unless you switch that off.
                         </DialogDescription>
                     </DialogHeader>
 
                     {!live && (
                         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-                            The console is not connected to the ADX backend, so nobody can be
-                            created from here right now.
+                            The console is not connected to the ADX backend, so nobody can be created from here right now.
                         </p>
                     )}
 
                     <div className="grid gap-4 sm:grid-cols-2">
                         <Field id="agent-name" label="Full name" errors={fieldErrors.name}>
-                            <Input
-                                id="agent-name"
-                                value={fields.name}
-                                onChange={set("name")}
-                                autoComplete="off"
-                                placeholder="Rahul Kumar"
-                            />
+                            <Input id="agent-name" value={fields.name} onChange={set("name")} autoComplete="off" placeholder="Rahul Kumar" />
                         </Field>
-                        <Field
-                            id="agent-mobile"
-                            label="Mobile number"
-                            hint="Their sign-in number. Ten digits, or with the country code."
-                            errors={fieldErrors.mobile}
-                        >
+                        <Field id="agent-mobile" label="Mobile number" errors={fieldErrors.mobile}>
                             <Input
                                 id="agent-mobile"
                                 inputMode="tel"
@@ -181,47 +169,26 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
                     <div className="grid gap-1.5">
                         <Label>Works on</Label>
-                        <RadioGroup
-                            value={side}
-                            onValueChange={(value) => setSide(value as Side)}
-                            className="grid gap-2 sm:grid-cols-2"
-                        >
+                        <RadioGroup value={side} onValueChange={(value) => setSide(value as Side)} className="grid gap-2 sm:grid-cols-2">
                             {SIDES.map((option) => (
                                 <label
                                     key={option.value}
                                     htmlFor={`side-${option.value}`}
                                     className="flex cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 text-left"
                                 >
-                                    <RadioGroupItem
-                                        id={`side-${option.value}`}
-                                        value={option.value}
-                                        className="mt-0.5"
-                                    />
+                                    <RadioGroupItem id={`side-${option.value}`} value={option.value} className="mt-0.5" />
                                     <span>
-                                        <span className="block text-sm font-medium text-foreground">
-                                            {option.label}
-                                        </span>
-                                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                                            {option.description}
-                                        </span>
+                                        <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                                        <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>
                                     </span>
                                 </label>
                             ))}
                         </RadioGroup>
-                        {fieldErrors.side?.[0] && (
-                            <p className="text-xs text-danger">{fieldErrors.side[0]}</p>
-                        )}
+                        {fieldErrors.side?.[0] && <p className="text-xs text-danger">{fieldErrors.side[0]}</p>}
                     </div>
 
                     <Field id="agent-email" label="Email" optional errors={fieldErrors.email}>
-                        <Input
-                            id="agent-email"
-                            type="email"
-                            value={fields.email}
-                            onChange={set("email")}
-                            autoComplete="off"
-                            placeholder="rahul@example.in"
-                        />
+                        <Input id="agent-email" type="email" value={fields.email} onChange={set("email")} autoComplete="off" placeholder="rahul@example.in" />
                     </Field>
 
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -229,39 +196,42 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                             <CityCombobox
                                 id="agent-city"
                                 value={fields.city}
-                                onChange={(city, picked) => setFields((current) => ({ ...current, city, state: picked ? (picked.geoState?.name ?? picked.state ?? current.state) : current.state }))}
+                                onChange={(city, picked) =>
+                                    setFields((current) => ({
+                                        ...current,
+                                        city,
+                                        state: picked ? (picked.geoState?.name ?? picked.state ?? current.state) : current.state,
+                                    }))
+                                }
                                 stages={["LAUNCHED", "SEEDING"]}
                                 placeholder="Bengaluru"
                             />
                         </Field>
                         <Field id="agent-state" label="State" optional errors={fieldErrors.state}>
-                            <Input
-                                id="agent-state"
-                                value={fields.state}
-                                onChange={set("state")}
-                                autoComplete="off"
-                                placeholder="Karnataka"
-                            />
+                            <Input id="agent-state" value={fields.state} onChange={set("state")} autoComplete="off" placeholder="Karnataka" />
                         </Field>
                     </div>
 
-                    {formError && (
-                        <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
-                            {formError}
-                        </p>
-                    )}
+                    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border bg-card p-3" htmlFor="agent-as-application">
+                        <span>
+                            <span className="block text-sm font-medium text-foreground">Start as an application</span>
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {asApplication
+                                    ? "Details, papers, payout account and terms first; the desk activates them with a grade."
+                                    : "Active at once with no grade — only for someone whose papers ADX already holds."}
+                            </span>
+                        </span>
+                        <Switch id="agent-as-application" checked={asApplication} onCheckedChange={setAsApplication} data-testid="agent-as-application" />
+                    </label>
+
+                    {formError && <p className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{formError}</p>}
 
                     <DialogFooter>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className="bg-card"
-                            onClick={() => handleOpenChange(false)}
-                        >
+                        <Button type="button" variant="outline" className="bg-card" onClick={() => handleOpenChange(false)}>
                             Cancel
                         </Button>
                         <Button type="submit" disabled={!live || !ready || busy}>
-                            {busy ? "Adding…" : "Add agent"}
+                            {busy ? "Adding…" : asApplication ? "Start the application" : "Add agent"}
                         </Button>
                     </DialogFooter>
                 </form>
@@ -287,17 +257,13 @@ function Field({
 }) {
     const error = errors?.[0];
     return (
-        <div className="grid gap-1.5">
+        <div className="grid content-start gap-1.5">
             <Label htmlFor={id}>
                 {label}
                 {optional && <span className="ml-1 font-normal text-muted-foreground">optional</span>}
             </Label>
             {children}
-            {error ? (
-                <p className="text-xs text-danger">{error}</p>
-            ) : hint ? (
-                <p className="text-xs text-muted-foreground">{hint}</p>
-            ) : null}
+            {error ? <p className="text-xs text-danger">{error}</p> : hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         </div>
     );
 }

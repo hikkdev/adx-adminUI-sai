@@ -5,6 +5,44 @@ import type { KycRowStatus, Order, StatusMeta } from "@/types";
 import type { Money, PayoutRailName, Timestamp, WalletSnapshot, WithdrawalStatus } from "./finance";
 
 /**
+ * DS-1: what a party's read says about a document e-signed through Digio —
+ * the same slice on a print partner (`agreement`), an employee
+ * (`appointment`) and an agent (`signing`). `signingUrl` is set only while
+ * the request is open; `signedFileId` is a `/files/:id` once it is done.
+ */
+export interface SigningSlice {
+    required: boolean;
+    satisfied: boolean;
+    status: string | null;
+    requestId: string | null;
+    signingUrl: string | null;
+    mock: boolean;
+    expiresAt: string | null;
+    completedAt: string | null;
+    signedFileId: string | null;
+    label?: string | null;
+}
+
+/** One line for a signing slice: "Signed 22 Sep", "Awaiting signature — until 7 Oct", or null when nothing is asked. */
+export function signingLine(slice: SigningSlice | null | undefined, formatDate: (iso: string) => string): string | null {
+    if (!slice || !slice.required) return null;
+    if (slice.satisfied) return slice.completedAt ? `Signed ${formatDate(slice.completedAt)}` : "Signed";
+    switch (slice.status) {
+        case "REQUESTED":
+        case "PARTIALLY_SIGNED":
+            return `Awaiting signature${slice.expiresAt ? ` — link good until ${formatDate(slice.expiresAt)}` : ""}`;
+        case "EXPIRED":
+            return "Signing link expired — send it again from Agreements › Signatures";
+        case "CANCELLED":
+            return "Request voided — send it again from Agreements › Signatures";
+        case "FAILED":
+            return "Declined at Digio — send it again from Agreements › Signatures";
+        default:
+            return "Not sent yet — it goes out on the next gated act, or from Agreements › Signatures";
+    }
+}
+
+/**
  * Print partners and their jobs — Lot B (Q50, package B4b), wired to the
  * backend `print-partners` module; Lot H (Q147) grows the desk's other half.
  *
@@ -65,6 +103,10 @@ export interface PrintPartner {
     id: string;
     /** PRT-1209-2601, from the identifier series. */
     displayId: string | null;
+    /** PP-1: stamped when the shop applied from the app; with `activatedAt` null it is an application awaiting the desk. */
+    appliedAt?: string | null;
+    /** DS-2: the service agreement e-signed through Digio — on the detail read; absent on a backend older than the rail. */
+    agreement?: SigningSlice;
     /** The PARTNER account — what `POST /finance/payout-methods` names; switched on by activation (Lot H). */
     userId: string;
     name: string;
@@ -636,16 +678,19 @@ export const capabilitiesLine = (partner: Pick<PrintPartner, "capabilities">): s
  * ended. The wire carries no last sign-in, so an activated partner reads
  * ACTIVE whether or not they have opened the app yet.
  */
-export type SignInState = "ACTIVE" | "INVITED" | "OFF";
+export type SignInState = "ACTIVE" | "INVITED" | "APPLIED" | "OFF";
 
-export function signInState(partner: Pick<PrintPartner, "isActive" | "activatedAt">): SignInState {
+/** PP-1: APPLIED is a shop that applied from the app and awaits the desk — reviewed here, activated through the same door. */
+export function signInState(partner: Pick<PrintPartner, "isActive" | "activatedAt" | "appliedAt">): SignInState {
     if (!partner.isActive) return "OFF";
-    return partner.activatedAt ? "ACTIVE" : "INVITED";
+    if (partner.activatedAt) return "ACTIVE";
+    return partner.appliedAt ? "APPLIED" : "INVITED";
 }
 
 export const SIGN_IN_STATE_META: Record<SignInState, StatusMeta> = {
     ACTIVE: { label: "Active", tone: "success" },
     INVITED: { label: "Invited", tone: "warning" },
+    APPLIED: { label: "Applied", tone: "info" },
     OFF: { label: "Off the roster", tone: "neutral" },
 };
 

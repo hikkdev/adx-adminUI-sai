@@ -2,7 +2,8 @@
  * Every console screen belongs to a feature — Lot G (answer 144).
  *
  * `features.manifest.json` at the package root maps route-group paths under
- * `src/app/(admin)` to feature keys. This walks every `page.tsx` there and
+ * `src/app/(admin)` — and, as `public/<path>`, under `src/app/(public)` (LH7's
+ * invite landing) — to feature keys. This walks every `page.tsx` there and
  * fails when one sits under no declared path, and when a declared path
  * matches no page (a screen that was moved or deleted without the manifest
  * following). The backend's `npm run features:sync` folds the manifest into
@@ -74,11 +75,11 @@ export function checkFeatures(pages, manifest) {
 
   for (const page of pages) {
     const match = declared.find(({ path }) => under(page, path));
-    if (!match) problems.push(`src/app/(admin)/${page}/page.tsx belongs to no feature — add its path to features.manifest.json`);
+    if (!match) problems.push(`src/app/${page.startsWith('public/') ? `(public)/${page.slice(7)}` : `(admin)/${page}`}/page.tsx belongs to no feature — add its path to features.manifest.json`);
   }
   for (const { path, key } of declared) {
     if (!pages.some((page) => under(page, path))) {
-      problems.push(`"${key}" names "${path}", which has no page under src/app/(admin) — the screen moved, or the manifest is stale`);
+      problems.push(`"${key}" names "${path}", which has no page under src/app/(admin) (or, as public/…, src/app/(public)) — the screen moved, or the manifest is stale`);
     }
   }
 
@@ -87,7 +88,9 @@ export function checkFeatures(pages, manifest) {
 
 export function main() {
   const manifest = JSON.parse(readFileSync(join(root(), 'features.manifest.json'), 'utf8'));
-  const result = checkFeatures(pagesUnder(join(root(), 'src', 'app', '(admin)')), manifest);
+  // LH7: the public pages (the invite landing under `src/app/(public)`) belong to a feature too, named as `public/<path>`.
+  const pages = [...pagesUnder(join(root(), 'src', 'app', '(admin)')), ...pagesUnder(join(root(), 'src', 'app', '(public)')).map((page) => `public/${page}`)];
+  const result = checkFeatures(pages, manifest);
   if (result.problems.length > 0) {
     console.error(`check-features: ${result.problems.length} problem(s)`);
     for (const problem of result.problems) console.error(`  - ${problem}`);

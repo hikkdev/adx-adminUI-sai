@@ -5,7 +5,7 @@ import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { useApiResource } from "@/lib/use-api-resource";
 import { isLive } from "@/lib/api-config";
 import { agentService, type AgentSummary } from "@/services/agents";
-import { leadsService, type LeadStatus, type LeadsPage } from "@/services/leads";
+import { leadsService, type LeadStatus, type LeadTemperature, type LeadsPage } from "@/services/leads";
 import { LeadsTable } from "./leads-table";
 import { LeadsOffline } from "./leads-offline";
 
@@ -33,18 +33,32 @@ import { LeadsOffline } from "./leads-offline";
 /** One page. Generous, and the header says so when there is more behind it. */
 const PAGE_SIZE = 100;
 
-export function LeadsLoader() {
+export function LeadsLoader({
+    initialStatus,
+    initialTemperature,
+    category = null,
+}: {
+    /** LH9: the facets the overview's rows hand the list through the URL. */
+    initialStatus?: LeadStatus | undefined;
+    initialTemperature?: LeadTemperature | undefined;
+    /** A category held for the whole read — the desk has no control for it, the URL carries it. */
+    category?: string | null;
+} = {}) {
     const live = isLive("leads");
-    const [status, setStatus] = React.useState<LeadStatus | "ALL">("ALL");
+    const [status, setStatus] = React.useState<LeadStatus | "ALL">(initialStatus ?? "ALL");
+    const [temperature, setTemperature] = React.useState<LeadTemperature | "ALL">(initialTemperature ?? "ALL");
     const [unassignedOnly, setUnassignedOnly] = React.useState(false);
 
     const resource = useApiResource<LeadsPage>(
-        `leads:list:${status}:${unassignedOnly}:${live}`,
+        `leads:list:${status}:${temperature}:${unassignedOnly}:${category ?? ""}:${live}`,
         () =>
             leadsService.list({
                 ...(status === "ALL" ? {} : { status: [status] }),
+                ...(temperature === "ALL" ? {} : { temperature }),
+                ...(category ? { category } : {}),
                 ...(unassignedOnly ? { unassigned: true } : {}),
-                sort: "NEWEST",
+                // LH1: hottest first — the desk's morning is the top of this list.
+                sort: "HOTTEST",
                 pageSize: PAGE_SIZE,
             }),
     );
@@ -60,6 +74,8 @@ export function LeadsLoader() {
                     page={page}
                     status={status}
                     onStatusChange={setStatus}
+                    temperature={temperature}
+                    onTemperatureChange={setTemperature}
                     unassignedOnly={unassignedOnly}
                     onUnassignedOnlyChange={setUnassignedOnly}
                     agents={roster.data ?? []}

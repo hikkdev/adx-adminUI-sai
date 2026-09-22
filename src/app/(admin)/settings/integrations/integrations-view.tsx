@@ -22,6 +22,9 @@ import {
 import type { SmsVocabulary } from "@/services/comms";
 import type { StatusMeta } from "@/types";
 import { DigioSection } from "./digio-section";
+import { EsignSection } from "./esign-section";
+import { LeadSourcesSection } from "./lead-sources-section";
+import { ChannelsSection } from "./channels-section";
 import { EmailModeControl, SMTP_HOST_FIELDS } from "./email-door";
 import { EmailDoorCard, SmsRoutingCard, ThirdRailCard, railBadges } from "./messaging-section";
 import { AudienceSection } from "./audience-section";
@@ -269,6 +272,11 @@ export function IntegrationsView({ settings, sms, onChanged }: IntegrationsViewP
 
             {/* Lot D (Q129): the KYC provider switch — DIGIO / MANUAL by ops, DEGRADED by the probe. */}
             <DigioSection />
+            <EsignSection />
+            {/* LH3: the directory feeds' partner credentials and the lead-form ad webhooks' secrets. */}
+            <LeadSourcesSection />
+            {/* LH6 (D5): the outreach hub's providers. */}
+            <ChannelsSection />
         </div>
     );
 }

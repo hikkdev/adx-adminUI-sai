@@ -26,7 +26,8 @@ import { countDelta, moneyDelta, moneyAsNumber, shiftDay, todayIST, type Delta }
 /* The sections                                                        */
 /* ------------------------------------------------------------------ */
 
-export const SECTIONS = ["publishers", "advertisers", "agents", "print-partners", "employees", "users"] as const;
+// LH9: the Leads section joined the six user sections.
+export const SECTIONS = ["publishers", "advertisers", "agents", "print-partners", "employees", "users", "leads"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export interface SectionMeta {
@@ -57,6 +58,8 @@ export const SECTION_META: Record<Section, SectionMeta> = {
     },
     employees: { label: "Employees", root: "/employees", directory: "/employees/directory", kycQueue: "/kyc/employees", cityFilter: false, domain: "employees" },
     users: { label: "Users", root: "/users", directory: "/users/accounts", kycQueue: null, cityFilter: true, domain: "users" },
+    // LH9: the list moved to `/leads/list` so the overview sits at the section's root like every other section's.
+    leads: { label: "Leads", root: "/leads", directory: "/leads/list", kycQueue: null, cityFilter: true, domain: "leads" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -276,6 +279,85 @@ export interface UsersOverview extends Base {
     breakdowns: { byRole: ListPage<CountRow>; byLanguage: ListPage<CountRow>; byCity: ListPage<CityRow> };
 }
 
+/* LH9: the Leads overview. */
+
+/** A conversion row: the cohort's leads, how many converted / activated, the rate. */
+export interface ConversionRow {
+    key: string;
+    label: string;
+    href: string | null;
+    leads: number;
+    converted: number;
+    activated: number;
+    /** Two decimals, as the server prints it. */
+    ratePct: string;
+}
+
+export interface ChannelRow {
+    key: string;
+    label: string;
+    href: null;
+    firstContact: number;
+    engaged: number;
+    converted: number;
+}
+
+export interface StageRow {
+    key: string;
+    label: string;
+    count: number;
+    value: Money | null;
+    avgDaysInStage: number | null;
+}
+
+export interface LeadsOverview extends Base {
+    section: "leads";
+    tiles: {
+        open: Figure;
+        newInWindow: Figure;
+        contacted: Figure;
+        converted: Figure;
+        activated: Figure;
+        lost: Figure;
+        byTemperature: ListPage<CountRow>;
+    };
+    /** The funnel over the window's cohort, as `/leads/funnel` answers it, the stages in the pipeline's order. */
+    funnel: {
+        byStage: StageRow[];
+        totals: { leads: number; converted: number; activated: number; retained: number; lost: number; recycled: number };
+        lossMix: { reason: string; count: number }[];
+    };
+    series: { newLeads: Series; conversions: Series; activations: Series };
+    breakdowns: {
+        bySource: ListPage<ConversionRow>;
+        byAgent: ListPage<ConversionRow & { displayId: string | null }>;
+        byCity: ListPage<CityRow & { converted: number; ratePct: string }>;
+        byCategory: ListPage<ConversionRow>;
+        byChannel: ListPage<ChannelRow>;
+    };
+    conversion: {
+        timeToConvert: { meanDays: number | null; medianDays: number | null; previousMeanDays: number | null; previousMedianDays: number | null };
+        costPerActivation: { value: Money | null; previous: Money | null; incentives: Money; topUps: Money; activations: number };
+        pipelineValue: Money;
+    };
+    recycle: { recycled: Figure; convertedAfterRecycle: Figure; yieldPct: string };
+    money: { incentives: MoneyFigure; topUps: MoneyFigure };
+}
+
+/** "5.7 days · median 5" — the time to convert, or what it is when nothing converted. */
+export function timeToConvertLine(time: LeadsOverview["conversion"]["timeToConvert"]): string {
+    if (time.meanDays === null) return "Nothing converted in this window";
+    const mean = `${time.meanDays} ${time.meanDays === 1 ? "day" : "days"}`;
+    return time.medianDays === null ? mean : `${mean} · median ${time.medianDays}`;
+}
+
+/** The day-count movement against the previous window as a Delta, for the tile; null when either side is empty. A fall in days is the good direction. */
+export function daysDelta(current: number | null, previous: number | null): Delta | null {
+    if (current === null || previous === null) return null;
+    const diff = Math.round((current - previous) * 10) / 10;
+    return { text: diff > 0 ? `+${diff} d` : diff < 0 ? `${diff} d` : "0", tone: diff < 0 ? "positive" : diff > 0 ? "negative" : "neutral" };
+}
+
 export type SectionOverviewOf<S extends Section> = S extends "publishers"
     ? PublishersOverview
     : S extends "advertisers"
@@ -286,7 +368,9 @@ export type SectionOverviewOf<S extends Section> = S extends "publishers"
           ? PrintPartnersOverview
           : S extends "employees"
             ? EmployeesOverviewSection
-            : UsersOverview;
+            : S extends "leads"
+              ? LeadsOverview
+              : UsersOverview;
 
 /* ------------------------------------------------------------------ */
 /* The window, in the URL                                              */
@@ -517,6 +601,8 @@ export function consoleHref(section: Section, href: string | null, window: Overv
     const params = new URLSearchParams(query);
     const record = /^\/(publishers|advertisers|agents|print-partners|users)\/[^/?]+$/;
     if (record.test(path) && !query) return href;
+    // LH9: the leads list and the sources desk keep their facets in the URL, so those rows open as they are.
+    if (section === "leads" && (path === "/leads/list" || path === "/leads/sources")) return href;
     if (path.startsWith("/hr/departments/")) return `/employees/departments/${path.slice("/hr/departments/".length)}`;
     const meta = SECTION_META[section];
     if (path === meta.root && params.has("city") && meta.cityFilter) {

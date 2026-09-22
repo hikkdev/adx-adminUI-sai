@@ -129,6 +129,9 @@ describe("modulePatch — only what changed", () => {
         unlockAfterOrdinal: 1,
         passPercent: 80,
         isActive: false,
+        audience: "ALL",
+        kind: "LESSON",
+        timeLimitMins: null,
     };
 
     it("sends nothing when nothing changed", () => {
@@ -240,5 +243,16 @@ describe("certifications", () => {
         expect(certifiedAgentLabel({ agentName: "Ravi Kumar", agentDisplayId: "AGT-1009-2601", agentId: "agt1" })).toBe("Ravi Kumar");
         expect(certifiedAgentLabel({ agentName: " ", agentDisplayId: "AGT-1009-2601", agentId: "agt1" })).toBe("AGT-1009-2601");
         expect(certifiedAgentLabel({ agentName: null, agentDisplayId: null, agentId: "agt1" })).toBe("agt1");
+    });
+});
+
+describe("AG-4: kind, audience and the clock", () => {
+    it("shapes an older server's module as a lesson for everyone, and patches only what moved", async () => {
+        const { shapeModule, modulePatch } = await import("./training");
+        const shaped = shapeModule({ id: "m1", ordinal: 1, title: "T", summary: null, durationMins: null, videoUrl: null, lessonBody: null, transcript: null, takeaways: [], passPercent: 80, questionCount: 0, isActive: true, unlockAfterOrdinal: null, createdAt: "", updatedAt: "" });
+        expect(shaped).toMatchObject({ audience: "ALL", kind: "LESSON", timeLimitMins: null });
+        const before = { ...shaped, summary: null };
+        expect(modulePatch(before, { ...before, kind: "ASSESSMENT", audience: "ADVERTISER_AGENT", timeLimitMins: 20 })).toEqual({ kind: "ASSESSMENT", audience: "ADVERTISER_AGENT", timeLimitMins: 20 });
+        expect(modulePatch(before, { ...before })).toEqual({});
     });
 });

@@ -26,6 +26,7 @@ import {
     SIZE_BAND_LABEL,
     financeService,
     incentiveEventLabel,
+    incentiveTierLabel,
     type BankAccount,
     type IncentiveEvent,
     type IncentiveRate,
@@ -636,7 +637,7 @@ function IncentiveRates({
     return (
         <SectionCard
             title="Agent incentive rates"
-            description={`What an agent earns for each kind of work, by tier. "*" covers every tier, so a rate that does not vary needs one row rather than one per tier.`}
+            description={`What an agent earns for each kind of work, by tier. "*" covers every tier, so a rate that does not vary needs one row rather than one per tier. A lead reward may be priced per side — "*:ADVERTISER" is every tier's advertiser figure (LH8, D1).`}
         >
             <div className="space-y-4">
                 <InstallationMode mode={installationMode} onChanged={onChanged} />
@@ -663,7 +664,7 @@ function IncentiveRates({
                                         {incentiveEventLabel(rate.event)}
                                     </td>
                                     <td className="px-3 py-2.5 text-muted-foreground">
-                                        {rate.tier === "*" ? "Every tier" : rate.tier}
+                                        {incentiveTierLabel(rate.tier)}
                                     </td>
                                     <td className="px-3 py-2.5 font-medium tabular-nums">
                                         {formatMoney(rate.amount)}
@@ -730,7 +731,7 @@ function IncentiveRates({
                                 onChange={(event) =>
                                     setForm((state) => ({ ...state, tier: event.target.value }))
                                 }
-                                placeholder="* for every tier"
+                                placeholder="* for every tier; *:ADVERTISER for one side"
                             />
                         </div>
                         <div className="space-y-1.5">

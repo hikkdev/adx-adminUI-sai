@@ -18,7 +18,7 @@ import {
     KINDS_FOR_PARTY,
     KIND_META,
     PARTY_LABEL,
-    PARTY_TYPES,
+    AGREEMENT_PARTIES,
     TEMPLATE_STATE_META,
     agreementService,
     kindCoverage,
@@ -213,7 +213,7 @@ export function TemplatesView({ templates, onChanged }: TemplatesViewProps) {
         <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
             {/* Rail: the four kinds, grouped by who signs them. */}
             <nav className="space-y-5" aria-label="Agreement kinds">
-                {PARTY_TYPES.map((partyType) => (
+                {AGREEMENT_PARTIES.map((partyType) => (
                     <div key={partyType}>
                         <p className="px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             {PARTY_LABEL[partyType].singular}

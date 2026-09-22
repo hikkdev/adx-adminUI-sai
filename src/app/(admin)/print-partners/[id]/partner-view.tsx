@@ -31,6 +31,7 @@ import { DetailShell } from "@/components/adx/detail-shell";
 import { VerifiedTick } from "@/components/adx/verified-tick";
 import { PrivateFile, openPrivateFile } from "@/components/adx/private-file";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
+import { signingLine } from "@/services/print-partners";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { useAuth } from "@/lib/auth";
 import { compareMoney, formatDate, formatDateTime, formatMoney } from "@/lib/format";
@@ -138,10 +139,23 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
             hint:
                 signIn === "ACTIVE" && partner.activatedAt
                     ? `Since ${formatDate(partner.activatedAt)} · last sign-in ${lastSignInLabel(partner, formatDateTime)}`
-                    : signIn === "INVITED"
-                      ? "Account not yet switched on"
-                      : (partner.displayId ?? "No PRT id"),
+                    : signIn === "APPLIED" && partner.appliedAt
+                      ? `Applied from the app ${formatDate(partner.appliedAt)} — review, then activate`
+                      : signIn === "INVITED"
+                        ? "Account not yet switched on"
+                        : (partner.displayId ?? "No PRT id"),
         },
+        // DS-2: the service agreement, beside the KYC — quotes and jobs wait on it while the policy asks.
+        ...(signingLine(partner.agreement, formatDate)
+            ? [
+                  {
+                      id: "agreement",
+                      label: "Service agreement",
+                      value: partner.agreement?.satisfied ? "Signed" : "Awaiting",
+                      hint: signingLine(partner.agreement, formatDate) ?? "",
+                  } satisfies KpiStat,
+              ]
+            : []),
     ];
 
     async function activate() {
@@ -469,9 +483,11 @@ function AccountCard({ partner, onActivate, busy, onChanged }: { partner: PrintP
             <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
                 {state === "ACTIVE"
                     ? "The shop signs in by OTP on this number and runs its jobs from the app. Taking it off the roster switches the app off and ends its sessions."
-                    : state === "INVITED"
-                      ? "On the roster as a payee only. Activate it so the shop signs in, keeps its rate card and walks its jobs from the app; until then ops record everything here."
-                      : partner.activatedAt
+                    : state === "APPLIED"
+                      ? "The shop applied from the app (PP-1): it filled in its own details and can verify its KYC from its phone. Check the identity, the papers and the city, then activate — the same switch as an invited partner. Off the roster with a reason declines it."
+                      : state === "INVITED"
+                        ? "On the roster as a payee only. Activate it so the shop signs in, keeps its rate card and walks its jobs from the app; until then ops record everything here."
+                        : partner.activatedAt
                         ? "Off the roster: the app is switched off and every session was ended. Reactivating switches it back on."
                         : "Off the roster and never activated. Reactivate it first, then activate the account."}
             </p>

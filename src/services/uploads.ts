@@ -37,6 +37,8 @@ export type UploadPurpose =
      * .attachmentMaxMb`, enforced by the server before the message is written.
      */
     | "SUPPORT_ATTACHMENT"
+    /** LH4: a wall or a shop front an agent photographed in the street — private, kept for the listing draft. */
+    | "LEAD_CAPTURE"
     | "OTHER";
 
 export interface Uploaded {

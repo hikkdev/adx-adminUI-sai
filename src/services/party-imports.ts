@@ -19,7 +19,7 @@ import { isLive, type LiveDomain } from "@/lib/api-config";
  */
 
 /** The `:party` segment. Anything else is a 400 before any table is read. */
-export const IMPORT_PARTIES = ["advertisers", "agents", "print-partners", "employees"] as const;
+export const IMPORT_PARTIES = ["advertisers", "agents", "print-partners", "employees", "leads"] as const;
 export type ImportParty = (typeof IMPORT_PARTIES)[number];
 
 /**
@@ -101,6 +101,8 @@ export const IMPORT_PARTY_DOMAIN: Record<ImportParty, LiveDomain> = {
     agents: "agents",
     "print-partners": "printPartners",
     employees: "employees",
+    /** LH3: leads on the same kit — a create goes through the lead's own service. */
+    leads: "leads",
 };
 
 function live(party: ImportParty) {

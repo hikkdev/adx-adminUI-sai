@@ -289,6 +289,8 @@ function CreateForm({ agents, onCreated, onClose }: Omit<CreateLeadDialogProps, 
         estimatedCommission: "",
     });
     const [agentId, setAgentId] = React.useState(OPEN_POOL);
+    /** AG-5: the band — a KEY or ENTERPRISE lead goes to the grade the routing settings ask for. */
+    const [importance, setImportance] = React.useState<"STANDARD" | "KEY" | "ENTERPRISE">("STANDARD");
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = React.useState<Record<string, string[]>>({});
@@ -312,6 +314,7 @@ function CreateForm({ agents, onCreated, onClose }: Omit<CreateLeadDialogProps, 
             if (value) input[key] = value;
         });
         if (agentId !== OPEN_POOL) input.assignedAgentId = agentId;
+        if (importance !== "STANDARD") input.importance = importance;
         try {
             const lead = await leadsService.create(input);
             toast.success(`${lead.businessName} added as ${lead.displayId ?? lead.id}`);
@@ -391,6 +394,19 @@ function CreateForm({ agents, onCreated, onClose }: Omit<CreateLeadDialogProps, 
                 {field("interest", "Interest", { placeholder: "What they asked about", maxLength: 200 })}
                 {field("source", "Source", { placeholder: "Walk-in, referral…", maxLength: 120 })}
                 {field("estimatedCommission", "Est. commission", { inputMode: "decimal", placeholder: "Quoted from the rate if blank" })}
+                <div className="grid gap-1.5">
+                    <Label htmlFor="lead-importance">Importance</Label>
+                    <Select value={importance} onValueChange={(v) => setImportance(v as "STANDARD" | "KEY" | "ENTERPRISE")}>
+                        <SelectTrigger id="lead-importance" className="h-9" data-testid="lead-importance">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="STANDARD">Standard</SelectItem>
+                            <SelectItem value="KEY">Key — a senior agent</SelectItem>
+                            <SelectItem value="ENTERPRISE">Enterprise — the top grade</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
                 <div className="grid gap-1.5">
                     <Label htmlFor="lead-agent">Assign to</Label>
                     <Select value={agentId} onValueChange={setAgentId}>

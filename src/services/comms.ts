@@ -48,8 +48,8 @@ export const TEMPLATE_STATUS_META: Record<TemplateStatus, StatusMeta> = {
     RETIRED: { label: "Retired", tone: "neutral" },
 };
 
-/** Where a message can go. The dispatcher renders EMAIL, SMS and PUSH from a template; in-app copy stays in code. */
-export const NOTIFICATION_CHANNELS = ["IN_APP", "PUSH", "EMAIL", "SMS"] as const;
+/** Where a message can go. The dispatcher renders EMAIL, SMS, PUSH — and, LH6, WHATSAPP through the outreach hub's BSP — from a template; in-app copy stays in code. */
+export const NOTIFICATION_CHANNELS = ["IN_APP", "PUSH", "EMAIL", "SMS", "WHATSAPP"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 export const CHANNEL_LABEL: Record<NotificationChannel, string> = {
@@ -57,6 +57,7 @@ export const CHANNEL_LABEL: Record<NotificationChannel, string> = {
     PUSH: "Push",
     EMAIL: "Email",
     SMS: "SMS",
+    WHATSAPP: "WhatsApp",
 };
 
 /** The channels a template's editor can switch on: the three the dispatcher sends. G13-C: PUSH joins EMAIL and SMS (G10, Q103 push copy). */

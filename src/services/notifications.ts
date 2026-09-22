@@ -70,11 +70,13 @@ export const NOTIFICATION_TYPE_TONE: Record<NotificationType, Tone> = {
 export const NOTIFICATION_CHANNELS = ["IN_APP", "PUSH", "EMAIL", "SMS"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
-export const NOTIFICATION_CHANNEL_LABEL: Record<NotificationChannel, string> = {
+/** LH6: WHATSAPP is a channel a template may name, but has no row of its own on the matrix — it follows the SMS switch. */
+export const NOTIFICATION_CHANNEL_LABEL: Record<NotificationChannel | "WHATSAPP", string> = {
     IN_APP: "In-app",
     PUSH: "Push",
     EMAIL: "Email",
     SMS: "SMS",
+    WHATSAPP: "WhatsApp",
 };
 
 /* ------------------------------------------------------------------ */

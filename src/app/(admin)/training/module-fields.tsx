@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ModuleDraft } from "@/services/training";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AUDIENCE_LABEL, MODULE_KIND_LABEL, TRAINING_AUDIENCES, type ModuleDraft, type TrainingAudience, type TrainingModuleKind } from "@/services/training";
 
 /**
  * What the two module forms share: the draft as text, the checks the schema
@@ -27,6 +29,10 @@ export interface ModuleFormValues {
     unlockAfterOrdinal: string;
     passPercent: string;
     isActive: boolean;
+    /** AG-4: whom it is for, what it is; "" is an untimed quiz. */
+    audience: TrainingAudience;
+    kind: TrainingModuleKind;
+    timeLimitMins: string;
 }
 
 /** A stored module, as the inputs hold it. */
@@ -43,6 +49,9 @@ export function fromModule(module: ModuleDraft): ModuleFormValues {
         unlockAfterOrdinal: module.unlockAfterOrdinal === null ? "" : String(module.unlockAfterOrdinal),
         passPercent: String(module.passPercent),
         isActive: module.isActive,
+        audience: module.audience,
+        kind: module.kind,
+        timeLimitMins: module.timeLimitMins === null ? "" : String(module.timeLimitMins),
     };
 }
 
@@ -64,6 +73,9 @@ export function toDraft(values: ModuleFormValues): ModuleDraft {
         unlockAfterOrdinal: values.unlockAfterOrdinal.trim() === "" ? null : Number(values.unlockAfterOrdinal),
         passPercent: Number(values.passPercent),
         isActive: values.isActive,
+        audience: values.audience,
+        kind: values.kind,
+        timeLimitMins: values.timeLimitMins.trim() === "" ? null : Number(values.timeLimitMins),
     };
 }
 
@@ -106,7 +118,59 @@ export function draftProblems(values: ModuleFormValues): Partial<Record<keyof Mo
         problems.unlockAfterOrdinal = "A module can only wait on one that comes before it.";
     }
     if (values.passPercent.trim() === "" || !wholeNumber(values.passPercent, 1, 100)) problems.passPercent = "A whole number from 1 to 100.";
+    if (!wholeNumber(values.timeLimitMins, 1, 240)) problems.timeLimitMins = "Whole minutes, 1 to 240 — or leave it empty for no clock.";
     return problems;
+}
+
+/**
+ * AG-4: whom the module is for and what it is. A lesson counts toward the
+ * certificate; an assessment is the screening test a sales applicant sits —
+ * scored, timed if you give it a clock, never certified.
+ */
+export function KindAudienceFields({
+    values,
+    onChange,
+    error,
+}: {
+    values: Pick<ModuleFormValues, "audience" | "kind" | "timeLimitMins">;
+    onChange: (patch: Partial<Pick<ModuleFormValues, "audience" | "kind" | "timeLimitMins">>) => void;
+    error?: string;
+}) {
+    return (
+        <div className="grid gap-4 sm:grid-cols-3">
+            <Field id="md-audience" label="For" hint="Every agent, or one side's curriculum.">
+                <Select value={values.audience} onValueChange={(value) => onChange({ audience: value as TrainingAudience })}>
+                    <SelectTrigger id="md-audience" className="bg-card">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {TRAINING_AUDIENCES.map((audience) => (
+                            <SelectItem key={audience} value={audience}>
+                                {AUDIENCE_LABEL[audience]}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </Field>
+            <Field id="md-kind" label="Kind" hint={values.kind === "ASSESSMENT" ? "The screening test: scored, never certified." : "Counts toward the certificate."}>
+                <Select value={values.kind} onValueChange={(value) => onChange({ kind: value as TrainingModuleKind })}>
+                    <SelectTrigger id="md-kind" className="bg-card">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {(Object.keys(MODULE_KIND_LABEL) as TrainingModuleKind[]).map((kind) => (
+                            <SelectItem key={kind} value={kind}>
+                                {MODULE_KIND_LABEL[kind]}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </Field>
+            <Field id="md-clock" label="Clock (minutes)" optional hint="The quiz submits what is answered when it runs out." error={error}>
+                <Input id="md-clock" type="number" min={1} max={240} inputMode="numeric" value={values.timeLimitMins} onChange={(event) => onChange({ timeLimitMins: event.target.value })} placeholder="—" />
+            </Field>
+        </div>
+    );
 }
 
 export function Field({

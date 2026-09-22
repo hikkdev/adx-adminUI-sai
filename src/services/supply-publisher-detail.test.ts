@@ -52,6 +52,8 @@ describe("shapePublisherDetail", () => {
             onboardingStatus: "PENDING_ONBOARDING",
             createdAt: "2026-09-14T15:00:00.000Z",
             activatedAt: null,
+            // AG-5: the importance band, null from a server older than the routing.
+            sizeBand: null,
             suspensionScopes: [],
             suspensionReason: null,
             suspendedAt: null,

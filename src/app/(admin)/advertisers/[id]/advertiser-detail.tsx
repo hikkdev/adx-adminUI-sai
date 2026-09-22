@@ -6,6 +6,7 @@ import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AccountClosure, CloseAccountButton } from "@/components/adx/account-closure";
+import { PartyBandControl } from "@/components/adx/party-band-control";
 import { ActivityTimeline } from "@/components/adx/activity-timeline";
 import { DetailShell } from "@/components/adx/detail-shell";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
@@ -195,6 +196,8 @@ export function AdvertiserDetail({
                         <div className="grid gap-4 lg:grid-cols-2">
                             <Card className="rounded-lg border-border p-5 shadow-none">
                                 <h3 className="text-base font-semibold text-foreground">Account</h3>
+                                {/* AG-5: the band that decides which grade of agent this account's work goes to. */}
+                                <PartyBandControl party="advertisers" partyId={advertiser.id} value={advertiser.sizeBand} onChanged={onChanged} className="mt-3" />
                                 <div className="mt-3">
                                     <StatusBadge
                                         status={ADVERTISER_STATUS_META[advertiser.status]}

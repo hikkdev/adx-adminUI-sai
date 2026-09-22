@@ -1,4 +1,5 @@
 import { api as http } from "@/lib/api-client";
+import type { SigningSlice } from "@/services/print-partners";
 import { isLive } from "@/lib/api-config";
 import { shapeKycSummary } from "./kyc-state";
 import type { KycSummary, WireKycSummary } from "@/types";
@@ -156,6 +157,8 @@ export interface WireEmployeeDetail extends WireEmployee {
     hrmsLink: string | null;
     documentsMasked?: boolean;
     documentsOnFile?: string[];
+    /** DS-2: the appointment letter's standing, when the server has the rail. */
+    appointment?: (SigningSlice & { inviteDeferred: boolean }) | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -253,6 +256,8 @@ export interface EmployeeDetail extends EmployeeRow {
     /** N3-B: the party's KYC state as `GET /employees/:userId` derives it — the queue row's word. */
     kyc: KycSummary;
     hrmsLink: string | null;
+    /** DS-2: the appointment letter e-signed through Digio; `inviteDeferred` while a console invitation waits on it. Null on a backend older than the rail. */
+    appointment: (SigningSlice & { inviteDeferred: boolean }) | null;
     /** True when the server nulled the URLs because the viewer lacks `hr.documents.view`. */
     documentsMasked: boolean;
     documents: EmployeeDocumentRow[];
@@ -305,6 +310,7 @@ export function shapeEmployeeDetail(wire: WireEmployeeDetail): EmployeeDetail {
         // N3-B: employees keep no mirror column; with no `kyc` on the read the employee is awaiting documents.
         kyc: shapeKycSummary(wire.kyc),
         hrmsLink: wire.hrmsLink ?? null,
+        appointment: wire.appointment ?? null,
         documentsMasked: wire.documentsMasked === true,
         documents: documentRows(wire),
     };

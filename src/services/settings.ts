@@ -181,6 +181,101 @@ export interface PlatformSettings {
      * Geographies desk then says it is not served.
      */
     geo?: GeoSettings;
+    /**
+     * DS-1 (Digio eSign): which of the five documents are e-signed rather
+     * than clicked, how and when. Optional on the read for a backend older
+     * than the section; Settings › E-signing then says it is not served.
+     */
+    esign?: EsignPolicy;
+    /**
+     * LT-1 (live agent tracking): the ping intervals, the trail retention,
+     * the geofence, the alert thresholds and whether the parties see an
+     * ETA. Optional on the read for a backend older than the section.
+     */
+    tracking?: TrackingSettings;
+    /** LH1: the lead score's policy; LH3/LH5: the claims (D3), the referral credit (D9), the priority top-up (D7). Optional on the read for a backend older than the section. */
+    leads?: { scoring: LeadScoringPolicy; claims?: LeadClaimsPolicy; referralCredit?: number; priority?: LeadPriorityPolicy };
+}
+
+/** LH5 (D3): `settings.leads.claims` — the hold, the caps by tier (null = unlimited), the cooldown after a lapse. */
+export interface LeadClaimsPolicy {
+    holdHours: number;
+    caps: { BRONZE: number | null; SILVER: number | null; GOLD: number | null; PLATINUM: number | null };
+    cooldownDays: number;
+}
+
+/** LH5 (D7): `settings.leads.priority` — the default top-up per activation in a zone, and the platform-wide monthly cap on top-ups. */
+export interface LeadPriorityPolicy {
+    topUp: number;
+    monthlyCap: number;
+}
+
+/** LH1: `settings.leads.scoring` — D10's five signals, weights, decay and thresholds. */
+export interface LeadScoringPolicy {
+    weights: { fitMax: number; intentMax: number; recencyMin: number; sourceMax: number; agentFlag: number };
+    recency: { afterDays7: number; afterDays21: number; afterDays45: number };
+    thresholds: { hot: number; warm: number };
+    agentFlagDays: number;
+    intent: Record<string, number>;
+    fit: {
+        defaultCategory: number;
+        categoryBySide: { PUBLISHER: Record<string, number>; ADVERTISER: Record<string, number> };
+        importanceBonus: { KEY: number; ENTERPRISE: number };
+        localityBonus: number;
+        localityRadiusM: number;
+    };
+}
+
+/** LT-1: `settings.tracking`. */
+export interface TrackingSettings {
+    pingMovingSec: number;
+    pingStillSec: number;
+    mode: "WHILE_USING" | "BACKGROUND";
+    retentionDays: number;
+    geofenceRadiusM: number;
+    idleAlertMin: number;
+    lateGraceMin: number;
+    offRouteKm: number;
+    offlineAfterMin: number;
+    partiesSeeEta: boolean;
+}
+
+export type SigningDocumentKey = "AGENT_ENGAGEMENT" | "EMPLOYEE_APPOINTMENT" | "PRINT_PARTNER_SERVICE" | "PUBLISHER_LICENCE" | "INSERTION_ORDER";
+export const SIGNING_DOCUMENT_KEYS: SigningDocumentKey[] = ["AGENT_ENGAGEMENT", "EMPLOYEE_APPOINTMENT", "PRINT_PARTNER_SERVICE", "PUBLISHER_LICENCE", "INSERTION_ORDER"];
+export const SIGNING_DOCUMENT_LABEL: Record<SigningDocumentKey, { label: string; when: string; gates: string }> = {
+    AGENT_ENGAGEMENT: { label: "Agent engagement terms", when: "when the desk activates the agent", gates: "working — the dashboard, accepting an order" },
+    EMPLOYEE_APPOINTMENT: { label: "Employee appointment and NDA", when: "at Employees › New, by a hosted link", gates: "the console invitation" },
+    PRINT_PARTNER_SERVICE: { label: "Print partner service agreement", when: "the moment the partner's KYC verifies", gates: "quoting and accepting jobs" },
+    PUBLISHER_LICENCE: { label: "Publisher licence to display", when: "at the first approved listing (or first submission)", gates: "publishing the next batch" },
+    INSERTION_ORDER: { label: "Insertion order", when: "at checkout, above the threshold or for a listed band", gates: "authorising that campaign" },
+};
+export type SignMethod = "AADHAAR" | "DSC" | "ELECTRONIC";
+export const SIGN_METHODS: SignMethod[] = ["AADHAAR", "DSC", "ELECTRONIC"];
+export const SIGN_METHOD_LABEL: Record<SignMethod, string> = { AADHAAR: "Aadhaar OTP", DSC: "DSC (USB token)", ELECTRONIC: "Electronic (drawn)" };
+export type PartyBand = "INDIVIDUAL" | "SMALL_AGENCY" | "LARGE_AGENCY";
+export const PARTY_BANDS: PartyBand[] = ["INDIVIDUAL", "SMALL_AGENCY", "LARGE_AGENCY"];
+export const PARTY_BAND_LABEL: Record<PartyBand, string> = { INDIVIDUAL: "Standard / Individual", SMALL_AGENCY: "Key / Small agency", LARGE_AGENCY: "Enterprise / Large agency" };
+
+export interface StampDutyRow {
+    document: SigningDocumentKey;
+    /** ISO state code without the country — KA, MH, DL … */
+    state: string;
+    amount: number;
+    article?: string;
+}
+
+/** DS-1: `settings.esign` — the policy behind the five documents. */
+export interface EsignPolicy {
+    enabled: boolean;
+    signMethod: SignMethod;
+    expireInDays: number;
+    countersign: boolean;
+    notifyThroughDigio: boolean;
+    documents: Record<SigningDocumentKey, boolean>;
+    insertionOrder: { valueThreshold: number; bands: PartyBand[] };
+    publisherLicenceAt: "FIRST_APPROVED_LISTING" | "FIRST_SUBMISSION";
+    resignOnNewVersion: boolean;
+    stampDuty: StampDutyRow[];
 }
 
 /** Lot V: `settings.geo`. `launchMinListings` is 0–10,000 on the schema. */
@@ -285,6 +380,14 @@ export type PlatformSettingsPatch = {
     hr?: { workloadThresholds?: Partial<HrSettings["workloadThresholds"]> };
     subscriptions?: Partial<Record<SubscriptionAudience, SubscriptionPolicyPatch>>;
     geo?: Partial<GeoSettings>;
+    esign?: Partial<Omit<EsignPolicy, "documents" | "insertionOrder">> & { documents?: Partial<EsignPolicy["documents"]>; insertionOrder?: Partial<EsignPolicy["insertionOrder"]> };
+    tracking?: Partial<TrackingSettings>;
+    leads?: {
+        scoring?: Partial<Omit<LeadScoringPolicy, "weights" | "recency" | "thresholds" | "fit">> & { weights?: Partial<LeadScoringPolicy["weights"]>; recency?: Partial<LeadScoringPolicy["recency"]>; thresholds?: Partial<LeadScoringPolicy["thresholds"]>; fit?: Partial<LeadScoringPolicy["fit"]> };
+        claims?: Partial<Omit<LeadClaimsPolicy, "caps">> & { caps?: Partial<LeadClaimsPolicy["caps"]> };
+        referralCredit?: number;
+        priority?: Partial<LeadPriorityPolicy>;
+    };
 };
 
 /** The schema's bounds, so the form refuses what the server would. */
@@ -312,6 +415,38 @@ export const SETTING_BOUNDS = {
     "subscriptions.unpaidOrderExpiryDays": { min: 1, max: 30 },
     /* Lot V: the readiness check's floor on live listings. */
     "geo.launchMinListings": { min: 0, max: 10_000 },
+    /* DS-1: the signing link's life and the insertion-order threshold. */
+    "esign.expireInDays": { min: 1, max: 90 },
+    "esign.insertionOrder.valueThreshold": { min: 0, max: 1_000_000_000 },
+    "esign.stampDuty.amount": { min: 0, max: 1_000_000 },
+    /* LT-1: the schema's own bounds on the tracking block. */
+    "tracking.pingMovingSec": { min: 15, max: 600 },
+    "tracking.pingStillSec": { min: 60, max: 3600 },
+    "tracking.retentionDays": { min: 1, max: 365 },
+    "tracking.geofenceRadiusM": { min: 25, max: 2000 },
+    "tracking.idleAlertMin": { min: 1, max: 240 },
+    "tracking.lateGraceMin": { min: 0, max: 240 },
+    "tracking.offRouteKm": { min: 0.5, max: 50 },
+    "tracking.offlineAfterMin": { min: 1, max: 240 },
+    /* LH1: the scoring policy's own bounds. */
+    "leads.claims.holdHours": { min: 1, max: 720 },
+    "leads.claims.cap": { min: 1, max: 1000 },
+    "leads.claims.cooldownDays": { min: 0, max: 90 },
+    "leads.referralCredit": { min: 0, max: 100_000 },
+    "leads.priority.topUp": { min: 0, max: 100_000 },
+    "leads.priority.monthlyCap": { min: 0, max: 100_000_000 },
+    "leads.scoring.weights.fitMax": { min: 0, max: 50 },
+    "leads.scoring.weights.intentMax": { min: 0, max: 50 },
+    "leads.scoring.weights.recencyMin": { min: -50, max: 0 },
+    "leads.scoring.weights.sourceMax": { min: 0, max: 30 },
+    "leads.scoring.weights.agentFlag": { min: 0, max: 30 },
+    "leads.scoring.recency": { min: -50, max: 0 },
+    "leads.scoring.thresholds.hot": { min: 1, max: 100 },
+    "leads.scoring.thresholds.warm": { min: 0, max: 99 },
+    "leads.scoring.agentFlagDays": { min: 1, max: 90 },
+    "leads.scoring.intent": { min: 0, max: 35 },
+    "leads.scoring.fit.points": { min: 0, max: 30 },
+    "leads.scoring.fit.localityRadiusM": { min: 200, max: 5000 },
 } as const;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>

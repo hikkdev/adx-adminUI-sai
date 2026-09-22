@@ -19,6 +19,7 @@ import { isLive } from "@/lib/api-config";
 import { useInstallationMode } from "@/lib/use-installation-mode";
 import { opsOverridesFor, orderService, type OpsOverride } from "@/services/orders";
 import { PickupCodeCard } from "./pickup-code-card";
+import { OrderJourneyCard } from "./order-journey-card";
 import { OrderMilestonesCard } from "./order-milestones-card";
 import { OrderOffersCard } from "./order-offers-card";
 import { OPS_OVERRIDE_COPY, OPS_REASON_MIN, OpsOverrideDialog, ReasonField, ReassignAgentDialog } from "./order-ops-dialogs";
@@ -326,6 +327,9 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
 
             {/* A12: the steps and the offer on each visit — ops dispatches from here. */}
             {live && <OrderMilestonesCard order={order} />}
+
+            {/* LT-1: the legs as the agent app reported them, and the agent's live line. */}
+            {live && <OrderJourneyCard order={order} />}
 
             {/* Lot D: every offer the order made, and every admin write that named it. */}
             {live && order.offers && (

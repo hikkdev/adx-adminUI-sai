@@ -25,13 +25,13 @@ const board = (over: Partial<Board> = {}): Board => ({
     cohort: { city: "Bengaluru", size: 14, minimum: 10, enough: true },
     me: null,
     top: [
-        { rank: 1, agentId: "a1", name: "Asha Rao", locality: "Jayanagar", you: false, earnings: "12000.00" },
-        { rank: 2, agentId: "a2", name: "Bala Iyer", locality: null, you: false, earnings: "9000.50" },
-        { rank: 3, agentId: "a3", name: "Charu Menon", locality: "Indiranagar", you: false, earnings: "8500.00" },
+        { rank: 1, agentId: "a1", name: "Asha Rao", locality: "Jayanagar", you: false, earnings: "12000.00", fromLeads: "1200.00", conversions: 4 },
+        { rank: 2, agentId: "a2", name: "Bala Iyer", locality: null, you: false, earnings: "9000.50", fromLeads: "0.00", conversions: 0 },
+        { rank: 3, agentId: "a3", name: "Charu Menon", locality: "Indiranagar", you: false, earnings: "8500.00", fromLeads: "0.00", conversions: 1 },
     ],
     window: [
-        { rank: 4, agentId: "a4", name: "Dev Kumar", locality: "HSR Layout", you: false },
-        { rank: 5, agentId: "a5", name: "Esha Nair", locality: null, you: false },
+        { rank: 4, agentId: "a4", name: "Dev Kumar", locality: "HSR Layout", you: false, conversions: 2 },
+        { rank: 5, agentId: "a5", name: "Esha Nair", locality: null, you: false, conversions: 0 },
     ],
     around: [],
     prize: null,
@@ -57,6 +57,18 @@ describe("the board", () => {
         expect(table.getByText("Esha Nair")).toBeInTheDocument();
         expect(table.queryByText(/₹/)).not.toBeInTheDocument();
         expect(screen.getByText(/sends no figures below the podium/)).toBeInTheDocument();
+    });
+
+    it("LH8: prints the hunt's share under each podium figure, and only a count of conversions below it", () => {
+        render(<LeaderboardBoard board={board()} />);
+        expect(screen.getByTestId("leaderboard-from-leads-1")).toHaveTextContent("₹1,200.00 from leads · 4 conversions");
+        expect(screen.getByTestId("leaderboard-from-leads-2")).toHaveTextContent("Nothing from leads yet");
+        expect(screen.getByTestId("leaderboard-from-leads-3")).toHaveTextContent("1 conversion");
+        const table = within(screen.getByTestId("leaderboard-window"));
+        expect(table.getByText("From leads")).toBeInTheDocument();
+        expect(table.getByText("2 conversions")).toBeInTheDocument();
+        // Still no money below the podium.
+        expect(table.queryByText(/₹/)).not.toBeInTheDocument();
     });
 
     it("links each agent to their page", () => {

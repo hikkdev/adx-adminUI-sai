@@ -39,6 +39,7 @@ export type ListingDocumentKind =
     | "OWNER_NOC"
     | "ADDRESS_PROOF"
     | "MUNICIPAL_PERMIT"
+    | "VEHICLE_RC"
     | "OTHER";
 
 export type ListingDocumentStatus = "PENDING" | "VERIFIED" | "REJECTED";
@@ -148,6 +149,8 @@ export const DOCUMENT_KIND_LABEL: Record<ListingDocumentKind, string> = {
     OWNER_NOC: "Owner NOC",
     ADDRESS_PROOF: "Address proof",
     MUNICIPAL_PERMIT: "Municipal permit",
+    /* AG-4: the registration certificate of a vehicle put up as a spot. */
+    VEHICLE_RC: "Vehicle RC",
     OTHER: "Other document",
 };
 

@@ -69,7 +69,8 @@ describe("partyImportService", () => {
     });
 
     it("gates each party on its own api-config domain and refuses to call when the domain is off", async () => {
-        expect(IMPORT_PARTY_DOMAIN).toEqual({ advertisers: "advertisers", agents: "agents", "print-partners": "printPartners", employees: "employees" });
+        // LH3: leads joined the kit, on the leads domain.
+        expect(IMPORT_PARTY_DOMAIN).toEqual({ advertisers: "advertisers", agents: "agents", "print-partners": "printPartners", employees: "employees", leads: "leads" });
         liveGate.live = false;
         await expect(partyImportService("agents").list()).rejects.toThrow(/connect the console/);
         expect(calls).toEqual([]);

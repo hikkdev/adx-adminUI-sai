@@ -19,6 +19,7 @@ import { formatDate } from "@/lib/format";
 import { EMPLOYEE_KYC_STATUS_META, employeeKycService, type EmployeeKycCase } from "@/services/employee-kyc";
 import { requestOf } from "@/services/kyc";
 import { KYC_STATE_META } from "@/services/kyc-state";
+import { signingLine } from "@/services/print-partners";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
 import { AssignedTasksCard } from "@/app/(admin)/tasks/assigned-tasks-card";
 import {
@@ -136,6 +137,17 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
                         value: kycStatus?.label ?? "Not recorded",
                         hint: kyc ? `${kyc.documents} of 7 documents recorded` : "nothing recorded at the desk yet",
                     },
+                    // DS-2: the appointment letter — the console invitation waits on it while the policy asks.
+                    ...(signingLine(employee.appointment, formatDate)
+                        ? [
+                              {
+                                  id: "appointment",
+                                  label: "Appointment letter",
+                                  value: employee.appointment?.satisfied ? "Signed" : "Awaiting",
+                                  hint: `${signingLine(employee.appointment, formatDate) ?? ""}${employee.appointment?.inviteDeferred ? " · the console invitation goes out once signed" : ""}`,
+                              },
+                          ]
+                        : []),
                 ]}
                 tabs={[
                     {

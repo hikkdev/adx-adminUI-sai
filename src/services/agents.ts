@@ -53,6 +53,19 @@ export interface WireAgent {
     suspensionScopes?: SuspensionScope[];
     suspensionReason?: string | null;
     suspendedAt?: string | null;
+    /* AG-1. Optional on the wire for a server older than the application ladder. */
+    stage?: string;
+    grade?: string | null;
+    engagementType?: string | null;
+    engagementStartAt?: string | null;
+    engagementEndAt?: string | null;
+    probationEndsAt?: string | null;
+    reportingManagerId?: string | null;
+    weeklyHours?: number | null;
+    activatedAt?: string | null;
+    exitedAt?: string | null;
+    exitReason?: string | null;
+    rehireEligible?: boolean;
     user?: {
         id?: string;
         name: string | null;
@@ -259,6 +272,22 @@ export function shapeAgent(wire: WireAgent): Agent {
         suspensionScopes: wire.suspensionScopes ?? [],
         suspensionReason: wire.suspensionReason ?? null,
         suspendedAt: wire.suspendedAt ?? null,
+        engagement: wire.stage
+            ? {
+                  stage: wire.stage,
+                  grade: wire.grade ?? null,
+                  type: wire.engagementType ?? null,
+                  startAt: wire.engagementStartAt ?? null,
+                  endAt: wire.engagementEndAt ?? null,
+                  probationEndsAt: wire.probationEndsAt ?? null,
+                  reportingManagerId: wire.reportingManagerId ?? null,
+                  weeklyHours: wire.weeklyHours ?? null,
+                  activatedAt: wire.activatedAt ?? null,
+                  exitedAt: wire.exitedAt ?? null,
+                  exitReason: wire.exitReason ?? null,
+                  rehireEligible: wire.rehireEligible ?? true,
+              }
+            : null,
         /* E10-1: the closure columns ride on the by-id read's `user`. A join
            without them (the listing) leaves the field undefined, so a page
            that needs them knows they were not sent rather than reading "open". */
@@ -333,6 +362,12 @@ export interface CreateAgentInput {
     side: "PUBLISHER" | "ADVERTISER";
     city?: string;
     state?: string;
+    /**
+     * AG-3: start them on the application ladder (the desk fills the rest
+     * in for them, or they finish it in the app) rather than active at
+     * once. The default at the desk; off is the pre-AG-1 shortcut.
+     */
+    asApplication?: boolean;
 }
 
 export const agentService = {

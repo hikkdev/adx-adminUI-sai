@@ -59,3 +59,41 @@ export const kycProviderService = {
         return { ...config.kyc, kycProvider: config.kyc.kycProvider ?? "DIGIO" };
     },
 };
+
+/* ------------------------------------------------------------------ */
+/* DS-1: the eSign wire                                                */
+/* ------------------------------------------------------------------ */
+
+/** What `GET /integrations` answers under `esign` — the keys masked, the hosts and ADX's signer as they stand. */
+export interface EsignWireConfig {
+    clientId: string | null;
+    clientSecret: string | null;
+    apiUrl: string | null;
+    gatewayUrl: string | null;
+    adxSignerName: string | null;
+    adxSignerIdentifier: string | null;
+    /** Keys present (its own, or the KYC section's Digio account). */
+    configured: boolean;
+    /** No keys of its own: it signs with the KYC section's Digio account. */
+    sharesKycCredentials: boolean;
+}
+
+export interface EsignWirePatch {
+    clientId?: string;
+    clientSecret?: string;
+    apiUrl?: string;
+    gatewayUrl?: string;
+    adxSignerName?: string;
+    adxSignerIdentifier?: string;
+}
+
+export const esignWireService = {
+    get: async (): Promise<EsignWireConfig | null> => {
+        const config = await http.get<{ esign?: EsignWireConfig }>("/integrations");
+        return config.esign ?? null;
+    },
+    set: async (patch: EsignWirePatch): Promise<EsignWireConfig | null> => {
+        const config = await http.put<{ message: string; esign?: EsignWireConfig }>("/integrations", { section: "esign", patch });
+        return config.esign ?? null;
+    },
+};

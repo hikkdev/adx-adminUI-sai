@@ -17,6 +17,8 @@ import {
     LEADERBOARD_PERIODS,
     LEADERBOARD_PERIOD_LABEL,
     cohortMessage,
+    conversionsLabel,
+    fromLeadsLine,
     type LeaderboardPeriod,
     type LeaderboardView as Board,
     type PublicRow,
@@ -138,6 +140,10 @@ export function LeaderboardBoard({ board }: { board: Board }) {
                         <p className="mt-1 text-xs text-muted-foreground">
                             Credited incentives, {LEADERBOARD_PERIOD_LABEL[board.period].toLowerCase()}
                         </p>
+                        {/* LH8: the hunt's share of that figure. */}
+                        <p className="mt-2 text-xs text-muted-foreground" data-testid={`leaderboard-from-leads-${row.rank}`}>
+                            {fromLeadsLine(row)}
+                        </p>
                     </Card>
                 ))}
             </div>
@@ -147,7 +153,8 @@ export function LeaderboardBoard({ board }: { board: Board }) {
                     <h3 className="text-base font-semibold text-foreground">Ranks {board.top.length + 1} onward</h3>
                     <p className="text-xs text-muted-foreground">
                         {board.cohort.size} agents in {board.cohort.city}. The server sends no figures below the
-                        podium — agents see their own and the gaps to their neighbours, nobody else&rsquo;s.
+                        podium — agents see their own and the gaps to their neighbours, nobody else&rsquo;s. Lead
+                        conversions are a count, not money, so every row carries them.
                     </p>
                 </div>
                 <div data-testid="leaderboard-window">
@@ -178,6 +185,14 @@ export function LeaderboardBoard({ board }: { board: Board }) {
                                 key: "locality",
                                 label: "Locality",
                                 render: (row) => <span className="text-muted-foreground">{row.locality ?? "—"}</span>,
+                            },
+                            {
+                                key: "conversions",
+                                label: "From leads",
+                                className: "w-36",
+                                render: (row) => (
+                                    <span className="tabular-nums text-muted-foreground">{conversionsLabel(row.conversions)}</span>
+                                ),
                             },
                         ]}
                     />

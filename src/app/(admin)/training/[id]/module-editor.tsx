@@ -18,10 +18,9 @@ import {
     passesForFree,
     trainingService,
     type ModuleRow,
-    type ModuleWithQuestions,
-} from "@/services/training";
+    type ModuleWithQuestions, AUDIENCE_LABEL } from "@/services/training";
 import type { StatusMeta } from "@/types";
-import { Field, draftProblems, fromModule, toDraft, type ModuleFormValues } from "../module-fields";
+import { Field, KindAudienceFields, draftProblems, fromModule, toDraft, type ModuleFormValues } from "../module-fields";
 import { LessonPreview } from "./lesson-preview";
 import { QuestionsEditor } from "./questions-editor";
 
@@ -143,7 +142,8 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                         <p className="mt-1 text-sm text-muted-foreground">
                             {durationLabel(module.durationMins)} · {module.questionCount}{" "}
                             {module.questionCount === 1 ? "question" : "questions"} · pass at {module.passPercent}% ·{" "}
-                            {module.isActive ? "on every agent's index" : "switched off"}
+                            {module.kind === "ASSESSMENT" ? `assessment${module.timeLimitMins ? ` · ${module.timeLimitMins} min` : ""}` : "lesson"} for {AUDIENCE_LABEL[module.audience].toLowerCase()} ·{" "}
+                            {module.isActive ? "on the index" : "switched off"}
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -327,6 +327,8 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                                 <Input id="md-unlock" type="number" min={1} inputMode="numeric" value={values.unlockAfterOrdinal} onChange={set("unlockAfterOrdinal")} placeholder="—" />
                             </Field>
                         </div>
+
+                        <KindAudienceFields values={values} onChange={(patch) => setValues((current) => ({ ...current, ...patch }))} error={errorFor("timeLimitMins")} />
 
                         <label className="flex items-center justify-between gap-4 border-t pt-4">
                             <span>

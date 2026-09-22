@@ -15,6 +15,7 @@ const NAV = [
     { label: "Templates", href: "/agreements", exact: true },
     { label: "Acceptances", href: "/agreements/acceptances" },
     { label: "Stale terms", href: "/agreements/stale" },
+    { label: "Signatures", href: "/agreements/signatures" },
 ];
 
 /**

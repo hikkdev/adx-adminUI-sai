@@ -27,8 +27,15 @@ export type AgreementKind =
     | "ADVERTISER_PLATFORM"
     | "INSERTION_ORDER"
     | "PACKAGE_SALE"
-    | "JOB_TERMS";
+    | "JOB_TERMS"
+    | "AGENT_PUBLISHER_PLATFORM"
+    | "AGENT_ADVERTISER_PLATFORM"
+    | "EMPLOYEE_APPOINTMENT"
+    | "PRINT_PARTNER_SERVICE"
+    | "PUBLISHER_LICENCE";
 export type PartyType = "publisher" | "advertiser" | "agent";
+/** DS-1: who a kind binds — the three acceptance parties, and the two that only ever e-sign. */
+export type AgreementParty = PartyType | "employee" | "print-partner";
 export type TemplateState = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 
 /** Click-accept today; the seam for an e-sign later (Lot D, Q123). */
@@ -37,25 +44,35 @@ export type SignatureProvider = "NONE" | "DIGIO";
 export const AGREEMENT_KINDS: AgreementKind[] = [
     "PLATFORM",
     "LISTING",
+    "PUBLISHER_LICENCE",
     "ADVERTISER_PLATFORM",
     "INSERTION_ORDER",
     "PACKAGE_SALE",
     "JOB_TERMS",
+    "AGENT_PUBLISHER_PLATFORM",
+    "AGENT_ADVERTISER_PLATFORM",
+    "EMPLOYEE_APPOINTMENT",
+    "PRINT_PARTNER_SERVICE",
 ];
+
+/** DS-1: the party groups the templates rail draws — the three that click, then the two that only sign. */
+export const AGREEMENT_PARTIES: AgreementParty[] = ["publisher", "advertiser", "agent", "employee", "print-partner"];
 
 export const PARTY_TYPES: PartyType[] = ["publisher", "advertiser", "agent"];
 
 /** The party types the lookup can find — an agent has no platform terms and no party page here. */
 export const LOOKUP_PARTY_TYPES: PartyType[] = ["publisher", "advertiser"];
 
-export const PARTY_LABEL: Record<PartyType, { singular: string; plural: string }> = {
+export const PARTY_LABEL: Record<AgreementParty, { singular: string; plural: string }> = {
     publisher: { singular: "Publisher", plural: "Publishers" },
     advertiser: { singular: "Advertiser", plural: "Advertisers" },
     agent: { singular: "Agent", plural: "Agents" },
+    employee: { singular: "Employee", plural: "Employees" },
+    "print-partner": { singular: "Print partner", plural: "Print partners" },
 };
 
 export interface KindMeta {
-    party: PartyType;
+    party: AgreementParty;
     scope: "PLATFORM" | "TRANSACTION";
     label: string;
     /** What the agreement gates, in the words the screen uses. */
@@ -103,6 +120,41 @@ export const KIND_META: Record<AgreementKind, KindMeta> = {
         label: "Job terms",
         gate: "Recorded on the agent's own tap when they accept an order. With no live version the tap is refused with NO_ACTIVE_TEMPLATE.",
     },
+    AGENT_PUBLISHER_PLATFORM: {
+        party: "agent",
+        scope: "PLATFORM",
+        label: "Field agent engagement terms",
+        gate: "Accepted at the application's terms step (AG-1). With e-signing on, signed through Digio at activation; the agent works once it is signed.",
+        hint: "Merge fields: {{party.name}}, {{party.displayId}}, {{agent.side}}, {{agent.grade}}, {{agent.engagement}}, {{agent.startDate}}, {{date}}, {{reference}}.",
+    },
+    AGENT_ADVERTISER_PLATFORM: {
+        party: "agent",
+        scope: "PLATFORM",
+        label: "Sales agent engagement terms",
+        gate: "Accepted at the application's terms step (AG-1). With e-signing on, signed through Digio at activation; the agent works once it is signed.",
+        hint: "Merge fields: {{party.name}}, {{party.displayId}}, {{agent.side}}, {{agent.grade}}, {{agent.engagement}}, {{agent.startDate}}, {{date}}, {{reference}}.",
+    },
+    EMPLOYEE_APPOINTMENT: {
+        party: "employee",
+        scope: "PLATFORM",
+        label: "Employee appointment and NDA",
+        gate: "E-signed only (DS-2): sent from Employees › New through a hosted link; a console invitation asked for at the same time waits on the signature.",
+        hint: "Merge fields: {{party.name}}, {{employee.designation}}, {{employee.department}}, {{employee.employmentType}}, {{date}}, {{reference}}.",
+    },
+    PRINT_PARTNER_SERVICE: {
+        party: "print-partner",
+        scope: "PLATFORM",
+        label: "Print partner service agreement",
+        gate: "E-signed only (DS-2): sent the moment the partner's KYC verifies; a quote and a job's Accept wait on the signature.",
+        hint: "Merge fields: {{party.name}}, {{party.tradeName}}, {{party.gstin}}, {{party.pan}}, {{party.signer}}, {{date}}, {{reference}}.",
+    },
+    PUBLISHER_LICENCE: {
+        party: "publisher",
+        scope: "PLATFORM",
+        label: "Publisher licence to display",
+        gate: "E-signed only (DS-3): one master licence per publisher, asked for at the first approved listing (or the first submission); the next attempt waits on it.",
+        hint: "Write {{listings}} where Schedule A — the publisher's listings — should appear. Merge fields: {{party.name}}, {{party.type}}, {{party.gstin}}, {{party.band}}, {{date}}, {{reference}}.",
+    },
 };
 
 /** The platform terms each party type is stuck behind until a version is live. */
@@ -114,11 +166,140 @@ export const PLATFORM_KIND_FOR: Record<PartyType, AgreementKind | null> = {
 };
 
 /** The kinds a party type signs, platform terms first. */
-export const KINDS_FOR_PARTY: Record<PartyType, AgreementKind[]> = {
-    publisher: ["PLATFORM", "LISTING"],
+export const KINDS_FOR_PARTY: Record<AgreementParty, AgreementKind[]> = {
+    publisher: ["PLATFORM", "LISTING", "PUBLISHER_LICENCE"],
     advertiser: ["ADVERTISER_PLATFORM", "INSERTION_ORDER", "PACKAGE_SALE"],
-    agent: ["JOB_TERMS"],
+    agent: ["AGENT_PUBLISHER_PLATFORM", "AGENT_ADVERTISER_PLATFORM", "JOB_TERMS"],
+    employee: ["EMPLOYEE_APPOINTMENT"],
+    "print-partner": ["PRINT_PARTNER_SERVICE"],
 };
+
+/* ------------------------------------------------------------------ */
+/* DS-1: e-signatures                                                  */
+/* ------------------------------------------------------------------ */
+
+export type SigningParty = "PUBLISHER" | "ADVERTISER" | "AGENT" | "EMPLOYEE" | "PRINT_PARTNER";
+export type SigningStatus = "REQUESTED" | "PARTIALLY_SIGNED" | "COMPLETED" | "EXPIRED" | "CANCELLED" | "FAILED";
+export type SigningDocument = "AGENT_ENGAGEMENT" | "EMPLOYEE_APPOINTMENT" | "PRINT_PARTNER_SERVICE" | "PUBLISHER_LICENCE" | "INSERTION_ORDER";
+
+export const SIGNING_PARTIES: SigningParty[] = ["PUBLISHER", "ADVERTISER", "AGENT", "EMPLOYEE", "PRINT_PARTNER"];
+export const SIGNING_STATUSES: SigningStatus[] = ["REQUESTED", "PARTIALLY_SIGNED", "COMPLETED", "EXPIRED", "CANCELLED", "FAILED"];
+/** The kinds the rail e-signs — the five documents. */
+export const SIGNABLE_KINDS: AgreementKind[] = ["AGENT_PUBLISHER_PLATFORM", "AGENT_ADVERTISER_PLATFORM", "EMPLOYEE_APPOINTMENT", "PRINT_PARTNER_SERVICE", "PUBLISHER_LICENCE", "INSERTION_ORDER"];
+
+export const SIGNING_PARTY_LABEL: Record<SigningParty, string> = {
+    PUBLISHER: "Publisher",
+    ADVERTISER: "Advertiser",
+    AGENT: "Agent",
+    EMPLOYEE: "Employee",
+    PRINT_PARTNER: "Print partner",
+};
+
+export const SIGNING_STATUS_META: Record<SigningStatus, StatusMeta> = {
+    REQUESTED: { label: "Awaiting signature", tone: "warning" },
+    PARTIALLY_SIGNED: { label: "Partly signed", tone: "info" },
+    COMPLETED: { label: "Signed", tone: "success" },
+    EXPIRED: { label: "Expired", tone: "neutral" },
+    CANCELLED: { label: "Voided", tone: "neutral" },
+    FAILED: { label: "Declined", tone: "danger" },
+};
+
+/** The kind a signing party's SIGNABLE documents belong to, for the send dialog. */
+export const SIGNABLE_KINDS_FOR: Record<SigningParty, AgreementKind[]> = {
+    PUBLISHER: ["PUBLISHER_LICENCE"],
+    ADVERTISER: ["INSERTION_ORDER"],
+    AGENT: ["AGENT_PUBLISHER_PLATFORM", "AGENT_ADVERTISER_PLATFORM"],
+    EMPLOYEE: ["EMPLOYEE_APPOINTMENT"],
+    PRINT_PARTNER: ["PRINT_PARTNER_SERVICE"],
+};
+
+export interface SignerState {
+    role: "PARTY" | "ADX";
+    name: string;
+    identifier: string;
+    status: "requested" | "signed" | "expired" | "declined" | "cancelled";
+    signedAt: string | null;
+}
+
+/** One e-signature request as `GET /agreements/signing` lists it. */
+export interface SigningRequest {
+    id: string;
+    kind: AgreementKind;
+    document: SigningDocument | null;
+    label: string;
+    title: string;
+    templateVersion: number;
+    partyType: SigningParty;
+    partyId: string;
+    campaignId: string | null;
+    attemptId: string | null;
+    status: SigningStatus;
+    mock: boolean;
+    signer: { name: string; identifier: string; userId: string | null };
+    signers: SignerState[];
+    signMethod: string;
+    signingUrl: string | null;
+    countersign: boolean;
+    stamp: { state: string; amount: string; ref: string | null } | null;
+    /** `/files/:id` ids — the rendered document, the signed copy, the audit certificate. */
+    files: { document: string | null; signed: string | null; certificate: string | null };
+    requestedAt: string;
+    expiresAt: string;
+    completedAt: string | null;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    failureReason: string | null;
+    lastReminderAt: string | null;
+    providerRef: string | null;
+}
+
+export interface SigningFilter {
+    kind?: AgreementKind;
+    status?: SigningStatus;
+    partyType?: SigningParty;
+    partyId?: string;
+    campaignId?: string;
+    q?: string;
+    limit?: number;
+    cursor?: string;
+}
+
+export interface OpenSigningInput {
+    kind: AgreementKind;
+    partyType: SigningParty;
+    partyId: string;
+    campaignId?: string;
+    force?: boolean;
+}
+
+/** Whether the request can still be reminded, voided or signed. */
+export const signingOpen = (request: Pick<SigningRequest, "status">): boolean => request.status === "REQUESTED" || request.status === "PARTIALLY_SIGNED";
+
+/** The console route that opens the party behind a request, where there is one. */
+export function signingPartyHref(request: Pick<SigningRequest, "partyType" | "partyId" | "campaignId">): string | null {
+    switch (request.partyType) {
+        case "PUBLISHER":
+            return `/publishers/${request.partyId}`;
+        case "ADVERTISER":
+            return request.campaignId ? `/campaigns/${request.campaignId}` : `/advertisers/${request.partyId}`;
+        case "AGENT":
+            return `/agents/${request.partyId}`;
+        case "PRINT_PARTNER":
+            return `/print-partners/${request.partyId}`;
+        default:
+            return null;
+    }
+}
+
+/** The `?a=b` for a signing filter, skipping what is unset. */
+export function signingQuery(filter: SigningFilter): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+        if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+    }
+    const query = params.toString();
+    return query ? `?${query}` : "";
+}
 
 /** The platform-scope kinds — the only ones a party can be behind on (`GET /agreements/stale`). */
 export const STALE_KINDS: ("PLATFORM" | "ADVERTISER_PLATFORM")[] = ["PLATFORM", "ADVERTISER_PLATFORM"];
@@ -416,4 +597,16 @@ export const agreementService = {
         http.get<PartySummary[]>(`/agreements/parties?q=${encodeURIComponent(q)}`),
     party: (type: PartyType, id: string) =>
         http.get<PartyAgreements>(`/agreements/parties/${type}/${encodeURIComponent(id)}`),
+
+    /* DS-1: the Signatures desk. */
+    signing: (filter: SigningFilter = {}) => http.get<Paged<SigningRequest>>(`/agreements/signing${signingQuery(filter)}`),
+    signingRequest: (id: string) => http.get<SigningRequest>(`/agreements/signing/${encodeURIComponent(id)}`),
+    /** The desk's own "send for signature" — by default forced, whatever the policy would ask. */
+    openSigning: (input: OpenSigningInput) => http.post<SigningRequest & { created: boolean }>("/agreements/signing", { force: true, ...input }),
+    /** Ask the provider now — what the desk presses when a webhook may have been missed. */
+    refreshSigning: (id: string) => http.post<SigningRequest>(`/agreements/signing/${encodeURIComponent(id)}/refresh`, {}),
+    remindSigning: (id: string) => http.post<SigningRequest>(`/agreements/signing/${encodeURIComponent(id)}/remind`, {}),
+    voidSigning: (id: string, reason: string) => http.post<SigningRequest>(`/agreements/signing/${encodeURIComponent(id)}/void`, { reason }),
+    /** The development door: signs a mocked request (no Digio credentials) so a flow can be walked. */
+    mockSign: (id: string) => http.post<SigningRequest>(`/agreements/signing/${encodeURIComponent(id)}/mock-sign`, {}),
 };

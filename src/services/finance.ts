@@ -54,7 +54,8 @@ export type PayoutMethodStatus = "PENDING_VERIFICATION" | "VERIFIED" | "REJECTED
 export type PayoutVerificationMethod = "PENNY_DROP" | "NAME_LOOKUP" | "MANUAL";
 export type PayoutRailName = "MANUAL_NEFT" | "RAZORPAY_X" | "CASHFREE";
 
-export type IncentiveStatus = "PENDING_VERIFICATION" | "CREDITED" | "REJECTED";
+// LH10: REVERSED is the clawback — credited and taken back, or refused before it moved.
+export type IncentiveStatus = "PENDING_VERIFICATION" | "CREDITED" | "REJECTED" | "REVERSED";
 export type IncentiveEvent =
     | "PUBLISHER_ONBOARDED"
     | "SITE_VISIT"
@@ -63,7 +64,10 @@ export type IncentiveEvent =
     | "TIER_BONUS"
     | "PACKAGE_SOLD"
     | "INSTALLATION"
-    | "ADVERTISER_ONBOARDED";
+    | "ADVERTISER_ONBOARDED"
+    | "LEAD_CONVERTED"
+    | "LEAD_ACTIVATED"
+    | "LEAD_RETAINED";
 
 /** Every value of the backend's `IncentiveEvent` enum, in the order the rates screen lists them. */
 export const INCENTIVE_EVENTS: readonly IncentiveEvent[] = [
@@ -75,6 +79,10 @@ export const INCENTIVE_EVENTS: readonly IncentiveEvent[] = [
     "PACKAGE_SOLD",
     "MILESTONE_BONUS",
     "TIER_BONUS",
+    /* LH2/LH8 (the Lead Hunt, D1): the hunt's three events, stacked on the onboarding ones. */
+    "LEAD_CONVERTED",
+    "LEAD_ACTIVATED",
+    "LEAD_RETAINED",
 ];
 
 /** Lot B: PARTNER is the print shop, withheld under 194C at cost approval. */
@@ -1170,6 +1178,7 @@ export const INCENTIVE_STATUS_META: Record<IncentiveStatus, StatusMeta> = {
     PENDING_VERIFICATION: { label: "Awaiting ops", tone: "warning" },
     CREDITED: { label: "Credited", tone: "success" },
     REJECTED: { label: "Rejected", tone: "danger" },
+    REVERSED: { label: "Clawed back", tone: "danger" },
 };
 
 export const WALLET_KIND_LABEL: Record<WalletKind, string> = {
@@ -1251,6 +1260,12 @@ export const INCENTIVE_EVENT_LABEL: Record<IncentiveEvent, string> = {
     INSTALLATION: "Installation",
     /** Lot B (Q101): the twin of PUBLISHER_ONBOARDED, on the demand side. */
     ADVERTISER_ONBOARDED: "Advertiser onboarded",
+    /** LH2/LH8 (D1): the account opened off a lead — small, once per account. */
+    LEAD_CONVERTED: "Lead converted",
+    /** LH2/LH8 (D1): the catch — first listing live / first campaign paid. A rate at tier `*:ADVERTISER` prices the advertiser side. */
+    LEAD_ACTIVATED: "Lead activated",
+    /** LH2/LH11 (D1): the trailing reward — a second booking / a second month live. */
+    LEAD_RETAINED: "Lead retained",
 };
 
 /**
@@ -1264,6 +1279,18 @@ export function incentiveEventLabel(event: string): string {
     if (!event) return "—";
     const words = event.toLowerCase().replace(/_/g, " ");
     return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * LH8 (D1): a rate's tier may be qualified by the lead's side — `*:ADVERTISER`
+ * is every tier's advertiser figure, `GOLD:PUBLISHER` one tier's publisher
+ * figure. The desk prints the qualification as words rather than the raw key.
+ */
+export function incentiveTierLabel(tier: string): string {
+    const [rung, side] = tier.split(":");
+    const base = !rung || rung === "*" ? "Every tier" : rung;
+    if (!side) return base;
+    return `${base} · ${side.toLowerCase()} side`;
 }
 
 export const RAIL_LABEL: Record<PayoutRailName, string> = {
