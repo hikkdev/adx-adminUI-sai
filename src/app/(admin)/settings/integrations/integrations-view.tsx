@@ -5,14 +5,18 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/adx/page-header";
 import { SectionCard } from "@/components/adx/section-card";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { useAuth } from "@/lib/auth";
 import {
+    GEO_IP_PROVIDERS,
+    GEO_IP_PROVIDER_LABEL,
     SECRET_FIELDS,
     emailModeOf,
+    geoIpConfigured,
     integrationsService,
     isMasked,
     sectionPatch,
@@ -32,6 +36,9 @@ import { MapsSection } from "./maps-section";
 import { PushSection } from "./push-section";
 import { QrEngineSection } from "./qr-engine-section";
 import { StaffToolsSection } from "./staff-tools-section";
+import { HolidayCalendarSection } from "./holiday-calendar-section";
+import { SecureIdSection } from "./secure-id-section";
+import { VerificationRoutingSection } from "./verification-routing-section";
 
 interface IntegrationsViewProps {
     settings: IntegrationsSettings;
@@ -46,7 +53,11 @@ interface FieldSpec {
     placeholder?: string;
     /** Masked on read; blank on save keeps the stored value. */
     secret?: boolean;
-    type?: "text" | "number";
+    type?: "text" | "number" | "select";
+    /** `type: "select"` only — the values the field may hold, in the order they are offered. */
+    options?: { value: string; label: string }[];
+    /** A line under the field while it is not a secret (a secret's line says whether one is stored). */
+    hint?: string;
 }
 
 interface SectionSpec {
@@ -99,6 +110,52 @@ const GATEWAYS: SectionSpec[] = [
     },
 ];
 
+/** BT-1 (DR 12): the account a bank-transfer payer pays into. Drawn on the pay screen as typed here; ops confirm each transfer under Finance › Payments. */
+const BANK_TRANSFER: SectionSpec = {
+    section: "bankTransfer",
+    name: "Bank transfer",
+    helper: "NEFT / IMPS / RTGS into ADX's own account. Offered on Review & pay once these are filled; each transfer is confirmed by hand against the statement.",
+    configuredBy: "accountNumber",
+    fields: [
+        { key: "beneficiary", label: "Beneficiary name", placeholder: "Keysquare Technologies Pvt Ltd" },
+        { key: "accountNumber", label: "Account number", placeholder: "50100123456789" },
+        { key: "ifsc", label: "IFSC", placeholder: "HDFC0001234" },
+        { key: "bank", label: "Bank" },
+        { key: "branch", label: "Branch" },
+        { key: "instructions", label: "A line for the payer", placeholder: "Quote the payment reference in the remarks." },
+    ],
+};
+
+/** FB-1 (DR 12): Facebook Login on the website. The app id is public — the website's button carries it; the secret is what the backend exchanges the code with. */
+const FACEBOOK: SectionSpec = {
+    section: "facebook",
+    name: "Facebook Login",
+    helper: "Facebook Login on the website — register-or-login on the mailbox Facebook vouches for. The app id is public; the secret never leaves the backend.",
+    configuredBy: "appId",
+    fields: [
+        { key: "appId", label: "App ID", placeholder: "1234567890123456" },
+        { key: "appSecret", label: "App secret", secret: true },
+    ],
+};
+
+/** SL-1: the IP-to-place lookup behind each session's city, region and country. ip-api.com takes no key; ipinfo.io wants its token. */
+const GEO_IP: SectionSpec = {
+    section: "geoIp",
+    name: "Where a session signed in from",
+    helper: "Looks a session's address up once at sign-in and stamps the city, region and country beside it on the sessions lists. Off looks nothing up.",
+    configuredBy: "provider",
+    fields: [
+        {
+            key: "provider",
+            label: "Provider",
+            type: "select",
+            options: GEO_IP_PROVIDERS.map((value) => ({ value, label: GEO_IP_PROVIDER_LABEL[value] })),
+            hint: "ip-api.com is free for light use and takes no key; ipinfo.io needs the token below.",
+        },
+        { key: "token", label: "ipinfo.io token", secret: true, placeholder: "Only for ipinfo.io" },
+    ],
+};
+
 /** Lot E (Q128): the two wired SMS rails. The third is a seam with no keys; the routing table below names all three. */
 const SMS_RAILS: (SectionSpec & { rail: "msg91" | "twilio" })[] = [
     {
@@ -135,7 +192,7 @@ const EMAIL_DOORS: SectionSpec[] = [
             { key: "port", label: "Port", type: "number", placeholder: "587" },
             { key: "user", label: "User" },
             { key: "password", label: "Password", secret: true },
-            { key: "from", label: "From address", placeholder: "ADX <no-reply@adx.in>" },
+            { key: "from", label: "From address", placeholder: "ADX <no-reply@mail.adx.in>" },
         ],
     },
     {
@@ -145,7 +202,7 @@ const EMAIL_DOORS: SectionSpec[] = [
         configuredBy: "apiKey",
         fields: [
             { key: "apiKey", label: "API key", secret: true },
-            { key: "fromEmail", label: "From address", placeholder: "no-reply@adx.in" },
+            { key: "fromEmail", label: "From address", placeholder: "ADX <no-reply@mail.adx.in>" },
         ],
     },
 ];
@@ -197,6 +254,37 @@ export function IntegrationsView({ settings, sms, onChanged }: IntegrationsViewP
                             onChanged={onChanged}
                         />
                     ))}
+                </div>
+            </SectionCard>
+
+            <SectionCard title="Bank transfer" description="The receiving account printed on the bank-transfer pay screen. Not a gateway: nothing captures itself — Finance › Payments confirms each transfer.">
+                <div className="grid gap-4 lg:grid-cols-3">
+                    <SectionForm
+                        key={`bankTransfer:${JSON.stringify(settings.bankTransfer ?? null)}`}
+                        spec={BANK_TRANSFER}
+                        stored={storedOf(settings, "bankTransfer")}
+                        onChanged={onChanged}
+                    />
+                </div>
+            </SectionCard>
+
+            {/* FB-1 and SL-1 (DR 12): the website's Facebook door and the lookup that says where a session signed in from. */}
+            <SectionCard title="Sign-in and sessions" description="The Facebook app the website signs people in with, and the lookup that stamps a place on every session.">
+                <div className="grid gap-4 lg:grid-cols-3">
+                    <SectionForm
+                        key={`facebook:${JSON.stringify(settings.facebook ?? null)}`}
+                        spec={FACEBOOK}
+                        stored={storedOf(settings, "facebook")}
+                        onChanged={onChanged}
+                    />
+                    <SectionForm
+                        key={`geoIp:${JSON.stringify(settings.geoIp ?? null)}`}
+                        spec={GEO_IP}
+                        stored={storedOf(settings, "geoIp")}
+                        // "Connected" is a provider chosen with what it needs on file — NONE is stored too, but looks nothing up.
+                        configured={geoIpConfigured(settings.geoIp)}
+                        onChanged={onChanged}
+                    />
                 </div>
             </SectionCard>
 
@@ -269,9 +357,14 @@ export function IntegrationsView({ settings, sms, onChanged }: IntegrationsViewP
 
             {/* Lot E (Q98) and E10-1: the HR tool and the work tool the employees overview links out to. */}
             <StaffToolsSection hrms={settings.hrms} workTool={settings.workTool} onChanged={onChanged} />
+            {/* HC-1: the public holiday calendar the Holidays page follows — on/off, observances, the address, Sync now. */}
+            <HolidayCalendarSection stored={settings.holidayCalendar} onChanged={onChanged} />
 
             {/* Lot D (Q129): the KYC provider switch — DIGIO / MANUAL by ops, DEGRADED by the probe. */}
             <DigioSection />
+            {/* Cashfree Phase 2: the backup to Digio — its keys, then who answers each check and when the backup takes over. */}
+            <SecureIdSection stored={settings.secureId} onChanged={onChanged} />
+            <VerificationRoutingSection stored={settings.verificationRouting} workflows={settings.kyc?.workflows} onChanged={onChanged} />
             <EsignSection />
             {/* LH3: the directory feeds' partner credentials and the lead-form ad webhooks' secrets. */}
             <LeadSourcesSection />
@@ -367,6 +460,28 @@ function SectionForm({
                     const id = `${spec.section}-${field.key}`;
                     const value = typed[field.key];
                     const masked = typeof value === "string" && isMasked(value);
+                    if (field.type === "select") {
+                        return (
+                            <div key={field.key} className="space-y-1">
+                                <Label htmlFor={id} className="text-xs">
+                                    {field.label}
+                                </Label>
+                                <Select value={typeof value === "string" ? value : ""} onValueChange={(next) => setTyped((current) => ({ ...current, [field.key]: next }))}>
+                                    <SelectTrigger id={id} aria-label={field.label}>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {(field.options ?? []).map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>
+                                                {option.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {field.hint && <p className="text-[11px] text-muted-foreground">{field.hint}</p>}
+                            </div>
+                        );
+                    }
                     return (
                         <div key={field.key} className="space-y-1">
                             <Label htmlFor={id} className="text-xs">
@@ -390,11 +505,13 @@ function SectionForm({
                                 }}
                                 onChange={(event) => setTyped((current) => ({ ...current, [field.key]: event.target.value }))}
                             />
-                            {field.secret && SECRET_FIELDS[spec.section].includes(field.key) && (
+                            {field.secret && SECRET_FIELDS[spec.section].includes(field.key) ? (
                                 <p className="text-[11px] text-muted-foreground">
                                     {stored?.[field.key] ? "Stored. Type a new value to replace it; leave it to keep it." : "Not set."}
                                 </p>
-                            )}
+                            ) : field.hint ? (
+                                <p className="text-[11px] text-muted-foreground">{field.hint}</p>
+                            ) : null}
                         </div>
                     );
                 })}

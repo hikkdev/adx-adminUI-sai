@@ -1,4 +1,5 @@
 import { apiConfig } from "./api-config";
+import { describeMissing, missingPermissionsOf } from "./permissions";
 
 /**
  * Thin client over the ADX backend.
@@ -266,6 +267,11 @@ async function failureOf(response: Response, fallback: string): Promise<ApiError
         code = payload.error?.code ?? code;
         message = payload.error?.message ?? message;
         details = payload.error?.details;
+        /* RP-2: a permission the role lacks is named, not "Insufficient permissions". */
+        if (response.status === 403 && code === "FORBIDDEN") {
+            const missing = missingPermissionsOf(details);
+            if (missing.length > 0) message = describeMissing(missing);
+        }
     } catch {
         /* Not a JSON envelope — a storage error page, say. The status is enough. */
     }

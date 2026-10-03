@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { PUBLISHER_READS, ViewAs, type ViewAsRead } from "@/components/adx/view-as-panel";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { useApiResource } from "@/lib/use-api-resource";
+import { ID_LABEL } from "@/services/identifiers";
 import { supportService, type RequesterPartyType, type RequesterRail as RequesterRailData } from "@/services/support";
 
 /** What the audited session reads for each kind of requester — the party's own endpoints. */
@@ -61,10 +62,14 @@ export function RequesterRail({ ticketId }: { ticketId: string }) {
                             <p className="truncate text-sm font-medium text-foreground">{rail.name}</p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                                 <StatusBadge status={{ label: rail.roleLabel, tone: rail.role ? "info" : "neutral" }} />
+                                {/* 29 Sep 2026: the party record's id beside the person's name, named by its kind so it never reads as theirs. */}
                                 {rail.party?.displayId && (
-                                    <Link href={rail.party.href} className="font-mono underline-offset-4 hover:underline">
-                                        {rail.party.displayId}
-                                    </Link>
+                                    <span>
+                                        {ID_LABEL[rail.party.type]}{" "}
+                                        <Link href={rail.party.href} className="font-mono underline-offset-4 hover:underline">
+                                            {rail.party.displayId}
+                                        </Link>
+                                    </span>
                                 )}
                                 {rail.party?.kycStatus && <span className="capitalize">KYC {rail.party.kycStatus.toLowerCase().replace(/_/g, " ")}</span>}
                             </div>

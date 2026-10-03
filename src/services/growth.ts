@@ -253,6 +253,14 @@ export interface WireMilestoneCard {
     claimedAt: string | null;
     claimable: boolean;
     link: "LEADS" | "VISITS" | "EARNINGS" | "RATING" | string;
+    /**
+     * CP-5: true when the target is above the agent's planned month, so the
+     * bonus buys work the salary did not. False when it sits inside the
+     * quota — such a milestone pays twice for the same onboardings, and the
+     * desk should see that before it pays. Null when the agent is off the
+     * quota model, or the milestone counts something other than onboardings.
+     */
+    stretch: boolean | null;
 }
 
 export interface MilestoneCard extends Omit<WireMilestoneCard, "chip"> {
@@ -280,12 +288,37 @@ export function shapeMilestoneCard(wire: WireMilestoneCard): MilestoneCard {
     return { ...wire, chip: { label: wire.chip.label, tone: milestoneChipTone(wire.chip.tone) } };
 }
 
+/**
+ * CP-5: the day's quota, as the board draws it.
+ *
+ * A tracker, not a milestone: the salary pays it, so there is nothing to
+ * claim and no reward field to fill in. It is synthesised by the server
+ * rather than stored as a template, precisely so nobody can attach a reward
+ * to it by editing a row. Null for an agent not on the salary-and-quota
+ * model — measuring them against a quota nobody set would be fiction.
+ */
+export interface QuotaTracker {
+    /** The Indian day it resets on, `YYYY-MM-DD`. */
+    day: string;
+    target: number;
+    progress: number;
+    leftToday: number;
+    pct: number;
+    /** Always false, and stated rather than implied. */
+    claimable: false;
+    /** Decimal string — what the next one past the quota earns. Null when the terms cannot price one. */
+    commissionPerExtra: string | null;
+    /** `dailyQuota × workingDaysPerMonth` — the figure a stretch target has to beat. */
+    plannedPerMonth: number;
+}
+
 export interface WireMilestoneBoard {
     tier: string;
     milestones: WireMilestoneCard[];
     claimable: WireMilestoneCard | null;
     active: WireMilestoneCard | null;
     counts: Partial<Record<MilestoneChip, number>>;
+    quota?: QuotaTracker | null;
 }
 
 export interface MilestoneBoard {
@@ -296,6 +329,8 @@ export interface MilestoneBoard {
     /** The first active one — the dashboard's hero line. */
     active: MilestoneCard | null;
     counts: Record<MilestoneChip, number>;
+    /** CP-5: the day's quota, above the claimable milestones. Null off the quota model. */
+    quota: QuotaTracker | null;
 }
 
 export function shapeBoard(wire: WireMilestoneBoard): MilestoneBoard {
@@ -307,6 +342,8 @@ export function shapeBoard(wire: WireMilestoneBoard): MilestoneBoard {
         claimable: wire.claimable ? shapeMilestoneCard(wire.claimable) : null,
         active: wire.active ? shapeMilestoneCard(wire.active) : null,
         counts,
+        // A server older than CP-5 sends no tracker; the card simply is not drawn.
+        quota: wire.quota ?? null,
     };
 }
 

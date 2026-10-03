@@ -335,6 +335,12 @@ export function RecordPaymentDialog({
             if (cause instanceof ApiError) {
                 setFieldErrors(cause.fieldErrors);
                 setFormError(cause.message);
+                // AGE-1 (29 Sep 2026): a plan is an order — the publisher's own date of birth on file and them 18 or over.
+                if (cause.code === "AGE_REQUIRED") {
+                    toast.error("The publisher can't place this order yet", {
+                        description: `${cause.message} A date of birth is added from the publisher's Edit details.`,
+                    });
+                }
             } else {
                 setFormError(cause instanceof Error ? cause.message : "Could not record the payment.");
             }

@@ -5,6 +5,7 @@ import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { isLive } from "@/lib/api-config";
 import { agentKycService, type AgentKycQueue as AgentKycQueueData } from "@/services/agent-kyc";
 import { kycStateFilter } from "@/services/kyc-state";
+import { useShowInactive } from "../_shared/show-inactive";
 import { useStateChip } from "../_shared/use-state-chip";
 import { AgentKycQueue } from "./agent-kyc-queue";
 
@@ -29,18 +30,20 @@ export interface LoadedAgentQueue {
 export function AgentKycLoader() {
     const live = isLive("kyc");
     const [chip, setChip] = useStateChip();
-    const resource = useApiResource<LoadedAgentQueue>(`agent-kyc:${live}:${chip}`, async () => {
+    /* 2 Oct 2026: working agents only — not the rejected, withdrawn or departed — unless the switch asks for the inactive too. */
+    const [inactive, setInactive] = useShowInactive();
+    const resource = useApiResource<LoadedAgentQueue>(`agent-kyc:${live}:${chip}:${inactive}`, async () => {
         const filter = kycStateFilter(chip);
         const [everything, visible] = await Promise.all([
-            agentKycService.queue(),
-            filter.state ? agentKycService.queue({ state: filter.state }) : Promise.resolve(null),
+            agentKycService.queue({ includeInactive: inactive }),
+            filter.state ? agentKycService.queue({ state: filter.state, includeInactive: inactive }) : Promise.resolve(null),
         ]);
         return { everything, visible: visible ?? (chip === "ESCALATED" ? { ...everything, rows: [], total: 0 } : everything) };
     });
 
     return (
         <ResourceBoundary resource={resource}>
-            {(data) => <AgentKycQueue loaded={data} chip={chip} onChip={setChip} live={live} onChanged={resource.reload} />}
+            {(data) => <AgentKycQueue loaded={data} chip={chip} onChip={setChip} showInactive={inactive} onShowInactive={setInactive} live={live} onChanged={resource.reload} />}
         </ResourceBoundary>
     );
 }

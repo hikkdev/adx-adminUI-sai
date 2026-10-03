@@ -50,32 +50,53 @@ describe("the rail after the fold", () => {
 });
 
 describe("the two SubNavs", () => {
-    it("PublishersNav: Overview | Directory | Activation funnel | Import | Onboarding board, the current page marked", () => {
-        location.pathname = "/publishers/activation";
+    it("PublishersNav: Overview | Directory | Import, the current page marked", () => {
+        location.pathname = "/publishers/directory";
         render(<PublishersNav />);
         const links = screen.getAllByRole("link");
         expect(links.map((link) => `${link.textContent}→${link.getAttribute("href")}`)).toEqual([
             "Overview→/publishers",
             "Directory→/publishers/directory",
-            "Activation funnel→/publishers/activation",
-            "Import→/publishers/import", "Onboarding board→/settings/reports/onboarding-board",
+            "Import→/publishers/import",
         ]);
-        expect(screen.getByRole("link", { name: "Activation funnel" })).toHaveAttribute("aria-current", "page");
+        expect(screen.getByRole("link", { name: "Directory" })).toHaveAttribute("aria-current", "page");
         expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
-        expect(screen.getByRole("link", { name: "Directory" })).not.toHaveAttribute("aria-current");
     });
 
-    it("AdvertisersNav: Overview | Directory | Activation funnel | Import (S-C), the overview exact so the others do not light it", () => {
+    /* The owner, 24 September: the activation funnel keeps its page and its
+       ⌘K entry, and loses only the tab — the Overview's funnel card is the
+       door, because it shows the gates before offering the rows. */
+    /* The owner, 24 September: the board is not publisher data, and a tab that
+       navigates into another section's tab bar is the wrong kind of door. */
+    it("PublishersNav no longer sends the operator to the onboarding board", () => {
+        location.pathname = "/publishers";
+        render(<PublishersNav />);
+        expect(screen.queryByRole("link", { name: "Onboarding board" })).not.toBeInTheDocument();
+        for (const link of screen.getAllByRole("link")) {
+            expect(link.getAttribute("href")).toMatch(/^\/publishers/);
+        }
+    });
+
+    it("neither section tab bar offers the activation funnel any more", () => {
+        location.pathname = "/publishers";
+        const { unmount } = render(<PublishersNav />);
+        expect(screen.queryByRole("link", { name: "Activation funnel" })).not.toBeInTheDocument();
+        unmount();
+
+        location.pathname = "/advertisers";
+        render(<AdvertisersNav />);
+        expect(screen.queryByRole("link", { name: "Activation funnel" })).not.toBeInTheDocument();
+    });
+
+    it("AdvertisersNav: Overview | Directory | Import (S-C), the overview exact so the others do not light it", () => {
         location.pathname = "/advertisers";
         render(<AdvertisersNav />);
         expect(screen.getAllByRole("link").map((link) => `${link.textContent}→${link.getAttribute("href")}`)).toEqual([
             "Overview→/advertisers",
             "Directory→/advertisers/directory",
-            "Activation funnel→/advertisers/activation",
             "Import→/advertisers/import",
         ]);
         expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
         expect(screen.getByRole("link", { name: "Directory" })).not.toHaveAttribute("aria-current");
-        expect(screen.getByRole("link", { name: "Activation funnel" })).not.toHaveAttribute("aria-current");
     });
 });

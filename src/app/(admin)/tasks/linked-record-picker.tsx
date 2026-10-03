@@ -36,7 +36,7 @@ export function LinkedRecordPicker({ kind, id, label, onChange, search = searchL
 
     return (
         <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
-            <div className="grid gap-1.5">
+            <div className="grid content-start gap-1.5">
                 <Label htmlFor="linked-kind">About a record</Label>
                 <Select value={kind || NONE} onValueChange={(value) => onChange({ kind: value === NONE ? "" : (value as WorkLinkedKind), id: "", label: null })}>
                     <SelectTrigger id="linked-kind">
@@ -53,7 +53,7 @@ export function LinkedRecordPicker({ kind, id, label, onChange, search = searchL
                 </Select>
             </div>
             {kind && (
-                <div className="grid gap-1.5">
+                <div className="grid content-start gap-1.5">
                     <Label htmlFor="linked-search">{LINKED_KIND_LABEL[kind]}</Label>
                     {picked ? (
                         <div className="flex h-10 items-center justify-between gap-2 rounded-md border bg-card px-3 text-sm">

@@ -136,8 +136,8 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                     <ChevronLeft className="size-4" />
                     Training
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Module {module.ordinal}</h1>
                         <p className="mt-1 text-sm text-muted-foreground">
                             {durationLabel(module.durationMins)} · {module.questionCount}{" "}
@@ -146,7 +146,7 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                             {module.isActive ? "on the index" : "switched off"}
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                         <Button variant="outline" className="bg-card" disabled={!edited || busy} onClick={discard}>
                             Discard
                         </Button>
@@ -207,12 +207,14 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Module details</h3>
                     <div className="mt-4 space-y-4">
                         <div className="grid grid-cols-2 gap-4">
-                            <Field id="md-order" label="Order" hint="Where it sits on the index; lower first." error={errorFor("ordinal")}>
+                            <Field id="md-order" label="Order" error={errorFor("ordinal")}>
                                 <Input id="md-order" type="number" min={1} inputMode="numeric" value={values.ordinal} onChange={set("ordinal")} />
                             </Field>
                             <Field id="md-duration" label="Duration (minutes)" optional error={errorFor("durationMins")}>
                                 <Input id="md-duration" type="number" min={1} inputMode="numeric" value={values.durationMins} onChange={set("durationMins")} />
                             </Field>
+                            {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                            <p className="col-span-2 -mt-2 text-xs text-muted-foreground">The order is where it sits on the index; lower first.</p>
                         </div>
                         <Field id="md-title" label="Title" error={errorFor("title")}>
                             <Input id="md-title" value={values.title} onChange={set("title")} autoComplete="off" />
@@ -321,11 +323,11 @@ export function ModuleEditor({ module, modules, onSaved }: ModuleEditorProps) {
                                 id="md-unlock"
                                 label="Unlock after"
                                 optional
-                                hint="The order number of the module an agent must pass first."
                                 error={errorFor("unlockAfterOrdinal")}
                             >
                                 <Input id="md-unlock" type="number" min={1} inputMode="numeric" value={values.unlockAfterOrdinal} onChange={set("unlockAfterOrdinal")} placeholder="—" />
                             </Field>
+                            <p className="col-span-2 -mt-2 text-xs text-muted-foreground">Unlock after takes the order number of the module an agent must pass first.</p>
                         </div>
 
                         <KindAudienceFields values={values} onChange={(patch) => setValues((current) => ({ ...current, ...patch }))} error={errorFor("timeLimitMins")} />

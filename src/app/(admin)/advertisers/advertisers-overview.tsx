@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BreakdownTable, CountTile, FunnelCard, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
+import { BreakdownTable, CostTile, CountTile, FunnelCard, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { SECTION_META, consoleHref, kycMixItems, typedSpellingsHover, type AdvertisersOverview } from "@/services/section-overviews";
 import { AdvertisersNav } from "./advertisers-nav";
@@ -40,17 +40,20 @@ export function AdvertisersOverviewView() {
 }
 
 export function AdvertisersOverviewBody({ data, link }: { data: AdvertisersOverview; link: (href: string | null) => string | null }) {
-    const { tiles, money, funnel, series, breakdowns, top } = data;
+    const { tiles, money, funnel, series, breakdowns, top, cost } = data;
     return (
         <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <CountTile label="Advertisers" figure={tiles.total} hint="as at the window's close" href={meta.directory} />
                 <CountTile label="New in window" figure={tiles.newInWindow} hint="signed up" />
-                <CountTile label="Active" figure={tiles.active} hint="a campaign ran on a day of the window" href="/campaigns" />
+                <CountTile label="Active" figure={tiles.active} hint="a campaign ran on a day of the window" href="/campaigns/directory" />
                 <CountTile label="First campaigns" figure={series.firstCampaigns.total} hint="advertisers whose first campaign was paid in the window" />
                 <MoneyTile label="Spend" figure={series.spend.total} hint="campaigns and packages paid" />
                 <MoneyTile label="Wallet top-ups" figure={money.topUps} hint="received into advertiser wallets" />
                 <MoneyTile label="Wallet balance held" figure={money.walletBalanceHeld} hint="across advertiser wallets, as of now" href="/finance" />
+                {/* CP-2: the advertiser-side twin — sales agents cost more per
+                    account than field agents, and this is where that shows. */}
+                <CostTile label="Cost per advertiser onboarded" cost={cost} noun="advertiser" href="/agents" />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
@@ -82,7 +85,7 @@ export function AdvertisersOverviewBody({ data, link }: { data: AdvertisersOverv
             <div className="grid gap-4 xl:grid-cols-2">
                 <BreakdownTable
                     title="By city"
-                    hint="Advertisers, and what they paid in the window — a city narrows this overview."
+                    hint="Advertisers, what they paid in the window, and what an onboarding cost there — a city narrows this overview."
                     labelHeading="City"
                     page={breakdowns.byCity}
                     initialSort="count"
@@ -91,6 +94,14 @@ export function AdvertisersOverviewBody({ data, link }: { data: AdvertisersOverv
                     columns={[
                         { key: "count", label: "Advertisers", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count },
                         { key: "spend", label: "Spend", align: "right", render: (row) => formatMoney(row.spend), sortValue: (row) => Number(row.spend) },
+                        {
+                            key: "cost",
+                            label: "Cost each",
+                            align: "right",
+                            // CP-2: null is "not recorded here", so it prints a dash rather than a free onboarding.
+                            render: (row) => (row.cost === null ? "—" : formatMoney(row.cost)),
+                            sortValue: (row) => (row.cost === null ? -1 : Number(row.cost)),
+                        },
                     ]}
                 />
                 <BreakdownTable

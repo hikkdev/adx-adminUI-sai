@@ -2,64 +2,61 @@
 
 import * as React from "react";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
+import { usePartyRosterFilters } from "@/components/adx/party-roster-filter-bar";
+import { usePartyRoster } from "@/components/adx/party-roster-table";
 import { isLive } from "@/lib/api-config";
 import { useApiResource } from "@/lib/use-api-resource";
-import { useDebounced } from "@/lib/use-debounced";
-import { EMPTY_CITY_FACET, cityFacetValue, type CityFacet } from "@/lib/city-facet";
-import { printPartnerService, type PrintPartnerPage } from "@/services/print-partners";
+import { DEFAULT_ACCOUNT_STATUS } from "@/services/account-state";
+import { printPartnerService, type PrintPartner, type PrintPartnerPage } from "@/services/print-partners";
+import type { PartyRosterPage } from "@/services/party-roster";
 import { PrintPartnersOffline } from "./print-partners-offline";
-import { PrintPartnersView, type ActiveFilter, type SignInFilter } from "./print-partners-view";
+import { PrintPartnersView, type SignInFilter } from "./print-partners-view";
+
+type PartnerRosterPage = PartyRosterPage<PrintPartner> & { counts: PrintPartnerPage["counts"] };
 
 /**
  * The roster — `GET /print-partners` on the list contract.
  *
- * The search, the city and the active facet are all part of the request —
- * the server cuts and counts them — so they live in the key and refetch,
- * the text ones debounced so a typed word is one call rather than five.
- * Lot X-B: the city facet is the shared combobox; a catalogued pick sends
- * the city's slug (the key is the identity — rows keyed to it, whatever
- * they were typed as), and free text goes as typed for the null-keyed rows.
+ * 29 Sep 2026 (the party rosters, made uniform): the five filters every
+ * party desk takes (search, door, KYC state, city — a shop has no type)
+ * are the server's and live in the shared filter state, the text ones
+ * settled before they refetch. 2 Oct 2026: the shared Status select, on
+ * Active as on every directory, replaces the "On the roster" dropdown and
+ * goes out as the route's `active=` facet. Lot H's app state still cuts
+ * the rows in hand, as the list route has no facet for it.
  */
 export function PrintPartnersLoader() {
     const live = isLive("printPartners");
-    const [q, setQ] = React.useState("");
-    const [city, setCity] = React.useState<CityFacet>(EMPTY_CITY_FACET);
-    const [active, setActive] = React.useState<ActiveFilter>("ACTIVE");
-    /* Lot H: the app state is cut on the page in hand, not on the server — no facet for it on the list route. */
+    /* The Status select starts on Active — the shops on the roster. */
+    const filters = usePartyRosterFilters({ status: DEFAULT_ACCOUNT_STATUS });
+    /* Lot H: the app state is cut on the rows in hand, not on the server — no facet for it on the list route. */
     const [signIn, setSignIn] = React.useState<SignInFilter>("ALL");
-    const qQuery = useDebounced(q.trim(), 300);
-    /* Lot X-B: a catalogued pick sends its slug at once; free text is debounced and sent as typed (the server takes either). */
-    const cityQuery = useDebounced(cityFacetValue(city), 300);
 
-    const resource = useApiResource<PrintPartnerPage>(
-        `print-partners:${qQuery}:${cityQuery}:${active}:${live}`,
-        () =>
-            live
-                ? printPartnerService.list({
-                      q: qQuery || undefined,
-                      city: cityQuery || undefined,
-                      active: active === "ALL" ? undefined : active === "ACTIVE",
-                      pageSize: 100,
-                  })
-                : Promise.resolve({ items: [], total: 0, page: 1, pageSize: 100, counts: {} })
+    /* "Applied from the app" is the server's facet (applied=true), so the list and its total are exact on any page. */
+    const applied = signIn === "APPLIED";
+    const roster = usePartyRoster<PrintPartner, PartnerRosterPage>(`print-partners:roster:${live}:${applied}`, filters, (query, cursor) =>
+        live ? printPartnerService.rosterPage(query, cursor, applied) : Promise.resolve({ rows: [], nextCursor: null, total: 0, counts: {} }),
+    );
+    /* The applications waiting for the desk, counted by the server over the whole roster — what the notice says. */
+    const waiting = useApiResource<number>(`print-partners:applications-waiting:${live}`, () =>
+        live ? printPartnerService.rosterPage({}, null, true).then((page) => page.total ?? 0) : Promise.resolve(0),
     );
 
     if (!live) return <PrintPartnersOffline />;
 
     return (
-        <ResourceBoundary resource={resource}>
-            {(page) => (
+        <ResourceBoundary resource={roster.resource}>
+            {() => (
                 <PrintPartnersView
-                    page={page}
-                    q={q}
-                    onQChange={setQ}
-                    city={city}
-                    onCityChange={setCity}
-                    active={active}
-                    onActiveChange={setActive}
+                    view={roster.view}
+                    filters={filters}
                     signIn={signIn}
                     onSignInChange={setSignIn}
-                    onChanged={resource.reload}
+                    applicationsWaiting={waiting.data ?? 0}
+                    onChanged={() => {
+                        roster.reload();
+                        waiting.reload();
+                    }}
                 />
             )}
         </ResourceBoundary>

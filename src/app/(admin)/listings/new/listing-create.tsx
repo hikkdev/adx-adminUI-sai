@@ -6,38 +6,45 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Combobox } from "@/components/ui/combobox";
-import { CityCombobox } from "@/components/adx/city-combobox";
+import {
+    FlowFieldView,
+    FlowSections,
+    answersInPlay,
+    branchOf,
+    chosenMediaType,
+    fieldSpan,
+    fieldsOf,
+    flowListingBody,
+    flowListingDocuments,
+    isNumbered,
+    matchedSizeClass,
+    missingFields,
+    offeredSizes,
+    screensInPlay,
+    withAnswer,
+    type FieldContext,
+    type FieldUpload,
+    type FlowAnswers,
+    type FlowExtras,
+    type FlowVocabularies,
+    type GeoPoint,
+} from "@/components/adx/flow-renderer";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
-import { PinPicker } from "@/components/adx/pin-picker";
 import { PriceIndicatorLine } from "@/components/adx/price-indicator";
 import { SectionCard } from "@/components/adx/section-card";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { ApiError } from "@/lib/api-client";
-import {
-    areaSqFtFrom,
-    ratePerDayFrom,
-    PRICING_UNITS,
-    UNIT_LABEL,
-    UNIT_NEEDS_AREA,
-    type PricingUnit,
-} from "@/lib/rate-per-day";
+import { areaSqFtFrom, ratePerDayFrom, UNIT_NEEDS_AREA, type PricingUnit } from "@/lib/rate-per-day";
+import type { ContentCategory } from "@/services/campaigns";
 import { listingsService } from "@/services/listings";
-import type { Material, MediaType, SizeClass, VenueType } from "@/types/pricing-engine";
+import { SPOT_ATTRIBUTE_WORDS } from "@/services/listing-record";
+import { uploadService } from "@/services/uploads";
 import type { RosterPublisher } from "@/services/supply";
+import type { FlowField, WizardFlow } from "@/types";
+import type { Material, MediaType, SizeClass, VenueType } from "@/types/pricing-engine";
 
 interface ListingCreateProps {
     publishers: RosterPublisher[];
@@ -45,256 +52,271 @@ interface ListingCreateProps {
     mediaTypes: MediaType[];
     sizeClasses: SizeClass[];
     materials: Material[];
+    /** FL-3: the wizard the form is drawn from — `flows.listing`, the screens both apps render. */
+    flow: WizardFlow;
+    contentCategories: ContentCategory[];
 }
 
 /**
  * Creating a listing, and pricing it against the market while you do.
  *
- * The rate is entered in whatever unit the publisher quotes in — a mall talks
- * in rupees per square foot per month, a billboard owner in rupees per day —
- * and the daily rate the platform compares on is derived from that pair. Asking
- * everyone for a daily rate is how a price gets mistyped by a factor of thirty.
+ * FL-3 (27 Sep 2026): the form is drawn from `flows.listing` — the same
+ * screens, fields, labels, order and branches the publisher's phone asks,
+ * so what an operator fills in here and what a publisher fills in on their
+ * phone are the same listing described the same way, and a screen added
+ * on the flow board reaches this form without a deploy. Every screen in
+ * play is a card; the branch is the first card's choice.
  *
- * Venue, media type and size class are the comparable match key, and all three
- * are required for the same reason: a spot missing any of them joins no
- * comparable pool and helps price nothing, its own neighbours included. Venue is
- * the coarsest cut and the easiest to get silently wrong, because leaving it
- * blank is not "any venue" — it files the spot with the roadside hoardings.
+ * What stays the desk's — the admin extras, drawn around the flow:
  *
- * The sections follow DR 02's order, so what an operator fills in here and what
- * a publisher fills in on their phone are the same listing described the same
- * way.
+ *   - whose spot this is: the publisher picker with the KYC badge;
+ *   - "Or a standard size": a size class picked instead of, or beside, the
+ *     measurements — DR 02 measures, an operator may know the class;
+ *   - LD-1 (3 Oct 2026): the questions every listing form asks — daily
+ *     footfall, how busy, how far it is seen, how high, a screen's
+ *     resolution, the kind of vehicle, available now — in the website's and
+ *     the apps' words, at the end of the spot-details card, each only while
+ *     the flow on the row does not ask it itself (they replace the desk's
+ *     old elevation / visibility / traffic picks and their own words);
+ *   - "Works out to": the daily rate the platform will store, and the
+ *     warnings when a price and a unit make no rate;
+ *   - the rate basis starting at "Per day", as the old form started;
+ *   - the review's attestation is not drawn — the desk creates a draft, and
+ *     the publisher confirms and submits from their own phone;
+ *   - the gate: the old form's own rule (publisher, name, spot type, a size
+ *     or measurements, address, coordinates, a price) plus every required
+ *     field on a numbered screen.
+ *
+ * The rate is entered in whatever unit the publisher quotes in, and the
+ * daily rate the platform compares on is derived from that pair. Venue,
+ * media type and size class are the comparable match key. The submit maps
+ * the answers to the same `POST /listings` body this form always sent
+ * (`flow-renderer/listing-body.test.ts` pins it), then files each venue
+ * proof collected onto the listing the way the phone does — and, LF-2
+ * (28 Sep 2026), the audience screen's two reports beside them: the BARC /
+ * TAM sheet as AUDIENCE_RATING, the footfall audit as FOOTFALL_AUDIT.
  */
 
-const NO_VENUE = "__none__";
+/** A select's options from the codes and their words — the code is what the listing stores. */
+const coded = (words: Record<string, string>) => Object.entries(words).map(([id, title]) => ({ id, title }));
 
 /**
- * The starting vocabulary for the physical attributes a factor rule reads.
- *
- * Fixed options rather than free text: these are what pricing factors key on,
- * and "Lit", "lit" and "Illuminated" are one property spelled three ways that no
- * rule could ever match. They are plain strings in the column, so ops can extend
- * the list without a migration — but they have to be *a* list, not prose.
+ * LD-1 (3 Oct 2026): the listing questions every form asks, as the flow's
+ * own fields — the same ids, words, options and order as the website and
+ * both apps — so `flowListingBody` maps them like any flow answer. Fixed
+ * options rather than free text, because pricing factors key on them and
+ * "Lit", "lit" and "Illuminated" are one property spelled three ways that
+ * no rule could match. Every one is optional.
  */
-const ATTRIBUTES = [
+type DeskQuestion = FlowField & { askedOf: (spot: { category: string | null; digital: boolean }) => boolean };
+
+/** A fixed spot: footfall, how busy and how far it is seen are not asked of a moving one or of a broadcast. */
+const fixed = ({ category }: { category: string | null }) => category === "indoor" || category === "outdoor";
+const DESK_QUESTIONS: DeskQuestion[] = [
     {
-        key: "illumination",
-        label: "Illumination",
-        options: ["Non-lit", "Front-lit", "Back-lit", "Digital"],
+        id: "estimated_daily_footfall",
+        type: "number",
+        label: "About how many people pass this spot in a day?",
+        placeholder: "e.g. 2500",
+        hint: "Your best estimate — we may refine it with measured data.",
+        askedOf: fixed,
     },
-    { key: "facing", label: "Facing", options: ["Single", "Double", "Junction", "Multi-facing"] },
-    { key: "elevation", label: "Elevation", options: ["Ground", "Mid-rise", "High-rise", "Rooftop"] },
-    { key: "visibility", label: "Visibility", options: ["Obstructed", "Partial", "Clear", "Landmark"] },
-    { key: "trafficGrade", label: "Traffic", options: ["Low", "Medium", "High", "Prime"] },
-] as const;
+    { id: "traffic_grade", type: "select", label: "How busy is it?", options: coded(SPOT_ATTRIBUTE_WORDS.trafficGrade), askedOf: fixed },
+    { id: "visibility", type: "select", label: "From how far can it be seen?", options: coded(SPOT_ATTRIBUTE_WORDS.visibility), askedOf: fixed },
+    { id: "elevation", type: "select", label: "How high is it?", options: coded(SPOT_ATTRIBUTE_WORDS.elevation), askedOf: ({ category }) => category === "outdoor" },
+    { id: "sec_screen", type: "section", label: "Screen resolution (pixels)", askedOf: ({ digital }) => digital },
+    { id: "width_px", type: "number", label: "Width (px)", placeholder: "e.g. 1920", askedOf: ({ digital }) => digital },
+    { id: "height_px", type: "number", label: "Height (px)", placeholder: "e.g. 1080", askedOf: ({ digital }) => digital },
+    { id: "vehicle_type", type: "select", label: "What kind of vehicle?", options: coded(SPOT_ATTRIBUTE_WORDS.vehicleType), askedOf: ({ category }) => category === "transit" },
+    { id: "available_now", type: "switch", label: "Available to book now?", askedOf: () => true },
+];
 
-type AttributeKey = (typeof ATTRIBUTES)[number]["key"];
+/** The flow asks a screen's resolution of every fixed spot and leaves it to the client to draw only for a screen — as the apps and the website do. */
+const SCREEN_ONLY = new Set(["sec_screen", "width_px", "height_px"]);
 
-export function ListingCreate({
-    publishers,
-    venues,
-    mediaTypes,
-    sizeClasses,
-    materials,
-}: ListingCreateProps) {
+/** A spot type that names a screen — the server's own test for a loop (`slots.service`). */
+const SCREEN_WORD = /digital|\bled\b|\blcd\b|(?<![\w-])screen(?![\w-])/i;
+
+/** The old form started on "Per day"; the flow's rate-basis select starts there too. */
+const DESK_DEFAULTS: FlowAnswers = { pricing_unit: "PER_DAY" };
+
+/** QR-24: the documents that evidence a right to the space; they carry the term's end date. */
+const RIGHTS_PAPERS = new Set(["DISPLAY_AGREEMENT", "MUNICIPAL_PERMIT", "OWNER_NOC"]);
+
+
+export function ListingCreate({ publishers, venues, mediaTypes, sizeClasses, materials, flow, contentCategories }: ListingCreateProps) {
     const router = useRouter();
 
     const [publisherId, setPublisherId] = React.useState(publishers[0]?.id ?? "");
-    const [title, setTitle] = React.useState("");
-    const [address, setAddress] = React.useState("");
-    const [city, setCity] = React.useState("");
-    const [latitude, setLatitude] = React.useState("");
-    const [longitude, setLongitude] = React.useState("");
-    const [venueId, setVenueId] = React.useState(NO_VENUE);
-    const [mediaTypeId, setMediaTypeId] = React.useState("");
-    const [placement, setPlacement] = React.useState("");
+    const [answers, setAnswers] = React.useState<FlowAnswers>(DESK_DEFAULTS);
     const [sizeClassId, setSizeClassId] = React.useState("");
-    const [widthFt, setWidthFt] = React.useState("");
-    const [heightFt, setHeightFt] = React.useState("");
-    const [materialId, setMaterialId] = React.useState("");
-    const [unit, setUnit] = React.useState<PricingUnit>("PER_DAY");
-    const [basePrice, setBasePrice] = React.useState("");
-    const [description, setDescription] = React.useState("");
-    const [targetAudience, setTargetAudience] = React.useState("");
-    const [uniqueSellingPoint, setUniqueSellingPoint] = React.useState("");
-    const [footfallNote, setFootfallNote] = React.useState("");
-    const [attributes, setAttributes] = React.useState<Partial<Record<AttributeKey, string>>>({});
-    const [minBookingDays, setMinBookingDays] = React.useState("");
-    const [availableFrom, setAvailableFrom] = React.useState("");
-    const [hoursFrom, setHoursFrom] = React.useState("");
-    const [hoursTo, setHoursTo] = React.useState("");
-    const [peakPeriodNote, setPeakPeriodNote] = React.useState("");
     const [busy, setBusy] = React.useState(false);
 
     const publisher = publishers.find((candidate) => candidate.id === publisherId);
-    const venue = venues.find((candidate) => candidate.id === venueId) ?? null;
-    const venueTypeId = venueId === NO_VENUE ? null : venueId;
+    const vocab = React.useMemo<FlowVocabularies>(() => ({ venues, mediaTypes, sizeClasses, materials, contentCategories }), [venues, mediaTypes, sizeClasses, materials, contentCategories]);
 
-    /**
-     * Only the formats that live in the chosen venue.
-     *
-     * The catalogue holds over a thousand, so an unfiltered list is not a
-     * control anybody can use. It is also the correct filter rather than a
-     * convenience: a format belongs to one venue, and offering a mall's atrium
-     * LED wall inside a hospital would create a listing in a pool it can never
-     * be compared against.
-     */
-    const offeredTypes = React.useMemo(
-        () => mediaTypes.filter((type) => (type.venueTypeId ?? null) === venueTypeId),
-        [mediaTypes, venueTypeId]
-    );
+    const screens = screensInPlay(flow, answers);
+    const category = branchOf(flow, answers);
+    const set = React.useCallback((id: string, value: unknown) => setAnswers((current) => withAnswer(flow, current, id, value)), [flow]);
 
-    /** Formats under their catalogue heading, so sixty-four read as four groups. */
-    const groupedTypes = React.useMemo(() => {
-        const groups = new Map<string, MediaType[]>();
-        for (const type of offeredTypes) {
-            const key = type.formatGroup ?? "Other formats";
-            const bucket = groups.get(key);
-            if (bucket) bucket.push(type);
-            else groups.set(key, [type]);
-        }
-        return [...groups.entries()];
-    }, [offeredTypes]);
+    /* Only what the screens in play asked for is priced and posted; a branch walked away from keeps its answers for a way back, not for the API. */
+    const flowInPlay = answersInPlay(answers, screens);
+    const mediaType = chosenMediaType(flowInPlay, mediaTypes);
+    /* LD-1: a screen's resolution is asked of a screen only; the questions the flow on the row does not ask itself are the desk's, and their answers ride in with the flow's. */
+    const digital = flowInPlay.illumination === "Digital" || [mediaType?.name, mediaType?.formatGroup].some((word) => typeof word === "string" && SCREEN_WORD.test(word));
+    const flowFields = fieldsOf(screens);
+    const deskQuestions = DESK_QUESTIONS.filter((question) => !flowFields.has(question.id) && question.askedOf({ category, digital }));
+    const inPlay = Object.fromEntries([
+        ...Object.entries(flowInPlay).filter(([id]) => digital || !SCREEN_ONLY.has(id)),
+        ...deskQuestions.flatMap((question) => (question.id in answers ? [[question.id, answers[question.id]] as const] : [])),
+    ]);
+    const venueTypeId = typeof inPlay.venue_type_id === "string" ? inPlay.venue_type_id : null;
+    const widthFt = typeof inPlay.width_ft === "string" ? inPlay.width_ft : "";
+    const heightFt = typeof inPlay.height_ft === "string" ? inPlay.height_ft : "";
 
-    // A placement belongs to the venue it was picked from. Without this, moving
-    // from a mall to a hospital left "Food court" in state — the Select rendered
-    // blank because it is not among the hospital's areas, and the POST still
-    // carried it.
-    const placementStillOffered =
-        venue === null || venue.subVenues.length === 0 || venue.subVenues.includes(placement);
-    const effectivePlacement = placementStillOffered ? placement : "";
+    // A size that belonged to the previous media type has to stop being selected when the type changes, or the form silently posts a mismatched pair.
+    const sizes = offeredSizes(sizeClasses, mediaType);
+    const effectiveSizeId = sizes.some((size) => size.id === sizeClassId) ? sizeClassId : "";
 
-    const typeStillOffered = offeredTypes.some((type) => type.id === mediaTypeId);
-    const effectiveTypeId = typeStillOffered ? mediaTypeId : "";
-    const mediaType = offeredTypes.find((candidate) => candidate.id === effectiveTypeId);
-
-    /**
-     * Only the sizes and materials this media type is actually built in.
-     *
-     * An empty list on the type means unconstrained rather than none, so the
-     * fallback is every option — a type nobody has pinned down yet must not
-     * block the person trying to list a spot of it.
-     */
-    const offeredSizes = React.useMemo(() => {
-        if (!mediaType || mediaType.sizeClassIds.length === 0) return sizeClasses;
-        return sizeClasses.filter((size) => mediaType.sizeClassIds.includes(size.id));
-    }, [mediaType, sizeClasses]);
-
-    const offeredMaterials = React.useMemo(() => {
-        if (!mediaType || mediaType.materialIds.length === 0) return materials;
-        return materials.filter((material) => mediaType.materialIds.includes(material.id));
-    }, [mediaType, materials]);
-
-    // A size that belonged to the previous media type has to stop being selected
-    // when the type changes, or the form silently posts a mismatched pair.
-    const sizeStillOffered = offeredSizes.some((size) => size.id === sizeClassId);
-    const effectiveSizeId = sizeStillOffered ? sizeClassId : "";
-    const materialStillOffered = offeredMaterials.some((item) => item.id === materialId);
-    const effectiveMaterialId = materialStillOffered ? materialId : "";
-
-    // Rounded exactly once, exactly where the server rounds it — before any
-    // per-square-foot rate is multiplied by it. Doing the arithmetic in floats
-    // and rounding at the end put the form's figure and the stored figure eleven
-    // rupees apart on a 3.33 x 3.33 spot.
+    // Rounded exactly once, exactly where the server rounds it.
     const areaSqFt = areaSqFtFrom(widthFt, heightFt);
     const measured = areaSqFt !== null;
-
-    /**
-     * The class those measurements already have a name for.
-     *
-     * A size class is identified by its exact dimensions, so this is a lookup
-     * rather than a guess. When there is no match the class is minted on save —
-     * which is why the indicator has to say it cannot answer yet rather than
-     * quietly comparing against the wrong pool.
-     */
-    const measuredClass = React.useMemo(() => {
-        if (!measured) return null;
-        return (
-            sizeClasses.find(
-                (size) =>
-                    size.widthFt !== null &&
-                    size.heightFt !== null &&
-                    Number(size.widthFt) === Number(widthFt) &&
-                    Number(size.heightFt) === Number(heightFt)
-            ) ?? null
-        );
-    }, [measured, sizeClasses, widthFt, heightFt]);
-
-    // The picked class wins where there is one, matching the server: a
-    // measurement should not silently overrule a decision.
+    const measuredClass = matchedSizeClass(sizeClasses, widthFt, heightFt);
+    // The picked class wins where there is one, matching the server: a measurement should not silently overrule a decision.
     const indicatorSizeId = effectiveSizeId || measuredClass?.id || null;
 
-    const lat = latitude.trim() === "" ? null : Number(latitude);
-    const lng = longitude.trim() === "" ? null : Number(longitude);
-    const coordsValid = lat !== null && lng !== null && !Number.isNaN(lat) && !Number.isNaN(lng);
-
-    /** The daily rate the platform will store. Shown, because it is the number
-     *  every comparison is made against and nobody should have to infer it. */
+    const point = inPlay.location as GeoPoint | undefined;
+    const unit = (typeof inPlay.pricing_unit === "string" ? inPlay.pricing_unit : "PER_DAY") as PricingUnit;
+    const basePrice = typeof inPlay.base_price === "string" ? inPlay.base_price : "";
     const derived = ratePerDayFrom({ unit, basePrice, areaSqFt });
     const ratePerDay = derived.rate ?? "";
     const perSqFtNeedsArea = UNIT_NEEDS_AREA[unit] && !measured;
+    const city = typeof inPlay.city === "string" ? inPlay.city.trim() : "";
+    const title = typeof inPlay.title === "string" ? inPlay.title.trim() : "";
+    const address = typeof inPlay.address === "string" ? inPlay.address.trim() : "";
 
+    /* The phone's "Still needed" over the numbered screens; the unnumbered documents and review gate nothing at the desk. */
+    const stillNeeded = screens.filter(isNumbered).flatMap((screen) => missingFields(screen, answers));
     const canSubmit =
-        publisherId !== "" &&
-        title.trim().length > 1 &&
-        address.trim().length > 1 &&
-        effectiveTypeId !== "" &&
-        (effectiveSizeId !== "" || measured) &&
-        coordsValid &&
-        derived.rate !== null;
+        publisherId !== "" && title.length > 1 && address.length > 1 && mediaType !== null && (effectiveSizeId !== "" || measured) && point !== undefined && derived.rate !== null && stillNeeded.length === 0;
+
+    /*
+     * ST-2 (28 Sep 2026): VERIFICATION is a private purpose now — a private
+     * file opens for its owner, the desk and the owner's agent under a grant.
+     * Filed at the desk, the venue papers and reports are the publisher's, so
+     * they go up in the publisher's name (Lot N's `ownerUserId`) and the
+     * publisher can open their own papers. A publisher nobody has registered
+     * for yet has no user id; the file is then filed as the desk's own, which
+     * the desk and the field agent sent to the listing can still open.
+     */
+    const ownerUserId = publisher?.userId ?? null;
+    const upload: FieldUpload = React.useCallback(
+        async (file, purpose) => (await uploadService.upload(file, purpose, purpose === "VERIFICATION" && ownerUserId ? { ownerUserId } : {})).url,
+        [ownerUserId]
+    );
+
+    const ctx: FieldContext = {
+        answers,
+        set,
+        vocab,
+        category,
+        upload,
+        idPrefix: "listing",
+        indicator: (
+            <PriceIndicatorLine venueTypeId={venueTypeId} mediaTypeId={mediaType?.id ?? null} sizeClassId={indicatorSizeId} latitude={point?.latitude ?? null} longitude={point?.longitude ?? null} city={city || null} ratePerDay={ratePerDay} />
+        ),
+    };
+
+    /* The admin extras, where they belong on the flow's screens. */
+    const sizeAnchor = screens.some((screen) => screen.fields.some((field) => field.id === "area_sq_ft")) ? "area_sq_ft" : null;
+    const standardSize = (
+        <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+                <Label htmlFor="listing-size-class">Or a standard size</Label>
+                <Select value={effectiveSizeId} onValueChange={setSizeClassId} disabled={mediaType === null}>
+                    <SelectTrigger id="listing-size-class">
+                        <SelectValue placeholder={mediaType === null ? "Pick a spot type first" : "Measured above"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {sizes.map((size) => (
+                            <SelectItem key={size.id} value={size.id}>
+                                {size.name}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+            {measured && effectiveSizeId === "" && (
+                <p className="self-end pb-2 text-xs text-muted-foreground">
+                    {areaSqFt} sq ft.{" "}
+                    {measuredClass ? `Compares against other ${measuredClass.name} spots.` : "No spot has been listed at these dimensions before, so a size class will be created on save — until then there is nothing to compare against."}
+                </p>
+            )}
+        </div>
+    );
+    /* Drawn the way the flow draws its own fields, on the same two-column grid. */
+    const deskAttributes =
+        deskQuestions.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2" data-testid="listing-desk-questions">
+                {deskQuestions.map((question) => (
+                    <div key={question.id} className={fieldSpan(question) === 2 ? "content-start sm:col-span-2" : "content-start"}>
+                        <FlowFieldView field={question} ctx={ctx} />
+                    </div>
+                ))}
+            </div>
+        ) : null;
+    const worksOutTo = (
+        <div className="space-y-2">
+            <p className="text-sm text-foreground">
+                <span className="text-muted-foreground">Works out to </span>
+                <span className="tabular-nums">{ratePerDay ? `₹${ratePerDay} per day` : "—"}</span>
+            </p>
+            {perSqFtNeedsArea && <p className="text-xs text-warning">A per-square-foot price needs the width and height, so the area can be worked out.</p>}
+            {derived.rate === null && derived.problem === "ROUNDS_TO_ZERO" && <p className="text-xs text-warning">That works out to nothing per day — check the price and the unit.</p>}
+            {derived.rate === null && derived.problem === "TOO_LARGE" && <p className="text-xs text-warning">That works out to more per day than a listing can hold.</p>}
+        </div>
+    );
+    const extras: FlowExtras = {
+        after: { ...(sizeAnchor ? { [sizeAnchor]: standardSize } : {}), base_price: worksOutTo },
+        screenEnd: { "spot-details": sizeAnchor ? deskAttributes : <div className="space-y-4">{standardSize}{deskAttributes}</div> },
+        // The attestation on the review screen is the submitter's to tick, on their own phone; a screen's resolution is asked of a screen.
+        skip: (field, screen) => (!isNumbered(screen) && field.type === "checkbox") || (!digital && SCREEN_ONLY.has(field.id)),
+    };
+    const footerOf = (screen: (typeof screens)[number]) => {
+        if (isNumbered(screen)) return undefined;
+        return (
+            <p className="text-xs text-muted-foreground">
+                {screen.fields.some((field) => field.type === "document-upload")
+                    ? "Filed onto the listing the moment it is created; ADX checks them at the desk before an agent is sent out."
+                    : "The desk creates the listing as a draft. The publisher confirms and submits it from their own phone."}
+            </p>
+        );
+    };
 
     async function submit(event: React.FormEvent) {
         event.preventDefault();
-        if (!canSubmit || !mediaType) return;
+        if (!canSubmit) return;
         setBusy(true);
         try {
-            const created = await listingsService.create({
-                publisherId,
-                title: title.trim(),
-                // Carried from the media type rather than asked twice: they are
-                // the same fact, and a form that lets them disagree will.
-                category: mediaType.category,
-                address: address.trim(),
-                city: city.trim() || undefined,
-                latitude: lat!,
-                longitude: lng!,
-                ...(venueTypeId ? { venueTypeId } : {}),
-                mediaTypeId: effectiveTypeId,
-                // Both, whenever both were given. The server prefers the picked
-                // class and stores the measurements beside it — sending only one
-                // meant a spot with a standard size and a per-square-foot price
-                // passed this form's own checks and was then 400'd for having no
-                // dimensions to work an area out from.
-                ...(effectiveSizeId ? { sizeClassId: effectiveSizeId } : {}),
-                ...(measured ? { widthFt: widthFt.trim(), heightFt: heightFt.trim() } : {}),
-                ...(effectiveMaterialId ? { materialId: effectiveMaterialId } : {}),
-                ...(effectivePlacement.trim() ? { placement: effectivePlacement.trim() } : {}),
-                pricingUnit: unit,
-                // The typed string, not a float round-trip. The server
-                // normalises it to two places with decimal arithmetic; parsing
-                // it here only to re-print it is how "100.05" becomes "100.04".
-                basePrice: basePrice.trim(),
-                ...(description.trim() ? { description: description.trim() } : {}),
-                ...(targetAudience.trim() ? { targetAudience: targetAudience.trim() } : {}),
-                ...(uniqueSellingPoint.trim()
-                    ? { uniqueSellingPoint: uniqueSellingPoint.trim() }
-                    : {}),
-                ...(footfallNote.trim() ? { footfallNote: footfallNote.trim() } : {}),
-                ...attributes,
-                ...(minBookingDays.trim() ? { minBookingDays: Number(minBookingDays) } : {}),
-                ...(availableFrom ? { availableFrom } : {}),
-                ...(hoursFrom.trim() ? { availableHoursFrom: hoursFrom.trim() } : {}),
-                ...(hoursTo.trim() ? { availableHoursTo: hoursTo.trim() } : {}),
-                ...(peakPeriodNote.trim() ? { peakPeriodNote: peakPeriodNote.trim() } : {}),
-            });
-            toast.success("Listing created", {
-                description: `${title.trim()} is a draft until it is published.`,
-            });
+            const body = flowListingBody(inPlay, { publisherId, mediaType, ...(effectiveSizeId ? { sizeClassId: effectiveSizeId } : {}), screens });
+            const created = await listingsService.create(body as Parameters<typeof listingsService.create>[0]);
+            // QR-24: a permit or agreement carries the day the right runs out, so a renewal later can extend it.
+            const basis = inPlay.rights_basis;
+            const validUntil = inPlay.rights_valid_until;
+            const term = typeof basis === "string" && basis !== "OWNED" && typeof validUntil === "string" && validUntil.trim() !== "" ? validUntil.trim() : null;
+            const unfiled: string[] = [];
+            for (const document of flowListingDocuments(inPlay)) {
+                try {
+                    await listingsService.addDocument(created.id, { kind: document.kind, url: document.url, ...(term && RIGHTS_PAPERS.has(document.kind) ? { expiresAt: term } : {}) });
+                } catch {
+                    unfiled.push(document.kind);
+                }
+            }
+            toast.success("Listing created", { description: `${title} is a draft until it is published.` });
+            if (unfiled.length > 0) toast.error(`Could not file ${unfiled.join(", ")} — add the document from the listing's verification tab.`);
             router.push(`/listings/${created.id}`);
         } catch (cause) {
-            toast.error(
-                cause instanceof ApiError ? cause.message : "Could not create that listing"
-            );
+            toast.error(cause instanceof ApiError ? cause.message : "Could not create that listing");
         } finally {
             setBusy(false);
         }
@@ -304,7 +326,7 @@ export function ListingCreate({
         <form onSubmit={submit} className="space-y-6">
             <div className="flex items-center gap-3">
                 <Button asChild variant="ghost" size="sm">
-                    <Link href="/listings">
+                    <Link href="/listings/directory">
                         <ChevronLeft className="size-4" aria-hidden />
                         Listings
                     </Link>
@@ -314,463 +336,29 @@ export function ListingCreate({
             <SectionCard title="Publisher" description="Whose spot this is.">
                 <div className="flex flex-wrap items-center gap-4">
                     <div className="max-w-sm flex-1">
-                        <Combobox
-                            items={publishers.map((candidate) => ({
-                                label: candidate.name,
-                                value: candidate.id,
-                            }))}
-                            value={publisherId}
-                            onValueChange={setPublisherId}
-                            placeholder="Choose a publisher"
-                            searchPlaceholder="Search publishers…"
-                        />
+                        <Combobox items={publishers.map((candidate) => ({ label: candidate.name, value: candidate.id }))} value={publisherId} onValueChange={setPublisherId} placeholder="Choose a publisher" searchPlaceholder="Search publishers…" />
                     </div>
                     {publisher && (
                         <div className="flex items-center gap-2">
                             <InitialsAvatar name={publisher.name} size="sm" />
-                            <StatusBadge
-                                status={
-                                    publisher.kycStatus === "VERIFIED"
-                                        ? { label: "KYC verified", tone: "success" }
-                                        : { label: "KYC pending", tone: "warning" }
-                                }
-                            />
+                            <StatusBadge status={publisher.kycStatus === "VERIFIED" ? { label: "KYC verified", tone: "success" } : { label: "KYC pending", tone: "warning" }} />
                         </div>
                     )}
                 </div>
             </SectionCard>
 
-            <SectionCard
-                title="Venue and spot type"
-                description="Venue, format and size are the comparable match key. All three decide which spots this one is priced against."
-            >
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="title">Site name</Label>
-                        <Input
-                            id="title"
-                            value={title}
-                            onChange={(event) => setTitle(event.target.value)}
-                            placeholder="Andheri East metro bridge gantry"
-                        />
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="venue">Venue</Label>
-                            <Combobox
-                                id="venue"
-                                items={[
-                                    {
-                                        label: "No venue — roadside or vehicle exterior",
-                                        value: NO_VENUE,
-                                    },
-                                    ...venues.map((item) => ({
-                                        label: item.name,
-                                        value: item.id,
-                                        group: item.category,
-                                    })),
-                                ]}
-                                value={venueId}
-                                onValueChange={(next) => setVenueId(next || NO_VENUE)}
-                                searchPlaceholder="Search fifty-seven venues…"
-                            />
-                            <p className="text-xs text-muted-foreground">
-                                &ldquo;No venue&rdquo; is its own market, not a wildcard — this spot
-                                will only be compared against other spots that have none.
-                            </p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="media-type">Spot type</Label>
-                            <Combobox
-                                id="media-type"
-                                items={offeredTypes.map((item) => ({
-                                    // Catalogue names are venue-qualified, and
-                                    // inside a chosen venue that prefix is noise.
-                                    label: item.formatGroup
-                                        ? (item.name.split(" — ").at(-1) ?? item.name)
-                                        : item.name,
-                                    value: item.id,
-                                    description: item.description ?? undefined,
-                                    group: item.formatGroup ?? undefined,
-                                }))}
-                                value={effectiveTypeId}
-                                onValueChange={setMediaTypeId}
-                                placeholder="Choose"
-                                searchPlaceholder="Search this venue's spot types…"
-                                emptyText="Nothing matches in this venue."
-                            />
-                            {offeredTypes.length === 0 && (
-                                <p className="text-xs text-warning">
-                                    No spot types are defined for this venue yet. Add some under
-                                    Pricing → Media types.
-                                </p>
-                            )}
-                        </div>
-                    </div>
-
-                    {venue && (
-                        <div className="space-y-2">
-                            <Label htmlFor="placement">Where in the venue</Label>
-                            {venue.subVenues.length > 0 ? (
-                                <Select value={effectivePlacement} onValueChange={setPlacement}>
-                                    <SelectTrigger id="placement">
-                                        <SelectValue placeholder="Choose an area" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {venue.subVenues.map((area) => (
-                                            <SelectItem key={area} value={area}>
-                                                {area}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            ) : (
-                                <Input
-                                    id="placement"
-                                    value={effectivePlacement}
-                                    onChange={(event) => setPlacement(event.target.value)}
-                                    placeholder="Reception / mirror wall"
-                                />
-                            )}
-                        </div>
-                    )}
-
-                    <div className="grid gap-4 sm:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="width">Width (ft)</Label>
-                            <Input
-                                id="width"
-                                inputMode="decimal"
-                                value={widthFt}
-                                onChange={(event) => setWidthFt(event.target.value)}
-                                placeholder="6"
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="height">Height (ft)</Label>
-                            <Input
-                                id="height"
-                                inputMode="decimal"
-                                value={heightFt}
-                                onChange={(event) => setHeightFt(event.target.value)}
-                                placeholder="4"
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="size-class">Or a standard size</Label>
-                            <Select
-                                value={effectiveSizeId}
-                                onValueChange={setSizeClassId}
-                                disabled={effectiveTypeId === ""}
-                            >
-                                <SelectTrigger id="size-class">
-                                    <SelectValue
-                                        placeholder={
-                                            effectiveTypeId === ""
-                                                ? "Pick a spot type first"
-                                                : "Measured above"
-                                        }
-                                    />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {offeredSizes.map((size) => (
-                                        <SelectItem key={size.id} value={size.id}>
-                                            {size.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    {measured && effectiveSizeId === "" && (
-                        <p className="text-xs text-muted-foreground">
-                            {areaSqFt} sq ft.{" "}
-                            {measuredClass
-                                ? `Compares against other ${measuredClass.name} spots.`
-                                : "No spot has been listed at these dimensions before, so a size class will be created on save — until then there is nothing to compare against."}
-                        </p>
-                    )}
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="material">Material (optional)</Label>
-                            <Select
-                                value={effectiveMaterialId}
-                                onValueChange={setMaterialId}
-                                disabled={effectiveTypeId === ""}
-                            >
-                                <SelectTrigger id="material">
-                                    <SelectValue placeholder="Choose" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {offeredMaterials.map((material) => (
-                                        <SelectItem key={material.id} value={material.id}>
-                                            {material.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label htmlFor="address">Address</Label>
-                        <Input
-                            id="address"
-                            value={address}
-                            onChange={(event) => setAddress(event.target.value)}
-                            placeholder="Western Express Highway, near the flyover"
-                        />
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="city">City</Label>
-                            <CityCombobox id="city" value={city} onChange={setCity} stages={["LAUNCHED", "SEEDING"]} placeholder="Mumbai" />
-                        </div>
-                    </div>
-
-                    {/* AD-C: the spot on a map — search, drag the pin, or type the two numbers; all three write the same two strings the payload always sent. */}
-                    <PinPicker
-                        id="spot"
-                        latitude={latitude}
-                        longitude={longitude}
-                        onChange={(next) => {
-                            setLatitude(next.latitude);
-                            setLongitude(next.longitude);
-                        }}
-                        onAddress={(place) => {
-                            setAddress(place.formattedAddress);
-                            if (place.city && !city.trim()) setCity(place.city);
-                        }}
-                        title={title.trim() || "The spot"}
-                        labels={{ search: "Find the spot" }}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                        Comparables are found within 200 m and the radius never widens, so
-                        coordinates need to be the spot rather than the neighbourhood.
-                    </p>
-                </div>
-            </SectionCard>
-
-            <SectionCard
-                title="Price and availability"
-                description="Quoted in the publisher's own unit. ADX does not set this — the line below says how it compares."
-            >
-                <div className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
-                        <div className="space-y-2">
-                            <Label htmlFor="unit">Rate basis</Label>
-                            <Select
-                                value={unit}
-                                onValueChange={(value) => setUnit(value as PricingUnit)}
-                            >
-                                <SelectTrigger id="unit">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {PRICING_UNITS.map((option) => (
-                                        <SelectItem key={option} value={option}>
-                                            {UNIT_LABEL[option]}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="base-price">Base price (₹)</Label>
-                            <Input
-                                id="base-price"
-                                inputMode="decimal"
-                                value={basePrice}
-                                onChange={(event) => setBasePrice(event.target.value)}
-                                placeholder="150"
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Works out to</Label>
-                            <p className="pt-2 text-sm tabular-nums text-foreground">
-                                {ratePerDay ? `₹${ratePerDay} per day` : "—"}
-                            </p>
-                        </div>
-                    </div>
-
-                    {perSqFtNeedsArea && (
-                        <p className="text-xs text-warning">
-                            A per-square-foot price needs the width and height, so the area can be
-                            worked out.
-                        </p>
-                    )}
-                    {derived.rate === null && derived.problem === "ROUNDS_TO_ZERO" && (
-                        <p className="text-xs text-warning">
-                            That works out to nothing per day — check the price and the unit.
-                        </p>
-                    )}
-                    {derived.rate === null && derived.problem === "TOO_LARGE" && (
-                        <p className="text-xs text-warning">
-                            That works out to more per day than a listing can hold.
-                        </p>
-                    )}
-
-                    <PriceIndicatorLine
-                        venueTypeId={venueTypeId}
-                        mediaTypeId={effectiveTypeId || null}
-                        sizeClassId={indicatorSizeId}
-                        latitude={coordsValid ? lat : null}
-                        longitude={coordsValid ? lng : null}
-                        city={city.trim() || null}
-                        ratePerDay={ratePerDay}
-                    />
-
-                    <div className="grid gap-4 sm:grid-cols-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="min-days">Min. booking (days)</Label>
-                            <Input
-                                id="min-days"
-                                inputMode="numeric"
-                                value={minBookingDays}
-                                onChange={(event) => setMinBookingDays(event.target.value)}
-                                placeholder="30"
-                                className="tabular-nums"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="available-from">Available from</Label>
-                            <Input
-                                id="available-from"
-                                type="date"
-                                value={availableFrom}
-                                onChange={(event) => setAvailableFrom(event.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="hours-from">Visible from</Label>
-                            <Input
-                                id="hours-from"
-                                value={hoursFrom}
-                                onChange={(event) => setHoursFrom(event.target.value)}
-                                placeholder="10 AM"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="hours-to">Visible until</Label>
-                            <Input
-                                id="hours-to"
-                                value={hoursTo}
-                                onChange={(event) => setHoursTo(event.target.value)}
-                                placeholder="10 PM"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label htmlFor="peak">Peak period</Label>
-                        <Input
-                            id="peak"
-                            value={peakPeriodNote}
-                            onChange={(event) => setPeakPeriodNote(event.target.value)}
-                            placeholder="Evenings and weekends"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                            When the spot is worth most, not when it is free.
-                        </p>
-                    </div>
-                </div>
-            </SectionCard>
-
-            <SectionCard
-                title="What it is like"
-                description="Observable properties a pricing factor can key on, and the claims an advertiser will act on."
-            >
-                <div className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-5">
-                        {ATTRIBUTES.map((attribute) => (
-                            <div key={attribute.key} className="space-y-2">
-                                <Label htmlFor={attribute.key}>{attribute.label}</Label>
-                                <Select
-                                    value={attributes[attribute.key] ?? ""}
-                                    onValueChange={(value) =>
-                                        setAttributes((current) => ({
-                                            ...current,
-                                            [attribute.key]: value,
-                                        }))
-                                    }
-                                >
-                                    <SelectTrigger id={attribute.key}>
-                                        <SelectValue placeholder="—" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {attribute.options.map((option) => (
-                                            <SelectItem key={option} value={option}>
-                                                {option}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="audience">Who sees it</Label>
-                            <Input
-                                id="audience"
-                                value={targetAudience}
-                                onChange={(event) => setTargetAudience(event.target.value)}
-                                placeholder="Office commuters, 25-40"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="usp">Unique selling point</Label>
-                            <Input
-                                id="usp"
-                                value={uniqueSellingPoint}
-                                onChange={(event) => setUniqueSellingPoint(event.target.value)}
-                                placeholder="Eye-level visibility near reception"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="footfall">Footfall</Label>
-                            <Input
-                                id="footfall"
-                                value={footfallNote}
-                                onChange={(event) => setFootfallNote(event.target.value)}
-                                placeholder="~8,000 a day"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label htmlFor="description">Description</Label>
-                        <Textarea
-                            id="description"
-                            rows={3}
-                            value={description}
-                            onChange={(event) => setDescription(event.target.value)}
-                            placeholder="What faces it, what it overlooks, anything an advertiser would ask."
-                        />
-                    </div>
-                </div>
-            </SectionCard>
+            <FlowSections screens={screens} ctx={ctx} extras={extras} footerOf={footerOf} />
 
             <div className="flex items-center gap-3">
                 <Button type="submit" disabled={busy || !canSubmit}>
                     {busy ? "Creating…" : "Create listing"}
                 </Button>
                 <Button asChild variant="outline" type="button">
-                    <Link href="/listings">Cancel</Link>
+                    <Link href="/listings/directory">Cancel</Link>
                 </Button>
                 {!canSubmit && (
                     <span className="text-xs text-muted-foreground">
-                        Publisher, name, spot type, a size or measurements, address, coordinates and
-                        a price are all needed.
+                        {stillNeeded.length > 0 ? `Still needed: ${stillNeeded.join(", ")}.` : "Publisher, name, spot type, a size or measurements, address, coordinates and a price are all needed."}
                     </span>
                 )}
             </div>

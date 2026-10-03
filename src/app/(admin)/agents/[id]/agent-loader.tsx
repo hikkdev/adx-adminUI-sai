@@ -4,7 +4,14 @@ import { notFound } from "next/navigation";
 import { useApiResource } from "@/lib/use-api-resource";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { isLive } from "@/lib/api-config";
-import { agentService, type AgentOffers, type AgentRating } from "@/services/agents";
+import {
+    agentService,
+    compensationService,
+    type AgentCompensationHistory,
+    type AgentOffers,
+    type AgentRating,
+    type AgentStanding,
+} from "@/services/agents";
 // LH10: the agent's quality score comes off the leads domain, beside the rating.
 import { integrityService, type AgentQuality } from "@/services/leads";
 import { orderService } from "@/services/orders";
@@ -41,17 +48,19 @@ interface Loaded {
     quality: AgentQuality | null;
     /** Lot A: the sections stopped and the history. Null when the API is off or the read failed. */
     suspension: SuspensionView | null;
+    /** CP-1: the pay terms in force and the ones before them. Null when the API is off or the read failed. */
+    compensation: AgentCompensationHistory | null;
+    /** CP-1: today's quota and this month's real cost per onboarding. Null when the API is off or the read failed. */
+    standing: AgentStanding | null;
 }
 
 /**
  * One agent, their orders, and what ops has recorded for them.
  *
- * Orders come off the board the console already reads and are matched by
- * `agentId` — which works now precisely because both sides are live: an
- * order's `agentId` and this page's `id` come from the same database. While
- * agents were fixtures this page rendered no orders at all, on purpose; a
- * fixture id names no real agent. The board is capped at the endpoint's limit,
- * so a very old order can drop off this tab; the orders screen is the record.
+ * Orders are `GET /orders?agentId=`, newest first, up to the list's page of a
+ * hundred (OM-2). They used to be the platform's first hundred orders
+ * filtered here by agent id, which lost an agent's rows once the platform
+ * passed a hundred orders. The orders screen remains the full record.
  *
  * Incentives are `GET /finance/incentives?agentId=`, the one per-agent money
  * figure the API has. It is a finance endpoint with no fixture at all, so it
@@ -80,11 +89,16 @@ export function AgentLoader({ id }: { id: string }) {
                 milestones: null,
                 quality: null,
                 suspension: null,
+                compensation: null,
+                standing: null,
             };
         }
 
-        const [orders, incentives, grants, scans, kyc, methods, offers, rating, tier, leaderboard, milestones, quality, suspension] = await Promise.all([
-            orderService.list(),
+        const [orders, incentives, grants, scans, kyc, methods, offers, rating, tier, leaderboard, milestones, quality, suspension, compensation, standing] = await Promise.all([
+            /* OM-2: the agent's own orders, by id, newest first. This used to be
+               the first hundred on the platform filtered here, which lost an
+               agent's rows past a hundred orders. */
+            orderService.page({ agentId: agent.id, pageSize: 100 }).then((page) => page.items),
             financeReadsApi()
                 ? financeService.incentives({ agentId: agent.id })
                 : Promise.resolve<Incentive[] | null>(null),
@@ -112,11 +126,17 @@ export function AgentLoader({ id }: { id: string }) {
             isLive("suspension")
                 ? suspensionService.history("AGENT", agent.id).catch(() => null)
                 : Promise.resolve<SuspensionView | null>(null),
+            /* CP-1: the salary and the quota it covers, and where the agent
+               stands against it today. Both are ADMIN reads on a live server
+               only; a failure leaves the card saying the terms could not be
+               read rather than implying there are none. */
+            live ? compensationService.get(agent.id).catch(() => null) : Promise.resolve<AgentCompensationHistory | null>(null),
+            live ? compensationService.standing(agent.id).catch(() => null) : Promise.resolve<AgentStanding | null>(null),
         ]);
 
         return {
             agent,
-            orders: orders.filter((order) => order.agentId === agent.id),
+            orders,
             incentives,
             grants,
             scans,
@@ -129,6 +149,8 @@ export function AgentLoader({ id }: { id: string }) {
             milestones,
             quality,
             suspension,
+            compensation,
+            standing,
         };
     });
 
@@ -152,6 +174,8 @@ export function AgentLoader({ id }: { id: string }) {
                         milestones={data.milestones}
                         quality={data.quality}
                         suspension={data.suspension}
+                        compensation={data.compensation}
+                        standing={data.standing}
                         onChanged={resource.reload}
                     />
                 );

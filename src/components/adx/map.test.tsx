@@ -21,7 +21,11 @@ import { browserKeyOf, vendorSentence, type MapsClientConfig } from "@/services/
 
 vi.mock("@vis.gl/react-google-maps", () => ({
     APIProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="google-api-provider">{children}</div>,
-    Map: ({ children }: { children: React.ReactNode }) => <div data-testid="google-map">{children}</div>,
+    Map: ({ children, colorScheme }: { children: React.ReactNode; colorScheme?: string }) => (
+        <div data-testid="google-map" data-color-scheme={colorScheme}>
+            {children}
+        </div>
+    ),
     AdvancedMarker: ({ children, title }: { children: React.ReactNode; title?: string }) => <div data-title={title}>{children}</div>,
 }));
 
@@ -123,7 +127,7 @@ describe("MapSurface with a Google key", () => {
             />,
         );
         expect(screen.queryByTestId("map-placeholder")).not.toBeInTheDocument();
-        expect(screen.getByTestId("map-surface")).toBeInTheDocument();
+        expect(screen.getByTestId("map-surface")).toHaveClass("isolate");
         expect(screen.getByTestId("google-map")).toBeInTheDocument();
         expect(screen.getByLabelText("MG Road Billboard")).toBeInTheDocument();
         expect(screen.getByLabelText("Connaught Place Hoarding")).toBeInTheDocument();
@@ -177,6 +181,8 @@ describe("MapSurface on OpenStreetMap", () => {
         render(<MapSurface config={osmConfig} points={points} camera={{ ...camera, zoom: 18 }} onCameraChange={() => {}} />);
         expect(screen.queryByTestId("map-placeholder")).not.toBeInTheDocument();
         expect(screen.getByTestId("map-surface")).toHaveAttribute("data-provider", "OSM");
+        /* Leaflet's panes (z-index 200–1000) stay inside the map, so a page's own buttons over it (z-10) stay visible. */
+        expect(screen.getByTestId("map-surface")).toHaveClass("isolate");
         /* The Leaflet branch is client-only and arrives after the first paint. */
         const tiles = await screen.findByTestId("leaflet-tiles");
         expect(tiles).toHaveAttribute("data-url", "https://tiles.example.in/{z}/{x}/{y}.png?key=abc");
@@ -231,5 +237,22 @@ describe("MapSurface on OpenStreetMap", () => {
         render(<MapSurface config={null} points={points} camera={camera} onCameraChange={() => {}} />);
         expect(screen.getByTestId("map-placeholder")).toBeInTheDocument();
         expect(screen.queryByTestId("leaflet-map")).not.toBeInTheDocument();
+    });
+});
+
+describe("MapSurface's light and dark tones", () => {
+    it("marks the OSM map with its tone, so the dark style's CSS can find the tiles — light when none is given", async () => {
+        const view = render(<MapSurface config={osmConfig} points={points} camera={camera} onCameraChange={() => {}} />);
+        expect(screen.getByTestId("map-surface")).toHaveAttribute("data-map-tone", "light");
+        view.rerender(<MapSurface config={osmConfig} points={points} camera={camera} onCameraChange={() => {}} tone="dark" />);
+        expect(screen.getByTestId("map-surface")).toHaveAttribute("data-map-tone", "dark");
+        await screen.findByTestId("leaflet-tiles");
+    });
+
+    it("hands Google its own colour scheme", () => {
+        const view = render(<MapSurface config={{ provider: "GOOGLE", googleBrowserKey: "AIza-test" }} points={points} camera={camera} onCameraChange={() => {}} />);
+        expect(screen.getByTestId("google-map")).toHaveAttribute("data-color-scheme", "LIGHT");
+        view.rerender(<MapSurface config={{ provider: "GOOGLE", googleBrowserKey: "AIza-test" }} points={points} camera={camera} onCameraChange={() => {}} tone="dark" />);
+        expect(screen.getByTestId("google-map")).toHaveAttribute("data-color-scheme", "DARK");
     });
 });

@@ -40,6 +40,14 @@ export type ListingDocumentKind =
     | "ADDRESS_PROOF"
     | "MUNICIPAL_PERMIT"
     | "VEHICLE_RC"
+    | "DRIVING_LICENCE"
+    | "VEHICLE_INSURANCE"
+    | "VEHICLE_FITNESS"
+    | "MEDIA_KIT"
+    | "RATE_CARD"
+    /* LF-2: the listing flow's audience evidence, filed once the listing exists. */
+    | "AUDIENCE_RATING"
+    | "FOOTFALL_AUDIT"
     | "OTHER";
 
 export type ListingDocumentStatus = "PENDING" | "VERIFIED" | "REJECTED";
@@ -132,6 +140,26 @@ export interface ReviewCase extends ReviewQueueRow {
 /** `CHANGES_REQUESTED` goes back to the publisher as a draft; `REJECTED` is the end. */
 export type SendBackOutcome = "CHANGES_REQUESTED" | "REJECTED";
 
+/** The two answers a send-back gives, as the review case and the Listings table's bulk "Send back…" both offer them. */
+export const SEND_BACK_OUTCOMES: { value: SendBackOutcome; label: string; description: string }[] = [
+    {
+        value: "CHANGES_REQUESTED",
+        label: "Send back for changes",
+        description: "Returns to the publisher as a draft they can fix and resubmit.",
+    },
+    {
+        value: "REJECTED",
+        label: "Reject outright",
+        description: "The end of the road for this spot. The reason stays as the record of why.",
+    },
+];
+
+/** Five characters is the server's floor below which nothing is a sentence. */
+export const SEND_BACK_REASON_MIN = 5;
+
+/** The permission the desk's verdicts ask — `POST /listings/:id/publish` and `/send-back`. */
+export const LISTING_DECIDE_PERMISSION = "supply.approve";
+
 /* ------------------------------------------------------------------ */
 /* Labels                                                              */
 /* ------------------------------------------------------------------ */
@@ -151,6 +179,15 @@ export const DOCUMENT_KIND_LABEL: Record<ListingDocumentKind, string> = {
     MUNICIPAL_PERMIT: "Municipal permit",
     /* AG-4: the registration certificate of a vehicle put up as a spot. */
     VEHICLE_RC: "Vehicle RC",
+    /* WG-1 (DR 12 boards 08/09): the vehicle papers and the publisher's own media kit and rate card. */
+    DRIVING_LICENCE: "Driving licence",
+    VEHICLE_INSURANCE: "Vehicle insurance",
+    VEHICLE_FITNESS: "Vehicle fitness certificate",
+    MEDIA_KIT: "Media kit",
+    RATE_CARD: "Rate card",
+    /* LF-2 (28 Sep 2026): the audience screen's two reports. */
+    AUDIENCE_RATING: "Audience rating sheet (BARC / TAM)",
+    FOOTFALL_AUDIT: "Footfall audit report",
     OTHER: "Other document",
 };
 

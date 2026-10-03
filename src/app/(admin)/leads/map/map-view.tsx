@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { FilterChips } from "@/components/adx/filter-chips";
 import { MapSurface, type MapBounds, type MapCell, type MapPoint, type MapPolygon, type MarkerTone } from "@/components/adx/map";
+import { MapToneSwitch } from "@/components/adx/map-tone-switch";
+import { useMapTone } from "@/lib/use-map-tone";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { cameraInto, stepZoom, type Camera } from "@/lib/map-geometry";
@@ -112,6 +114,7 @@ export function heatCells(heat: LeadHeat | null): MapCell[] {
  */
 export function MapView({ mapsConfig, view, loading, error, heat, territories, zones, agents, filter, onFilter, onBounds, onChanged }: MapViewProps) {
     const [camera, setCamera] = React.useState<Camera>(HOME);
+    const [tone, setTone] = useMapTone();
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [layers, setLayers] = React.useState({ territories: true, zones: true });
     const [drawing, setDrawing] = React.useState(false);
@@ -227,6 +230,7 @@ export function MapView({ mapsConfig, view, loading, error, heat, territories, z
                     <div className="absolute inset-0">
                         <MapSurface<LeadPoint>
                             config={mapsConfig}
+                            tone={tone}
                             points={points}
                             polygons={polygons}
                             cells={cells}
@@ -244,10 +248,10 @@ export function MapView({ mapsConfig, view, loading, error, heat, territories, z
                         />
                     </div>
                     <div className="absolute left-3 top-3 z-[500] flex flex-col gap-1">
-                        <Button size="icon" variant="outline" className="size-8 bg-card" aria-label="Zoom in" onClick={() => setCamera((c) => ({ ...c, zoom: stepZoom(c.zoom, 1) }))}>
+                        <Button size="icon" variant="outline" className={cn("size-8", tone === "dark" ? "border-white/10 bg-neutral-900/85 text-neutral-100 backdrop-blur-md hover:bg-neutral-800 hover:text-white" : "bg-card")} aria-label="Zoom in" onClick={() => setCamera((c) => ({ ...c, zoom: stepZoom(c.zoom, 1) }))}>
                             <Plus className="size-4" />
                         </Button>
-                        <Button size="icon" variant="outline" className="size-8 bg-card" aria-label="Zoom out" onClick={() => setCamera((c) => ({ ...c, zoom: stepZoom(c.zoom, -1) }))}>
+                        <Button size="icon" variant="outline" className={cn("size-8", tone === "dark" ? "border-white/10 bg-neutral-900/85 text-neutral-100 backdrop-blur-md hover:bg-neutral-800 hover:text-white" : "bg-card")} aria-label="Zoom out" onClick={() => setCamera((c) => ({ ...c, zoom: stepZoom(c.zoom, -1) }))}>
                             <Minus className="size-4" />
                         </Button>
                     </div>
@@ -287,6 +291,7 @@ export function MapView({ mapsConfig, view, loading, error, heat, territories, z
                                 Zones
                             </button>
                         </div>
+                        <MapToneSwitch tone={tone} onChange={setTone} />
                     </div>
                     {loading ? <div className="absolute bottom-3 left-3 z-[500] rounded-md bg-card/90 px-2 py-1 text-xs text-muted-foreground">Reading the viewport…</div> : null}
                 </Card>

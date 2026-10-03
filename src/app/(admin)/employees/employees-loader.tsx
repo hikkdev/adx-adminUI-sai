@@ -25,18 +25,13 @@ export function EmployeesLoader() {
             title="Employees"
             subtitle="Staff records, departments and the holiday calendar — the window's movement against the same number of days before it."
             actions={
-                <>
-                    {/* Lot D (Q131): the intake — submitted, reviewed, approved into an HR record. */}
-                    <Button variant="outline" className="h-9 bg-card" asChild>
-                        <Link href="/onboarding/submissions?userType=EMPLOYEE">Onboard</Link>
-                    </Button>
-                    <Button className="h-9" asChild>
-                        <Link href="/employees/new">
-                            <Plus className="size-4" />
-                            Add employee
-                        </Link>
-                    </Button>
-                </>
+                // 2 Oct 2026: one way to add an employee — the back-office intake ("Onboard") is retired.
+                <Button className="h-9" asChild>
+                    <Link href="/employees/new">
+                        <Plus className="size-4" />
+                        Add employee
+                    </Link>
+                </Button>
             }
             nav={<EmployeesNav />}
         >

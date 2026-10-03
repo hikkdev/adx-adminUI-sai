@@ -117,6 +117,7 @@ const PUBLISHER_COLUMN_META: Record<(typeof PUBLISHER_COLUMNS)[number], Omit<Imp
     address: { label: "Address", hint: "Free text.", example: "12 Mount Road" },
     city: { label: "City", hint: "Resolved against the catalogue; unknown is a warning.", example: "Chennai" },
     state: { label: "State", hint: "Free text.", example: "Tamil Nadu" },
+    postalCode: { label: "PIN code", hint: "Six digits, not starting with 0; optional.", example: "600002" },
     contactName: { label: "Contact name", hint: "Free text.", example: "R. Kumar" },
     contactMobile: { label: "Contact mobile", hint: "Ten digits.", example: "9876500000" },
     contactEmail: { label: "Contact email", hint: "Lower-cased.", example: "kumar@example.in" },
@@ -124,7 +125,7 @@ const PUBLISHER_COLUMN_META: Record<(typeof PUBLISHER_COLUMNS)[number], Omit<Imp
     // QR-13: a row naming the person opens (or adopts) their account with the publisher; with the basics in it lands complete.
     firstName: { label: "First name", hint: "Opens the owner's account with the row; the app never asks their name again.", example: "Rakesh" },
     lastName: { label: "Last name", hint: "With the first name.", example: "Sharma" },
-    dateOfBirth: { label: "Date of birth", hint: "YYYY-MM-DD, 18 or over — one of the four readiness basics.", example: "1980-05-14" },
+    dateOfBirth: { label: "Date of birth", hint: "YYYY-MM-DD, optional — any real date; 18 or over is asked only when they place an order.", example: "1980-05-14" },
     gender: { label: "Gender", hint: "MALE, FEMALE, OTHER or PREFER_NOT_TO_SAY — any casing; optional.", example: "MALE" },
     latitude: { label: "Latitude", hint: "The address pin, with the longitude; decimal degrees.", example: "13.0604" },
     longitude: { label: "Longitude", hint: "With the latitude.", example: "80.2496" },
@@ -204,7 +205,7 @@ export const PARTY_IMPORT_CONFIGS: Record<ImportParty, PartyImportConfig> = {
             /* QR-15: the person — given a first name, the row opens the sign-in account up front, as the desk does. */
             { key: "firstName", label: "First name", hint: "Given, the row opens the sign-in account with the number (lastName, address and city needed too; companyName unless INDIVIDUAL).", example: "Priya" },
             { key: "lastName", label: "Last name", hint: "The person's last name.", example: "Menon" },
-            { key: "dateOfBirth", label: "Date of birth", hint: "YYYY-MM-DD, 18 or over; on the account, not the profile.", example: "1988-02-14" },
+            { key: "dateOfBirth", label: "Date of birth", hint: "YYYY-MM-DD, optional — any real date; 18 or over is asked only when they place an order. On the account, not the profile.", example: "1988-02-14" },
             { key: "gender", label: "Gender", hint: "MALE, FEMALE, OTHER or PREFER_NOT_TO_SAY — any casing; on the account.", example: "FEMALE" },
         ],
         grid: [
@@ -272,6 +273,8 @@ export const PARTY_IMPORT_CONFIGS: Record<ImportParty, PartyImportConfig> = {
             { key: "email", label: "Email", hint: "Lower-cased; one already on another account is invalid.", example: "print@example.in" },
             { key: "address", label: "Address", hint: "Free text.", example: "18 Industrial Estate" },
             CITY,
+            { key: "state", label: "State", hint: "Free text; optional.", example: "Karnataka" },
+            { key: "postalCode", label: "PIN code", hint: "Six digits, not starting with 0; optional.", example: "560058" },
             { key: "capabilities", label: "Capabilities", hint: "Pipe-separated: flex|vinyl|backlit.", example: "flex|vinyl" },
             { key: "maxWidthFt", label: "Max width (ft)", hint: "A number with at most two decimals.", example: "12.5" },
             { key: "turnaroundDays", label: "Turnaround (days)", hint: "A whole number up to 365.", example: "3" },

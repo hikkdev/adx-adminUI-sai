@@ -157,10 +157,6 @@ export function EditAgentDialog({ agent, open, onOpenChange, onSaved }: EditAgen
                                 <div className="flex h-9 items-center" data-testid="agent-status-readonly">
                                     <StatusBadge status={AGENT_STATUS_META[agent.status]} />
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                    Derived, not edited: Block new on the profile page suspends them from the sweep,
-                                    and reinstating lifts it.
-                                </p>
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="agent-territory">Territory</Label>
@@ -171,6 +167,11 @@ export function EditAgentDialog({ agent, open, onOpenChange, onSaved }: EditAgen
                                     placeholder="Bengaluru South"
                                 />
                             </div>
+                            {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                            <p className="-mt-1 text-xs text-muted-foreground sm:col-span-2">
+                                The status is derived, not edited: Block new on the profile page suspends them from the sweep,
+                                and reinstating lifts it.
+                            </p>
                         </div>
                     </section>
 

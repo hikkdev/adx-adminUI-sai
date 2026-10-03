@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INCENTIVE_EVENTS, INCENTIVE_EVENT_LABEL, incentiveEventLabel, incentiveTierLabel } from "./finance";
+import { INCENTIVE_EVENTS, INCENTIVE_EVENT_LABEL, incentiveEventLabel, incentiveTierLabel, incentiveTierOptions } from "./finance";
 
 /**
  * D12 — the incentive queue's vocabulary.
@@ -32,7 +32,28 @@ describe("what an incentive was for", () => {
         expect(INCENTIVE_EVENT_LABEL.LEAD_RETAINED).toBe("Lead retained");
         expect(incentiveTierLabel("*")).toBe("Every tier");
         expect(incentiveTierLabel("*:ADVERTISER")).toBe("Every tier · advertiser side");
-        expect(incentiveTierLabel("GOLD:PUBLISHER")).toBe("GOLD · publisher side");
-        expect(incentiveTierLabel("GOLD")).toBe("GOLD");
+        expect(incentiveTierLabel("GOLD:PUBLISHER")).toBe("Gold · publisher side");
+        expect(incentiveTierLabel("GOLD")).toBe("Gold");
+    });
+});
+
+describe("the tier keys the rate form offers", () => {
+    it("are exactly the keys the backend resolves: every tier, the four tiers, and the sides for lead events only", () => {
+        expect(incentiveTierOptions("PUBLISHER_ONBOARDED").map((option) => option.value)).toEqual(["*", "BRONZE", "SILVER", "GOLD", "PLATINUM"]);
+        expect(incentiveTierOptions("LEAD_RETAINED")).toEqual([
+            { value: "*", label: "Every tier" },
+            { value: "BRONZE", label: "Bronze" },
+            { value: "SILVER", label: "Silver" },
+            { value: "GOLD", label: "Gold" },
+            { value: "PLATINUM", label: "Platinum" },
+            { value: "*:ADVERTISER", label: "Every tier · advertiser side" },
+            { value: "*:PUBLISHER", label: "Every tier · publisher side" },
+        ]);
+    });
+
+    it("keeps a row's own key when the list does not hold it, so changing that row keeps it", () => {
+        const values = incentiveTierOptions("LEAD_ACTIVATED", "GOLD:ADVERTISER").map((option) => option.value);
+        expect(values.at(-1)).toBe("GOLD:ADVERTISER");
+        expect(incentiveTierOptions("LEAD_ACTIVATED", "*").filter((option) => option.value === "*")).toHaveLength(1);
     });
 });

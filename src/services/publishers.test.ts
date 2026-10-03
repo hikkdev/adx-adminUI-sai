@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feedKindLabel, subscriptionLine } from "./publishers";
+import { feedKindLabel, subscriptionLine, updatePublisherBody } from "./publishers";
 
 /* P-C: the words the publisher card prints off `GET /publishers/:id/summary`. */
 describe("feedKindLabel", () => {
@@ -10,6 +10,14 @@ describe("feedKindLabel", () => {
         expect(feedKindLabel("BOOKING_AUTHORISED")).toBe("Booking authorised");
         expect(feedKindLabel("PAYOUT_RELEASED")).toBe("Payout released");
         expect(feedKindLabel("DISPUTE_RAISED")).toBe("Dispute raised");
+    });
+});
+
+/* Phase D: the entity type on the desk's PATCH — named only when the desk changed it. */
+describe("updatePublisherBody", () => {
+    it("carries the entity type when one is named, and leaves it off otherwise", () => {
+        expect(updatePublisherBody({ city: "Pune", entityType: "SOLE_PROPRIETOR" })).toEqual({ city: "Pune", entityType: "SOLE_PROPRIETOR" });
+        expect(updatePublisherBody({ city: "Pune" })).toEqual({ city: "Pune" });
     });
 });
 

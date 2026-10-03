@@ -15,9 +15,14 @@ import {
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { accountRefusal } from "@/services/account-state";
 import { isAlreadyVerified, requestOutcome } from "@/services/kyc";
-import { providerUnavailable } from "@/services/kyc-provider";
+import { ENTITY_PICKER_BUTTON, ENTITY_PICKER_HEADING, entityTypeRequired, type KycEntityType, type KycEntityTypeOption } from "@/services/kyc-entity-types";
+import { DIGIO_NOT_ANSWERING, digioFailure, providerUnavailable } from "@/services/kyc-provider";
 import type { KycRequestChannel } from "@/types";
+import { EntityTypeChoices } from "./entity-type-picker";
+import { backupOffer } from "@/services/verification";
+import { toastStartFailure } from "./resend-on-backup";
 
 /** What the request answers, for the toast — every party's route says whether anybody was told. */
 export interface RequestKycResult {
@@ -41,8 +46,8 @@ interface RequestKycDialogProps {
     contact?: string | null;
     /** N3-C: the channel the dialog opens on — MANUAL from the row menu's "Request manual upload". */
     initialChannel?: KycRequestChannel;
-    /** `POST …/request { channel, note? }` for this party. */
-    onRequest: (channel: KycRequestChannel, note?: string) => Promise<RequestKycResult>;
+    /** `POST …/request { channel, note?, entityType? }` for this party — Phase D: the entity type only once the server asked for it. */
+    onRequest: (channel: KycRequestChannel, note?: string, entityType?: KycEntityType) => Promise<RequestKycResult>;
     onRequested?: () => void;
 }
 
@@ -56,16 +61,26 @@ interface RequestKycDialogProps {
  * the desk commits, because the two channels put different things in
  * front of them. 409 `KYC_ALREADY_VERIFIED` is explained, and a Digio ask
  * while the provider is off is answered with the manual channel.
+ *
+ * Phase D (1 Oct 2026): a Digio ask for an account whose entity type is
+ * unknown answers 409 `ENTITY_TYPE_REQUIRED` — nothing stored, nothing
+ * sent. The dialog then asks "Who is this account for?" with the options
+ * the server named, and sends the same request again with the answer.
+ * Digio failing the start is said in the owner's words.
  */
 export function RequestKycDialog({ open, onOpenChange, party, hasAccount, contact, initialChannel = "DIGIO", onRequest, onRequested }: RequestKycDialogProps) {
     const [channel, setChannel] = React.useState<KycRequestChannel>(initialChannel);
     const [note, setNote] = React.useState("");
     const [busy, setBusy] = React.useState(false);
+    /** Phase D: the options of a 409 `ENTITY_TYPE_REQUIRED`, and the one the desk chose. Asked of a Digio request only. */
+    const [entityOptions, setEntityOptions] = React.useState<KycEntityTypeOption[] | null>(null);
+    const [entityType, setEntityType] = React.useState<KycEntityType | null>(null);
+    const asking = channel === "DIGIO" && entityOptions !== null;
 
     const submit = async () => {
         setBusy(true);
         try {
-            const result = await onRequest(channel, note);
+            const result = await onRequest(channel, note, asking && entityType ? entityType : undefined);
             toast.success(`KYC requested from ${party}`, {
                 description:
                     channel === "DIGIO"
@@ -80,9 +95,25 @@ export function RequestKycDialog({ open, onOpenChange, party, hasAccount, contac
             setNote("");
             onRequested?.();
         } catch (cause) {
-            if (isAlreadyVerified(cause)) {
+            const required = entityTypeRequired(cause);
+            const failure = digioFailure(cause);
+            const refused = accountRefusal(cause);
+            if (refused) {
+                // 2 Oct 2026: a closed account, or one suspended from new work — the server's sentence, and the queue read again.
+                toast.error(`Can't ask ${party} for KYC`, { description: refused.message });
+                onOpenChange(false);
+                onRequested?.();
+            } else if (required) {
+                // Phase D: nothing was stored or sent — the dialog asks who the account is for and the next send carries the answer.
+                setEntityOptions(required.options);
+            } else if (isAlreadyVerified(cause)) {
                 toast.error(`${party} is already verified`, { description: "There is nothing to request." });
                 onOpenChange(false);
+            } else if (backupOffer(cause)) {
+                // Cashfree Phase 2: Digio could not be asked (whatever the reason) and the backup can be sent for this case — the toast offers it.
+                toastStartFailure(failure ?? DIGIO_NOT_ANSWERING, cause, onRequested);
+            } else if (failure) {
+                toast.error(failure);
             } else if (providerUnavailable(cause)) {
                 toast.error("Digio is not available right now", { description: "Ask for the documents by hand instead — choose Manual." });
                 setChannel("MANUAL");
@@ -141,6 +172,18 @@ export function RequestKycDialog({ open, onOpenChange, party, hasAccount, contac
                         />
                     </div>
 
+                    {asking && entityOptions && (
+                        <div className="space-y-2" data-testid="entity-type-ask">
+                            <div>
+                                <p className="text-sm font-medium text-foreground">{ENTITY_PICKER_HEADING}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {party} has no entity type on the account yet, so nothing was sent to Digio. Choose it and the request goes out on that workflow.
+                                </p>
+                            </div>
+                            <EntityTypeChoices options={entityOptions} value={entityType} onChange={setEntityType} disabled={busy} idPrefix="request-entity-type" />
+                        </div>
+                    )}
+
                     <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground" data-testid="request-outcome">
                         {requestOutcome(channel, party, hasAccount)}
                     </p>
@@ -155,9 +198,9 @@ export function RequestKycDialog({ open, onOpenChange, party, hasAccount, contac
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
                         Cancel
                     </Button>
-                    <Button onClick={() => void submit()} disabled={busy}>
+                    <Button onClick={() => void submit()} disabled={busy || (asking && entityType === null)}>
                         <Send className="mr-1.5 size-4" aria-hidden />
-                        {busy ? "Sending…" : channel === "DIGIO" ? "Open the Digio check" : "Send the request"}
+                        {busy ? "Sending…" : asking ? ENTITY_PICKER_BUTTON : channel === "DIGIO" ? "Open the Digio check" : "Send the request"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

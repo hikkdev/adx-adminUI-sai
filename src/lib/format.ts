@@ -59,6 +59,26 @@ export function formatDate(iso: string): string {
     }).format(new Date(iso));
 }
 
+/**
+ * A flight — "1 May – 31 May 2026", the year once when both ends share it;
+ * "From …" / "Until …" with one end; `empty` with neither. One helper for
+ * every list that prints a booking window (orders, campaigns, an
+ * advertiser's campaigns), so the same dates never read two ways.
+ */
+export function flightLabel(range: { startDate?: string | null; endDate?: string | null }, empty = "—"): string {
+    if (range.startDate && range.endDate) {
+        const start = formatDate(range.startDate);
+        const end = formatDate(range.endDate);
+        const year = /\s(\d{4})$/;
+        const startYear = start.match(year)?.[1];
+        const same = startYear !== undefined && startYear === end.match(year)?.[1];
+        return `${same ? start.replace(year, "") : start} – ${end}`;
+    }
+    if (range.startDate) return `From ${formatDate(range.startDate)}`;
+    if (range.endDate) return `Until ${formatDate(range.endDate)}`;
+    return empty;
+}
+
 /** 24 Apr, 6:00 PM */
 export function formatDateTime(iso: string): string {
     return new Intl.DateTimeFormat("en-IN", {
@@ -86,6 +106,34 @@ export function getInitials(name: string | null | undefined): string {
         .map((part) => part[0] ?? "")
         .join("")
         .toUpperCase();
+}
+
+/**
+ * An Indian mobile as every roster prints it: `+91 98765 43210` (29 Sep
+ * 2026, the party rosters made uniform).
+ *
+ * The API stores the canonical `+919876543210`, but a row older than the
+ * normaliser may hold the bare ten digits (`9507842149`), a `91` without the
+ * plus, or a leading trunk `0`; all of them read the same here. Only a real
+ * mobile — ten digits starting 6 to 9 — is regrouped: anything else (a
+ * landline, a foreign number, a typo) is shown exactly as stored, because
+ * dressing it up as `+91 …` would claim a number nobody checked. Empty for
+ * nothing, so a caller picks its own dash.
+ */
+export function formatIndianMobile(raw: string | null | undefined): string {
+    const text = raw?.trim() ?? "";
+    if (!text) return "";
+    const digits = text.replace(/\D/g, "");
+    const ten =
+        digits.length === 10
+            ? digits
+            : digits.length === 12 && digits.startsWith("91")
+              ? digits.slice(2)
+              : digits.length === 11 && digits.startsWith("0")
+                ? digits.slice(1)
+                : null;
+    if (!ten || !/^[6-9]/.test(ten)) return text;
+    return `+91 ${ten.slice(0, 5)} ${ten.slice(5)}`;
 }
 
 /* ------------------------------------------------------------------ */

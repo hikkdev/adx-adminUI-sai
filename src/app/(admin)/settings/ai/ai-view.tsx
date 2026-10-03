@@ -126,9 +126,6 @@ export function AiView({ initial }: { initial: AiSettings }) {
                                 ))}
                             </SelectContent>
                         </Select>
-                        {provider && (
-                            <p className="text-xs text-muted-foreground">{provider.hint}</p>
-                        )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -144,6 +141,9 @@ export function AiView({ initial }: { initial: AiSettings }) {
                             }
                         />
                     </div>
+
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    {provider && <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">{provider.hint}</p>}
 
                     <div className="space-y-1.5">
                         <Label>API key</Label>

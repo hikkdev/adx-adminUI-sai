@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { PrivateFile, fetchPrivateFile, isPrivateFileUrl, kindOf } from "./private-file";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { PrivateFile, PrivateFileLink, fetchPrivateFile, isPrivateFileUrl, kindOf } from "./private-file";
 import { tokens } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
 
@@ -87,5 +87,32 @@ describe("fetchPrivateFile", () => {
     it("throws with the status when the response is not ok", async () => {
         const impl = vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 404 }));
         await expect(fetchPrivateFile(`${files}/gone`, impl)).rejects.toMatchObject({ status: 404 });
+    });
+});
+
+describe("<PrivateFileLink>", () => {
+    /* ST-2: a listing's venue papers moved behind `/files/:id`; one filed before the move keeps its public URL. */
+    it("leaves a public URL a plain new-tab link and never fetches it", () => {
+        const open = vi.spyOn(window, "open").mockReturnValue(null);
+        render(<PrivateFileLink href="https://cdn.adx.in/uploads/verification/noc.pdf">Owner NOC</PrivateFileLink>);
+        const link = screen.getByRole("link", { name: "Owner NOC" });
+        expect(link).toHaveAttribute("href", "https://cdn.adx.in/uploads/verification/noc.pdf");
+        expect(link).toHaveAttribute("target", "_blank");
+        fireEvent.click(link);
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(open).not.toHaveBeenCalled();
+        open.mockRestore();
+    });
+
+    it("opens a private URL with the bearer token, from an object URL", async () => {
+        const open = vi.spyOn(window, "open").mockReturnValue(null);
+        fetchMock.mockResolvedValue(bytes("application/pdf"));
+        render(<PrivateFileLink href={`${files}/doc1`}>Footfall audit</PrivateFileLink>);
+        fireEvent.click(screen.getByRole("link", { name: "Footfall audit" }));
+        await waitFor(() => expect(open).toHaveBeenCalledWith("blob:adx/1", "_blank", "noopener,noreferrer"));
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toBe(`${files}/doc1`);
+        expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+        open.mockRestore();
     });
 });

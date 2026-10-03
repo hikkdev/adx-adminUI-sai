@@ -118,11 +118,11 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-name">Name</Label>
                                 <Input id="dept-name" value={draft.name} onChange={(event) => set("name", event.target.value)} placeholder="e.g. Field operations" autoFocus />
                             </div>
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-code">Code</Label>
                                 <Input
                                     id="dept-code"
@@ -134,7 +134,7 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                                 />
                             </div>
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="dept-description">Description</Label>
                             <Textarea
                                 id="dept-description"
@@ -146,7 +146,7 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                             />
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2">
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-head">Department head</Label>
                                 <Select value={draft.headId || NONE} onValueChange={(value) => set("headId", value === NONE ? "" : value)}>
                                     <SelectTrigger id="dept-head">
@@ -161,9 +161,8 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <p className="text-xs text-muted-foreground">Staff with an HR record.</p>
                             </div>
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-parent">Sits under</Label>
                                 <Select value={draft.parentId || NONE} onValueChange={(value) => set("parentId", value === NONE ? "" : value)}>
                                     <SelectTrigger id="dept-parent">
@@ -179,9 +178,11 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                            <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">The head is picked from staff who have an HR record.</p>
                         </div>
                         <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-regions">Regions covered</Label>
                                 <Input
                                     id="dept-regions"
@@ -189,9 +190,8 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                                     onChange={(event) => set("regions", event.target.value)}
                                     placeholder="Delhi NCR, Karnataka, Tamil Nadu"
                                 />
-                                <p className="text-xs text-muted-foreground">Comma-separated.</p>
                             </div>
-                            <div className="grid gap-1.5">
+                            <div className="grid content-start gap-1.5">
                                 <Label htmlFor="dept-open-roles">Open roles</Label>
                                 <Input
                                     id="dept-open-roles"
@@ -200,6 +200,7 @@ export function DepartmentDialog({ department, departments, open, onOpenChange, 
                                     onChange={(event) => set("openRoles", event.target.value)}
                                 />
                             </div>
+                            <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">Separate regions with commas.</p>
                         </div>
                         {department && (
                             <label className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">

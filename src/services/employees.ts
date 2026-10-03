@@ -526,6 +526,113 @@ export interface Holiday {
     region: string | null;
     /** Lot G (Q123). Absent from a server one release behind, which the badge reads as Public — what the seed wrote. */
     kind?: HolidayKind;
+    /** HC-1: typed by a person (or a calendar row someone edited), or kept by the public calendar. Absent from an older server. */
+    source?: HolidaySource;
+    /** HC-1: the calendar says the date may still move. */
+    tentative?: boolean;
+}
+
+/**
+ * HC-1 (1 Oct 2026): where a holiday came from. CALENDAR rows follow the
+ * public holiday calendar Settings › Integrations names; MANUAL rows are a
+ * person's and the sync never touches them.
+ */
+export const HOLIDAY_SOURCES = ["MANUAL", "CALENDAR"] as const;
+export type HolidaySource = (typeof HOLIDAY_SOURCES)[number];
+
+export const HOLIDAY_SOURCE_META: Record<HolidaySource, StatusMeta> = {
+    CALENDAR: { label: "From calendar", tone: "info" },
+    MANUAL: { label: "Added by hand", tone: "neutral" },
+};
+
+export const TENTATIVE_HOLIDAY_META: StatusMeta = { label: "Tentative date", tone: "warning" };
+
+/** The source badge, or null for a row from a server that does not say. */
+export const holidaySourceMeta = (holiday: Pick<Holiday, "source">): StatusMeta | null =>
+    holiday.source ? HOLIDAY_SOURCE_META[holiday.source] : null;
+
+/** HC-1: one run of the calendar sync, as `GET /hr/holidays/calendar` reports the last one. */
+export interface HolidaySyncState {
+    /** ISO instant. */
+    at: string;
+    added: number;
+    updated: number;
+    adopted: number;
+    skipped: number;
+    /** The reason the run wrote nothing, in plain words; null when it worked. */
+    error: string | null;
+    years: number[];
+}
+
+/** HC-1: `GET /hr/holidays/calendar`. */
+export interface HolidayCalendarView {
+    enabled: boolean;
+    url: string;
+    includeObservances: boolean;
+    lastSync: HolidaySyncState | null;
+}
+
+/** HC-1: `POST /hr/holidays/sync`. */
+export interface HolidaySyncResult {
+    added: number;
+    updated: number;
+    adopted: number;
+    skipped: number;
+    years: number[];
+}
+
+/** HC-1: the calendar the page follows unless Settings › Integrations names another. */
+export const GOOGLE_INDIA_HOLIDAYS_URL =
+    "https://calendar.google.com/calendar/ical/en.indian%23holiday%40group.v.calendar.google.com/public/basic.ics";
+
+/** "Google's Holidays in India calendar", or "your holiday calendar" for an address someone set. */
+export function holidayCalendarName(url: string): string {
+    return url === GOOGLE_INDIA_HOLIDAYS_URL || /en\.indian%23holiday/.test(url) ? "Google's Holidays in India calendar" : "your holiday calendar";
+}
+
+/** "2 Oct, 03:00" in India's day. */
+export function formatSyncTime(iso: string): string {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(new Date(iso));
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${part("day")} ${part("month")}, ${part("hour")}:${part("minute")}`;
+}
+
+/** "18 added · 2 updated", or "nothing new". */
+export function syncCountsLine(run: Pick<HolidaySyncResult, "added" | "updated" | "adopted" | "skipped">): string {
+    const bits = [
+        run.added ? `${run.added} added` : null,
+        run.updated ? `${run.updated} updated` : null,
+        run.adopted ? `${run.adopted} taken over from the old list` : null,
+        run.skipped ? `${run.skipped} left as you set ${run.skipped === 1 ? "it" : "them"}` : null,
+    ].filter(Boolean);
+    return bits.length ? bits.join(" · ") : "nothing new";
+}
+
+/** "The last sync on 2 Oct, 03:00 didn't work. The calendar could not be reached. Nothing was changed." */
+export function syncFailureLine(last: Pick<HolidaySyncState, "at" | "error">): string {
+    const reason = (last.error ?? "").trim();
+    return `The last sync on ${formatSyncTime(last.at)} didn't work. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Nothing was changed.`;
+}
+
+/**
+ * The line under the Holidays header: where the days come from and how the
+ * last sync went — or that the sync is off.
+ */
+export function holidayCalendarLine(view: HolidayCalendarView | null): string | null {
+    if (!view) return null;
+    if (!view.enabled) return "Calendar sync is off";
+    const source = `Synced from ${holidayCalendarName(view.url)}`;
+    const last = view.lastSync;
+    if (!last) return `${source} · not synced yet`;
+    if (last.error) return syncFailureLine(last);
+    return `${source} · last synced ${formatSyncTime(last.at)} · ${syncCountsLine(last)}`;
 }
 
 export interface HolidayInput {
@@ -789,6 +896,14 @@ export const employeesService = {
     updateHoliday: (id: string, patch: HolidayPatch): Promise<Holiday> =>
         live().patch<Holiday>(`/hr/holidays/${encodeURIComponent(id)}`, patch),
 
-    deleteHoliday: (id: string): Promise<{ message: string }> =>
-        live().delete<{ message: string }>(`/hr/holidays/${encodeURIComponent(id)}`),
+    /** HC-1: a calendar row is hidden (`hidden: true`) so the next sync leaves it out; a typed one is deleted. */
+    deleteHoliday: (id: string): Promise<{ message: string; hidden?: boolean }> =>
+        live().delete<{ message: string; hidden?: boolean }>(`/hr/holidays/${encodeURIComponent(id)}`),
+
+    /** HC-1: what the page follows — the switch, the address, the observances choice and the last run. */
+    holidayCalendar: (): Promise<HolidayCalendarView> => live().get<HolidayCalendarView>("/hr/holidays/calendar"),
+
+    /** HC-1: "Sync now" — 409 while the sync is off or already running; 502 (plain words) when the calendar cannot be read. */
+    syncHolidays: (years?: number[]): Promise<HolidaySyncResult> =>
+        live().post<HolidaySyncResult>("/hr/holidays/sync", years?.length ? { years } : {}),
 };

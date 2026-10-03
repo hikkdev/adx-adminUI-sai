@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { ExternalLink, FileText, ImageOff, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ApiError, tokens } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
@@ -139,6 +140,47 @@ export async function openPrivateFile(src: string): Promise<void> {
     window.open(loaded.objectUrl, "_blank", "noopener,noreferrer");
     // The tab holds its own reference once opened; a minute is ample.
     window.setTimeout(() => URL.revokeObjectURL(loaded.objectUrl), 60_000);
+}
+
+interface PrivateFileLinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "target" | "rel"> {
+    /** A `/files/:id` URL or a public one — whichever the row recorded. */
+    href: string;
+    /** The toast when a private file cannot be opened and the server gave no reason. */
+    fallbackError?: string;
+}
+
+/**
+ * A link to a file that may be private (ST-2, 28 Sep 2026: a listing's venue
+ * papers, audience reports and site-visit photographs moved behind
+ * `GET /files/:id`). A public URL stays a plain new-tab link — exactly what
+ * it was, so a document filed before the move opens as it always did. A
+ * private one is fetched with the token on click and opened from an object
+ * URL; a refusal is a toast, never a tab full of JSON.
+ */
+export function PrivateFileLink({ href, fallbackError = "The file could not be opened.", onClick, children, ...rest }: PrivateFileLinkProps) {
+    const [opening, setOpening] = React.useState(false);
+    return (
+        <a
+            {...rest}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            aria-busy={opening || undefined}
+            onClick={(event) => {
+                onClick?.(event);
+                if (event.defaultPrevented || !isPrivateFileUrl(href)) return;
+                // The browser sends no bearer with a plain new-tab open, and `/files/:id` refuses without one.
+                event.preventDefault();
+                if (opening) return;
+                setOpening(true);
+                openPrivateFile(href)
+                    .catch((error: unknown) => toast.error(error instanceof Error ? error.message : fallbackError))
+                    .finally(() => setOpening(false));
+            }}
+        >
+            {children}
+        </a>
+    );
 }
 
 export interface PrivateObjectUrl {

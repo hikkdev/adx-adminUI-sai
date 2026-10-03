@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ListingsNav } from "../listings-nav";
 import { RenewalsLoader } from "./renewals-loader";
 
-export const metadata: Metadata = { title: "Renewals due" };
+export const metadata: Metadata = { title: "Lease, licence and permit renewals" };
 
 /**
  * QR-24 (the owner, 17 Sep 2026): the spots held on a lease, a licence or a

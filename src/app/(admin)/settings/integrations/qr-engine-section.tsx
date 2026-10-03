@@ -298,8 +298,9 @@ function PrintStyle({ stored, onChanged }: { stored: QrEngineSettings; onChanged
                         Caption
                     </Label>
                     <Input id="qr-style-caption" value={draft.frameCaption ?? ""} placeholder="Scan me" maxLength={120} onChange={(event) => set("frameCaption", event.target.value)} />
-                    <p className="text-[11px] text-muted-foreground">Each printed code type names its own purpose over this.</p>
                 </div>
+                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                <p className="-mt-1 text-[11px] text-muted-foreground sm:col-span-3">Each printed code type names its own purpose over the caption.</p>
                 <div className="space-y-1">
                     <Label htmlFor="qr-style-logo" className="text-xs">
                         Logo URL

@@ -17,14 +17,50 @@ import type { StatusMeta } from "@/types";
  * rather than toasted.
  */
 
-export type PaymentGateway = "RAZORPAY" | "CASHFREE" | "CCAVENUE";
-export const PAYMENT_GATEWAYS: readonly PaymentGateway[] = ["RAZORPAY", "CASHFREE", "CCAVENUE"];
+export type PaymentGateway = "RAZORPAY" | "CASHFREE" | "CCAVENUE" | "BANK_TRANSFER";
+export const PAYMENT_GATEWAYS: readonly PaymentGateway[] = ["RAZORPAY", "CASHFREE", "CCAVENUE", "BANK_TRANSFER"];
 
 export const GATEWAY_LABEL: Record<PaymentGateway, string> = {
     RAZORPAY: "Razorpay",
     CASHFREE: "Cashfree",
     CCAVENUE: "CCAvenue",
+    /** BT-1 (DR 12): money sent to ADX's own account; ops confirm it against the statement. */
+    BANK_TRANSFER: "Bank transfer",
 };
+
+/** BT-1: what the payer told us about their transfer. */
+export interface BankTransferClaim {
+    utr: string | null;
+    /** YYYY-MM-DD */
+    paidOn: string | null;
+    claimedAmount: string | null;
+    proofFileId: string | null;
+    claimedAt: string | null;
+}
+
+/**
+ * RF-1: what the payment is for. SETTLEMENT is the target's full amount —
+ * a booking, a package, a plan; RESERVATION_FEE is the fee that holds a
+ * campaign's spots, which is not a booking payment and is folded into the
+ * checkout later. The list takes no `purpose` facet, so the desk cuts on
+ * it client-side over the page in hand.
+ */
+export type PaymentPurpose = "SETTLEMENT" | "RESERVATION_FEE";
+export const PAYMENT_PURPOSES: readonly PaymentPurpose[] = ["SETTLEMENT", "RESERVATION_FEE"];
+
+export const PAYMENT_PURPOSE_META: Record<PaymentPurpose, StatusMeta> = {
+    SETTLEMENT: { label: "Settlement", tone: "neutral" },
+    RESERVATION_FEE: { label: "Reservation fee", tone: "info" },
+};
+
+/** The purpose as the row carries it; a row from before RF-1 is a settlement. */
+export const paymentPurposeOf = (payment: Pick<Payment, "purpose">): PaymentPurpose => payment.purpose ?? "SETTLEMENT";
+
+/** The purpose facet, applied to the rows in hand — "ALL" leaves them alone. */
+export function filterByPurpose<T extends Pick<Payment, "purpose">>(rows: T[], purpose: PaymentPurpose | "ALL"): T[] {
+    if (purpose === "ALL") return rows;
+    return rows.filter((row) => paymentPurposeOf(row) === purpose);
+}
 
 export type PaymentStatus = "CREATED" | "AUTHORIZED" | "CAPTURED" | "FAILED" | "REFUNDED" | "PARTIALLY_REFUNDED";
 export const PAYMENT_STATUSES: readonly PaymentStatus[] = [
@@ -87,6 +123,10 @@ export interface Payment {
     currency: string;
     /** card | upi | netbanking | wallet, as the gateway reported it. */
     method: string | null;
+    /** RF-1: a settlement, or the reservation fee on a campaign. Absent on a backend older than RF-1 — a settlement. */
+    purpose?: PaymentPurpose;
+    /** UP-1: the UPI id the payer typed, when they did — a collect request on Cashfree, the prefilled VPA on Razorpay. */
+    payerUpiId?: string | null;
     status: PaymentStatus;
     failureReason: string | null;
     topUpId: string | null;
@@ -100,6 +140,8 @@ export interface Payment {
     /** What is still on the payment after the refunds that stand. */
     refundable: string;
     refunds: PaymentRefund[];
+    /** BT-1: the payer's claim on a bank-transfer payment; null on a gateway payment. */
+    bankTransfer?: BankTransferClaim | null;
 }
 
 /** The list contract: `{ items, total, page, pageSize, counts }`. */
@@ -148,6 +190,22 @@ export function paymentTarget(payment: Pick<Payment, "campaignId" | "packageSale
     if (payment.campaignId) return { kind: "CAMPAIGN", href: `/campaigns/${payment.campaignId}`, label: "Campaign" };
     if (payment.packageSaleId) return { kind: "PACKAGE_SALE", href: "/packages", label: "Package sale" };
     return { kind: null, href: null, label: "—" };
+}
+
+/** BT-1: a bank transfer still waiting for ops — confirmable or rejectable, whether or not the payer has claimed it yet. */
+export function awaitsBankConfirmation(payment: Pick<Payment, "gateway" | "status">): boolean {
+    return payment.gateway === "BANK_TRANSFER" && payment.status === "CREATED";
+}
+
+/** BT-1: what the confirm dialog refuses before the API would. */
+export function bankConfirmProblem(input: { amount: string; utr: string }, claim: BankTransferClaim | null | undefined): string | null {
+    const amount = input.amount.trim();
+    if (amount && !/^\d+(\.\d{1,2})?$/.test(amount)) return "Enter the amount that arrived in rupees, up to two decimal places — or leave it for the intent's own.";
+    if (amount && Number(amount) <= 0) return "The amount has to be more than zero.";
+    const utr = input.utr.trim();
+    if (!utr && !claim?.utr) return "Give the UTR from the statement — the payer left none.";
+    if (utr && utr.length < 6) return "A UTR is at least six characters.";
+    return null;
 }
 
 /** Only a capture — or a partial refund of one — has money left to send back. */
@@ -203,4 +261,16 @@ export const paymentsService = {
      * money leaving ADX that the advertiser still holds. ADMIN + finance.approve.
      */
     refund: (id: string, input: RefundInput) => http.post<RefundOutcome>(`/payments/${id}/refund`, input),
+
+    /**
+     * BT-1: ops saw the transfer on the statement. Captured and settled
+     * exactly as a gateway capture — the wallet topped up keyed on the UTR,
+     * the campaign authorised. `amount` empty means the intent's own; a
+     * different figure is credited as it came and flagged. ADMIN + finance.approve.
+     */
+    confirmBankTransfer: (id: string, input: { amount?: string; utr?: string; note?: string }) =>
+        http.post<Payment>(`/payments/${id}/bank-transfer/confirm`, input),
+
+    /** BT-1: nothing arrived. FAILED with the reason; the payer is told to start again. */
+    rejectBankTransfer: (id: string, input: { reason: string }) => http.post<Payment>(`/payments/${id}/bank-transfer/reject`, input),
 };

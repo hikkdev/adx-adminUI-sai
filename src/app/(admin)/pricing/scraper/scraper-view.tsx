@@ -378,8 +378,9 @@ function NewSource({ onCreated }: { onCreated: () => void }) {
                                 ))}
                             </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">{selectedKind?.hint}</p>
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">{selectedKind?.hint}</p>
                 </div>
 
                 <div className="space-y-2">
@@ -402,9 +403,6 @@ function NewSource({ onCreated }: { onCreated: () => void }) {
                             onChange={(event) => setCities(event.target.value)}
                             placeholder="mumbai, pune"
                         />
-                        <p className="text-xs text-muted-foreground">
-                            Comma separated. Blank means national.
-                        </p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="src-uplift">Default uplift (%)</Label>
@@ -415,9 +413,6 @@ function NewSource({ onCreated }: { onCreated: () => void }) {
                             onChange={(event) => setUplift(event.target.value)}
                             className="tabular-nums"
                         />
-                        <p className="text-xs text-muted-foreground">
-                            Used when a record carries none of its own.
-                        </p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="src-interval">Run every (hours)</Label>
@@ -429,6 +424,10 @@ function NewSource({ onCreated }: { onCreated: () => void }) {
                             className="tabular-nums"
                         />
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-2 text-xs text-muted-foreground sm:col-span-3">
+                        Cities are comma separated; blank means national. The default uplift is used when a record carries none of its own.
+                    </p>
                 </div>
 
                 {kind !== "MANUAL" && (

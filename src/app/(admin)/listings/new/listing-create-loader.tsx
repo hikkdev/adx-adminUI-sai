@@ -1,13 +1,18 @@
 "use client";
 
-import { PlugZap } from "lucide-react";
+import Link from "next/link";
+import { PlugZap, Workflow } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/adx/empty-state";
 import { PageHeader } from "@/components/adx/page-header";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { useApiResource } from "@/lib/use-api-resource";
 import { isLive } from "@/lib/api-config";
+import { campaignService, type ContentCategory } from "@/services/campaigns";
+import { flowService } from "@/services/flows";
 import { supplyService, type RosterPublisher } from "@/services/supply";
 import { pricingService } from "@/services/pricing";
+import type { WizardFlow } from "@/types";
 import type { Material, MediaType, SizeClass, VenueType } from "@/types/pricing-engine";
 import { ListingCreate } from "./listing-create";
 
@@ -18,6 +23,12 @@ import { ListingCreate } from "./listing-create";
  * The vocabularies are not optional garnish: venue, media type and size class
  * are the comparable match key, so without them the form can neither price a
  * spot against the market nor produce a listing that helps price anyone else's.
+ *
+ * FL-3 (27 Sep 2026): the form is drawn from `flows.listing`, read here off
+ * the public `GET /config` beside the vocabularies, with the content
+ * categories the content-rules screen asks about. No flow on the row means
+ * no form: the screen says so and points at the flow editor rather than
+ * drawing a shape of its own.
  */
 export function ListingCreateLoader() {
     const resource = useApiResource<{
@@ -26,8 +37,10 @@ export function ListingCreateLoader() {
         mediaTypes: MediaType[];
         sizeClasses: SizeClass[];
         materials: Material[];
+        flow: WizardFlow | null;
+        contentCategories: ContentCategory[];
     }>("listings:new", async () => {
-        const [publishers, venues, mediaTypes, sizeClasses, materials] = await Promise.all([
+        const [publishers, venues, mediaTypes, sizeClasses, materials, flow, contentCategories] = await Promise.all([
             // The live roster. This used to be `api.publishers.list()` —
             // fixtures — and the form posted the chosen `pub_*` id straight to
             // the real POST /listings, filing every console-created spot under
@@ -37,8 +50,11 @@ export function ListingCreateLoader() {
             pricingService.mediaTypes(),
             pricingService.sizeClasses(),
             pricingService.materials(),
+            flowService.listingFlow(),
+            // The content-rules screen's vocabulary; a read that fails leaves the screen saying none are set up, not the form unusable.
+            campaignService.contentCategories().catch(() => []),
         ]);
-        return { publishers, venues, mediaTypes, sizeClasses, materials };
+        return { publishers, venues, mediaTypes, sizeClasses, materials, flow, contentCategories };
     });
 
     return (
@@ -49,7 +65,22 @@ export function ListingCreateLoader() {
             />
             {isLive("pricingEngine") ? (
                 <ResourceBoundary resource={resource}>
-                    {(data) => <ListingCreate {...data} />}
+                    {({ flow, ...data }) =>
+                        flow ? (
+                            <ListingCreate {...data} flow={flow} />
+                        ) : (
+                            <EmptyState
+                                icon={Workflow}
+                                title="The listing flow is not on the config row"
+                                description="This form is drawn from the listing wizard both apps render, and the row holds none. Run the backend's config seed, or open the flow editor to check the key."
+                                action={
+                                    <Link href="/flows" className="text-sm font-medium text-primary hover:underline">
+                                        Open the flow editor
+                                    </Link>
+                                }
+                            />
+                        )
+                    }
                 </ResourceBoundary>
             ) : (
                 <Card className="rounded-lg border-border p-8 text-center shadow-none">

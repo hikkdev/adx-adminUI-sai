@@ -5,6 +5,8 @@ import { ChevronLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KpiCard } from "@/components/adx/kpi-card";
 import type { KpiStat } from "@/types";
+import { cn } from "@/lib/utils";
+import { STICKY_SECTION_BAR } from "@/components/adx/sub-nav";
 
 export interface DetailTab {
     value: string;
@@ -19,6 +21,10 @@ interface DetailShellProps {
     /** QR-3: drawn inline after the title — the verified tick, a chip. */
     titleAdornment?: React.ReactNode;
     subtitle?: string;
+    /** A line under the subtitle — who the record is for ("Placed by …"), with its links. */
+    byline?: React.ReactNode;
+    /** A notice between the heading and the KPI tiles — what the record is waiting on, say. */
+    notice?: React.ReactNode;
     actions?: React.ReactNode;
     kpis?: KpiStat[];
     tabs: DetailTab[];
@@ -27,7 +33,9 @@ interface DetailShellProps {
 
 /**
  * Master-detail page scaffold: back link, heading row, KPI tiles,
- * underline tabs. Used by every entity detail screen.
+ * underline tabs. Used by every entity detail screen. The tab strip stays
+ * pinned under the fixed header while the page scrolls — the owner's rule
+ * for every section bar (2 Oct 2026), here as on `SubNav`.
  */
 export function DetailShell({
     backHref,
@@ -35,6 +43,8 @@ export function DetailShell({
     title,
     titleAdornment,
     subtitle,
+    byline,
+    notice,
     actions,
     kpis,
     tabs,
@@ -50,8 +60,8 @@ export function DetailShell({
                     <ChevronLeft className="size-4" />
                     {backLabel}
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
                             {title}
                             {titleAdornment}
@@ -59,10 +69,13 @@ export function DetailShell({
                         {subtitle && (
                             <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
                         )}
+                        {byline}
                     </div>
                     {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
                 </div>
             </div>
+
+            {notice}
 
             {kpis && kpis.length > 0 && (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -73,7 +86,7 @@ export function DetailShell({
             )}
 
             <Tabs defaultValue={defaultTab ?? tabs[0]?.value}>
-                <TabsList className="h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0">
+                <TabsList className={cn("h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0", STICKY_SECTION_BAR)}>
                     {tabs.map((tab) => (
                         <TabsTrigger
                             key={tab.value}

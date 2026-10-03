@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    SECTION_META,
     consoleHref,
     figureDelta,
     foldMoneySeries,
@@ -158,6 +159,23 @@ describe("where a row leads", () => {
     it("a users role opens the accounts directory under that role; a department its console page", () => {
         expect(consoleHref("users", "/users?role=AGENT_PUBLISHER", window)).toBe("/users/accounts?role=AGENT_PUBLISHER");
         expect(consoleHref("employees", "/hr/departments/dep_1", window)).toBe("/employees/departments/dep_1");
+    });
+
+    /* 2 Oct 2026: the listings directory keeps its status and category in the URL, so those rows open it from any section. */
+    it("a listings status or category opens the directory under it; a listings city narrows the Listings overview", () => {
+        expect(consoleHref("publishers", "/listings/directory?category=OUTDOOR", window)).toBe("/listings/directory?category=OUTDOOR");
+        expect(consoleHref("listings", "/listings/directory?status=PENDING_REVIEW", window)).toBe("/listings/directory?status=PENDING_REVIEW");
+        expect(consoleHref("listings", "/listings?city=bengaluru", window)).toBe("/listings?window=7D&city=bengaluru");
+    });
+
+    /* 2 Oct 2026: the campaigns list and the launch queue keep their facets in the URL; a campaigns city narrows the Campaigns overview. */
+    it("a campaigns status opens the list, a reason the launch queue, a campaign its page; a city narrows the overview", () => {
+        expect(consoleHref("campaigns", "/campaigns/directory?status=LIVE", window)).toBe("/campaigns/directory?status=LIVE");
+        expect(consoleHref("campaigns", "/campaigns/launch-queue?reason=KYC", window)).toBe("/campaigns/launch-queue?reason=KYC");
+        expect(consoleHref("campaigns", "/campaigns/cmp_1", window)).toBe("/campaigns/cmp_1");
+        expect(consoleHref("campaigns", "/campaigns?city=bengaluru", window)).toBe("/campaigns?window=7D&city=bengaluru");
+        expect(consoleHref("campaigns", "/campaigns?goal=BRAND_AWARENESS", window)).toBeNull();
+        expect(SECTION_META.campaigns).toMatchObject({ root: "/campaigns", directory: "/campaigns/directory", cityFilter: true, domain: "campaigns" });
     });
 
     it("a cut nothing on the console honours stays a label", () => {

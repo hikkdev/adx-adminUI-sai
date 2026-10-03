@@ -186,10 +186,6 @@ export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps
                                 An HR record hangs off a user account. No account yet? Invite one under{" "}
                                 <Link href="/users/accounts" className="font-medium text-primary hover:underline">
                                     Users
-                                </Link>{" "}
-                                or approve their intake under{" "}
-                                <Link href="/onboarding/submissions?userType=EMPLOYEE" className="font-medium text-primary hover:underline">
-                                    Onboarding
                                 </Link>
                                 .
                             </p>
@@ -250,7 +246,7 @@ export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps
 
                 {step === 1 && (
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="emp-department">Department</Label>
                             <Select value={form.departmentId} onValueChange={(value) => patch({ departmentId: value })}>
                                 <SelectTrigger id="emp-department">
@@ -265,15 +261,8 @@ export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <p className="text-xs text-muted-foreground">
-                                A department not listed is added under{" "}
-                                <Link href="/employees/departments" className="font-medium text-primary hover:underline">
-                                    Departments
-                                </Link>
-                                .
-                            </p>
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="emp-designation">Designation</Label>
                             <Input
                                 id="emp-designation"
@@ -282,11 +271,19 @@ export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps
                                 placeholder="e.g. Ops Executive"
                             />
                         </div>
-                        <div className="grid gap-1.5">
+                        {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                        <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">
+                            A department not listed is added under{" "}
+                            <Link href="/employees/departments" className="font-medium text-primary hover:underline">
+                                Departments
+                            </Link>
+                            .
+                        </p>
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="emp-region">Region</Label>
                             <Input id="emp-region" value={form.region} onChange={(event) => patch({ region: event.target.value })} placeholder="e.g. Delhi NCR" maxLength={80} />
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="emp-work-mode">Work mode</Label>
                             <Select value={form.workMode} onValueChange={(value) => patch({ workMode: value as WorkMode | typeof UNSET })}>
                                 <SelectTrigger id="emp-work-mode">
@@ -302,7 +299,7 @@ export function AddEmployeeWizard({ departments, roles }: AddEmployeeWizardProps
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="emp-employment-type">Employment type</Label>
                             <Select value={form.employmentType} onValueChange={(value) => patch({ employmentType: value as EmploymentType | typeof UNSET })}>
                                 <SelectTrigger id="emp-employment-type">

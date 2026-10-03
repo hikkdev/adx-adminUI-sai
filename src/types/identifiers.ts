@@ -16,17 +16,22 @@ export type PartyType =
     | "DISPUTE"
     | "SAFETY"
     | "LEAD"
+    | "ORDER"
     | "VISIT"
     | "CERTIFICATE"
     | "FRAUD_CASE"
     | "TASK"
     | "ISSUE"
-    | "PROJECT";
+    | "PROJECT"
+    /* LM-1: ADB-… on a display ad, BST-… on a sponsored listing. */
+    | "AD_BOOKING"
+    | "LISTING_BOOST";
 
 /**
- * The eighteen series of the backend's `PartyType`: the five parties, the
+ * The nineteen series of the backend's `PartyType`: the five parties, the
  * person's own id (QR-4, ADX-…), the listing reference (QR-8, LST-…), the
- * eight numbered records (R-C) and the three work series (Lot AA).
+ * booking id (BK-1, BKG-…), the eight numbered records (R-C) and the three
+ * work series (Lot AA).
  */
 export const PARTY_LABELS: Record<PartyType, string> = {
     PUBLISHER: "Publishers",
@@ -36,6 +41,8 @@ export const PARTY_LABELS: Record<PartyType, string> = {
     AGENT: "Field agents",
     USER: "People (every account)",
     LISTING: "Listings",
+    /* BK-1: BKG-DDMM-YYNN on an order, so an advertiser and a publisher can name a booking. */
+    ORDER: "Bookings",
     TICKET: "Support tickets",
     FEEDBACK: "Feedback",
     DISPUTE: "Disputes",
@@ -47,6 +54,8 @@ export const PARTY_LABELS: Record<PartyType, string> = {
     TASK: "Tasks",
     ISSUE: "Issues",
     PROJECT: "Projects",
+    AD_BOOKING: "Display ads",
+    LISTING_BOOST: "Sponsored listings",
 };
 
 export const PARTY_ORDER: PartyType[] = [
@@ -57,6 +66,7 @@ export const PARTY_ORDER: PartyType[] = [
     "EMPLOYEE",
     "USER",
     "LISTING",
+    "ORDER",
     "TICKET",
     "FEEDBACK",
     "DISPUTE",
@@ -68,6 +78,8 @@ export const PARTY_ORDER: PartyType[] = [
     "TASK",
     "ISSUE",
     "PROJECT",
+    "AD_BOOKING",
+    "LISTING_BOOST",
 ];
 
 export interface IdentifierFormat {

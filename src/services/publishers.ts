@@ -1,5 +1,6 @@
 import { api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
+import type { KycEntityType } from "./kyc-entity-types";
 import { importBody, type ImportOutcome, type ImportStatus } from "./party-imports";
 
 /**
@@ -34,7 +35,9 @@ export interface PublisherDeskFields {
     gender?: "MALE" | "FEMALE" | "OTHER" | "PREFER_NOT_TO_SAY";
     address?: string;
     state?: string;
-    /** Both or neither; null clears. */
+    /** The address's six-digit PIN (`^[1-9][0-9]{5}$`), filled by the address bar's pick or typed. */
+    postalCode?: string;
+    /** Both or neither; null clears. Never typed: they come silently from the address bar's pick. */
     latitude?: number | null;
     longitude?: number | null;
     gstin?: string;
@@ -49,6 +52,13 @@ export interface CreatePublisherInput extends PublisherDeskFields {
     mobile: string;
     email?: string;
     type?: PublisherType;
+    /**
+     * The precise legal form (1 Oct 2026), chosen beside DR 08's account
+     * type so a school or a ministry is one from the first save. Optional:
+     * while none is sent the server reads it off `type`, or asks it when
+     * verification starts.
+     */
+    entityType?: KycEntityType;
     city?: string;
     /**
      * Whose book this publisher goes on. An admin's publisher has no agent
@@ -58,10 +68,16 @@ export interface CreatePublisherInput extends PublisherDeskFields {
     attributeToAgentId?: string;
 }
 
-/** `updatePublisherSchema`, as the desk sends it (QR-13): everything the ladder collects; blank fields are left out. */
-export type UpdatePublisherInput = PublisherDeskFields & { name?: string; email?: string; type?: PublisherType; city?: string };
+/**
+ * `updatePublisherSchema`, as the desk sends it (QR-13): everything the ladder collects; blank fields are left out.
+ * Phase D: `entityType` is sent only when the desk changed it. On a VERIFIED
+ * publisher only Individual → a business form is taken, and it fires a fresh
+ * Digio request (503/502 when Digio fails); any other change is 409
+ * `KYC_LOCKED` and nothing in the patch is written.
+ */
+export type UpdatePublisherInput = PublisherDeskFields & { name?: string; email?: string; type?: PublisherType; city?: string; entityType?: KycEntityType };
 
-const DESK_TEXT_KEYS = ["firstName", "lastName", "dateOfBirth", "gender", "address", "state", "gstin", "contactName", "contactMobile", "contactEmail"] as const;
+const DESK_TEXT_KEYS = ["firstName", "lastName", "dateOfBirth", "gender", "address", "state", "postalCode", "gstin", "contactName", "contactMobile", "contactEmail"] as const;
 
 /** The desk's fields onto a body: trimmed text where given, the pin as numbers (both or neither). */
 export function deskFieldsBody(input: PublisherDeskFields): Record<string, unknown> {
@@ -97,6 +113,7 @@ export function createPublisherBody(input: CreatePublisherInput): Record<string,
     const email = input.email?.trim();
     if (email) body.email = email;
     if (input.type) body.type = input.type;
+    if (input.entityType) body.entityType = input.entityType;
     const city = input.city?.trim();
     if (city) body.city = city;
     if (input.attributeToAgentId) body.attributeToAgentId = input.attributeToAgentId;
@@ -112,6 +129,7 @@ export function updatePublisherBody(input: UpdatePublisherInput): Record<string,
     if (input.type) body.type = input.type;
     const city = input.city?.trim();
     if (city) body.city = city;
+    if (input.entityType) body.entityType = input.entityType;
     return body;
 }
 
@@ -317,6 +335,8 @@ export const IMPORT_COLUMNS = [
     "address",
     "city",
     "state",
+    // Onboarding addresses (1 Oct 2026): the PIN code, in the backend's column order.
+    "postalCode",
     "contactName",
     "contactMobile",
     "contactEmail",

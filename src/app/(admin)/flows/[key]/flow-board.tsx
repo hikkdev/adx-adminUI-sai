@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { allowedProps, flowIssues, flowService, resolveWizardIssue, retypeField, unknownKinds, type FlowIssue, type WizardIssueTarget } from "@/services/flows";
 import type { FieldKindSpec, FlowBranch, FlowField, FlowOption, FlowScreen, FlowVocabulary, WizardFlow } from "@/types";
 import { BoardHeader, IssueList, IssueNote, LiveBanner, useIssueJump } from "./board-chrome";
+import { FlowPreviewPanel } from "./flow-preview";
 
 /**
  * A refusal with its place on the board, resolved once against the flow
@@ -409,6 +410,8 @@ export function FlowBoard({ flowKey, flow: initial, vocabulary, onSaved }: FlowB
                 )}
             </div>
 
+            {/* FL-2: the board on the left, the phone on the right, drawn from the draft in state. */}
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_424px]">
             <div className="grid gap-4 xl:grid-cols-[280px_1fr_340px]">
                 {/* Screens rail */}
                 <div className="space-y-2.5">
@@ -697,6 +700,8 @@ export function FlowBoard({ flowKey, flow: initial, vocabulary, onSaved }: FlowB
                         <p className="px-5 py-8 text-center text-sm text-muted-foreground">Nothing selected.</p>
                     )}
                 </Card>
+            </div>
+            <FlowPreviewPanel shape="wizard" flow={flow} />
             </div>
 
             <BranchDialog

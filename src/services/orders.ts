@@ -1,6 +1,6 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
-import type { Order, OrderOffer, OrderSpot, OrderStatus } from "@/types";
+import type { Order, OrderOffer, OrderPlacedBy, OrderRiskSignal, OrderScreening, OrderSpot, OrderStatus } from "@/types";
 
 /**
  * Orders, wired to the backend `orders` module.
@@ -20,14 +20,20 @@ import type { Order, OrderOffer, OrderSpot, OrderStatus } from "@/types";
 /** The order as the API sends it: the row, plus the relations it joins. */
 interface WireOrder {
     id: string;
+    /** BK-1: BKG-DDMM-YYNN, the booking's reference; null on a row minted before the series until the backfill runs. */
+    displayId?: string | null;
     status: OrderStatus;
     campaignName: string | null;
+    /** OM-1: the campaign spot the order was raised from; null for an order placed straight onto a listing. */
+    campaignSpot?: { campaignId: string } | null;
     budget: number | null;
     startDate: string | null;
     endDate: string | null;
     slotTime: string | null;
     createdAt: string;
     agentId: string | null;
+    /** PB-1: who placed it — the person and the business. Admin reads only. */
+    placedBy?: OrderPlacedBy | null;
     /** The spot's id. Always sent; typed optional for the same reason `listing` is. */
     listingId?: string | null;
     listing?: {
@@ -43,6 +49,12 @@ interface WireOrder {
     } | null;
     /** The artwork the advertiser attached. Detail read only. */
     designUrl?: string | null;
+    /* SI-N (DR 12 board 10): the publisher's own self-install proof — the condition photos before, the installed shot after, and what they wrote beside them. */
+    selfInstallConditionPhotoUrls?: string[] | null;
+    selfInstallInstallPhotoUrl?: string | null;
+    selfInstallCollectPhotoUrl?: string | null;
+    selfInstallCheckedInAt?: string | null;
+    selfInstallNotes?: string | null;
     agent?: { user?: { name?: string | null } | null } | null;
     /** Lot B (Q102): the installation figure the agent accepted the job at. Detail read only. */
     quotedFee?: string | null;
@@ -58,6 +70,75 @@ interface WireOrder {
     cancelledByUserId?: string | null;
     cancellationReason?: string | null;
     agentAssignments?: WireAssignment[];
+    /* Order screening (2 Oct 2026): admin reads only, every one optional — a backend older than the screening sends none of them. */
+    riskScore?: string | number | null;
+    riskBand?: "LOW" | "REVIEW" | "HOLD" | null;
+    riskSignals?: WireRiskSignal[] | null;
+    riskScoredAt?: string | null;
+    riskReviewStatus?: "FLAGGED" | "CLEARED" | "CONFIRMED_FRAUD" | null;
+    riskReviewedById?: string | null;
+    riskReviewedBy?: { name?: string | null } | null;
+    riskReviewedAt?: string | null;
+    riskReviewNote?: string | null;
+    riskClearedSignalKeys?: string[] | null;
+    heldAt?: string | null;
+    heldById?: string | null;
+    heldBy?: { name?: string | null } | null;
+    holdReason?: string | null;
+    fraudCaseId?: string | null;
+}
+
+/** One stored signal on `Order.riskSignals`. */
+interface WireRiskSignal {
+    key: string;
+    weight?: number | string | null;
+    value?: number | string | null;
+    detail?: string | null;
+    side?: string | null;
+}
+
+/** The fields whose presence says the read carries the screening at all. */
+const SCREENING_KEYS = ["riskScore", "riskBand", "riskSignals", "riskReviewStatus", "heldAt"] as const;
+
+const finiteOrNull = (value: number | string | null | undefined): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const number = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(number) ? number : null;
+};
+
+/**
+ * The screening fields of an admin order row, gathered into one object —
+ * or null when the read carries none of them (a backend older than the
+ * screening). The score is a Decimal on the wire, so a string or a number.
+ */
+export function shapeScreening(raw: Partial<WireOrder>): OrderScreening | null {
+    if (!SCREENING_KEYS.some((key) => key in raw)) return null;
+    const signals: OrderRiskSignal[] = (raw.riskSignals ?? [])
+        .filter((signal): signal is WireRiskSignal => !!signal && typeof signal.key === "string")
+        .map((signal) => ({
+            key: signal.key,
+            weight: finiteOrNull(signal.weight) ?? 0,
+            value: finiteOrNull(signal.value),
+            detail: signal.detail ?? "",
+            side: signal.side ?? null,
+        }));
+    return {
+        score: finiteOrNull(raw.riskScore),
+        band: raw.riskBand ?? null,
+        signals,
+        scoredAt: raw.riskScoredAt ?? null,
+        reviewStatus: raw.riskReviewStatus ?? null,
+        reviewedById: raw.riskReviewedById ?? null,
+        reviewedByName: raw.riskReviewedBy?.name ?? null,
+        reviewedAt: raw.riskReviewedAt ?? null,
+        reviewNote: raw.riskReviewNote ?? null,
+        clearedSignalKeys: raw.riskClearedSignalKeys ?? [],
+        heldAt: raw.heldAt ?? null,
+        heldById: raw.heldById ?? null,
+        heldByName: raw.heldBy?.name ?? null,
+        holdReason: raw.holdReason ?? null,
+        fraudCaseId: raw.fraudCaseId ?? null,
+    };
 }
 
 /** One offer on the order, newest first — `OrderAgentAssignment` with the agent's name joined. */
@@ -96,11 +177,13 @@ export function shapeOffer(raw: WireAssignment): OrderOffer {
 export function shapeOrder(raw: WireOrder): Order {
     return {
         id: raw.id,
+        displayId: raw.displayId ?? null,
         status: raw.status,
         listing: raw.listing?.title ?? raw.id,
         listingId: raw.listingId ?? null,
         city: raw.listing?.city ?? null,
         campaignName: raw.campaignName ?? null,
+        campaignId: raw.campaignSpot?.campaignId ?? null,
         agent: raw.agent?.user?.name ?? null,
         agentId: raw.agentId ?? null,
         budget: raw.budget ?? null,
@@ -108,6 +191,7 @@ export function shapeOrder(raw: WireOrder): Order {
         endDate: raw.endDate ?? null,
         slotTime: raw.slotTime ?? null,
         createdAt: raw.createdAt,
+        placedBy: raw.placedBy ?? null,
         quotedFee: raw.quotedFee ?? null,
         agentFeeAmount: raw.agentFeeAmount ?? null,
         publisherTimerExpiry: raw.publisherTimerExpiry ?? null,
@@ -119,8 +203,34 @@ export function shapeOrder(raw: WireOrder): Order {
         offers: raw.agentAssignments ? raw.agentAssignments.map(shapeOffer) : undefined,
         spot: raw.listing?.category ? shapeSpot(raw.listing) : null,
         designUrl: raw.designUrl ?? null,
+        selfInstall: shapeSelfInstall(raw),
+        screening: shapeScreening(raw),
     };
 }
+
+/** SI-N: the self-install proof, or null while the publisher has sent none of it. */
+function shapeSelfInstall(raw: WireOrder): Order["selfInstall"] {
+    const conditionPhotoUrls = (raw.selfInstallConditionPhotoUrls ?? []).filter((url): url is string => typeof url === "string" && url.length > 0);
+    const installPhotoUrl = raw.selfInstallInstallPhotoUrl ?? null;
+    const collectPhotoUrl = raw.selfInstallCollectPhotoUrl ?? null;
+    const notes = raw.selfInstallNotes?.trim() || null;
+    const checkedInAt = raw.selfInstallCheckedInAt ?? null;
+    if (!conditionPhotoUrls.length && !installPhotoUrl && !collectPhotoUrl && !notes && !checkedInAt) return null;
+    return { conditionPhotoUrls, installPhotoUrl, collectPhotoUrl, notes, checkedInAt };
+}
+
+/**
+ * BK-1: what an order is called wherever it is named — the booking id
+ * (BKG-DDMM-YYNN) once minted, else the short id: the tail of the cuid,
+ * which is the part that differs between two rows made in the same minute.
+ */
+export function orderLabel(order: Pick<Order, "id" | "displayId">): string {
+    return order.displayId ?? shortOrderId(order.id);
+}
+
+export const shortOrderId = (id: string): string => id.slice(-8).toUpperCase();
+
+/* PB-1: how "Placed by" reads — `placedByView` — moved to `components/adx/placed-by`, shared with the campaigns list. */
 
 /** Lot H: the surface as the listing join carries it — only on the detail read, where the category is joined. */
 function shapeSpot(listing: NonNullable<WireOrder["listing"]>): OrderSpot {
@@ -255,6 +365,8 @@ export interface OrdersQuery {
     city?: string;
     /** E7-2: the advertiser account, reached through the campaign the order was raised from. */
     advertiserId?: string;
+    /** OM-2: one campaign's orders, through the spot each was raised from. */
+    campaignId?: string;
     /**
      * E7-2: a window, as ISO instants. An order is in it when its slot falls
      * inside or its flight overlaps it; either bound alone is open-ended.
@@ -370,7 +482,18 @@ export function pageOrders(rows: Order[], query: OrdersQuery = {}): OrdersPage {
         if (query.from || query.to) return false;
         if (query.city && !(order.city ?? "").toLowerCase().includes(query.city.toLowerCase())) return false;
         if (!q) return true;
-        return [order.campaignName, order.listing, order.city, order.agent]
+        // PB-1: and who placed it — the business and the person, names and ids, as the server's search does.
+        const placedBy = order.placedBy;
+        return [
+            order.campaignName,
+            order.listing,
+            order.city,
+            order.agent,
+            placedBy?.business?.name,
+            placedBy?.business?.displayId,
+            placedBy?.name,
+            placedBy?.displayId,
+        ]
             .some((field) => (field ?? "").toLowerCase().includes(q));
     });
     const counts: Record<string, number> = {};
@@ -412,6 +535,7 @@ export function ordersPath(query: OrdersQuery = {}): string {
     if (query.listingId) params.set("listingId", query.listingId);
     if (query.city) params.set("city", query.city);
     if (query.advertiserId) params.set("advertiserId", query.advertiserId);
+    if (query.campaignId) params.set("campaignId", query.campaignId);
     if (query.from) params.set("from", query.from);
     if (query.to) params.set("to", query.to);
     return `/orders?${params.toString()}`;

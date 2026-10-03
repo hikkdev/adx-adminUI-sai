@@ -102,7 +102,9 @@ export type LedgerTransactionKind =
     | "EXPIRY"
     /** Lot B (B4b): a print partner's approved cost, posted into their payee wallet. */
     | "PRINT_COST"
-    | "REVERSAL";
+    | "REVERSAL"
+    /** LM-1: a display ad or a sponsored listing, paid from a wallet. */
+    | "PROMOTION_SPEND";
 
 /** One row of `GET /finance/wallets`. */
 export interface WalletRow {
@@ -207,7 +209,46 @@ export interface PayoutMethod {
     nameMatchPct: Money | null;
     rejectionReason: string | null;
     createdAt: Timestamp;
+    /**
+     * The last automatic check (2 Oct 2026): on the desk's queue, a UPI
+     * method's last UPI ID check; on a verify, the answer just given. Null
+     * (or absent) when no check has run. A method whose last check says
+     * NOT_FOUND, NAME_MISMATCH or REFUSED is flagged for the desk.
+     */
+    check?: PayoutMethodCheck | null;
 }
+
+/** How a payout method's automatic check came out. */
+export type PayoutCheckOutcome = "VERIFIED" | "NOT_FOUND" | "NAME_MISMATCH" | "INVALID" | "REFUSED" | "UNAVAILABLE";
+
+export interface PayoutMethodCheck {
+    check: "UPI_VPA" | "BANK_ACCOUNT";
+    outcome: PayoutCheckOutcome;
+    provider: "DIGIO" | "CASHFREE_SECURE_ID" | null;
+    providerLabel: string | null;
+    /** The name on the account or UPI ID, as the provider gave it. */
+    nameAtBank: string | null;
+    /** 0–100, when a name was sent and scored. */
+    nameMatchScore: number | null;
+    failureCode: string | null;
+    /** One sentence for the desk. */
+    message: string;
+    checkedAt: Timestamp;
+}
+
+/** The outcome as the desk reads it. */
+export const PAYOUT_CHECK_OUTCOME_META: Record<PayoutCheckOutcome, StatusMeta> = {
+    VERIFIED: { label: "Verified", tone: "success" },
+    NOT_FOUND: { label: "Not found", tone: "danger" },
+    NAME_MISMATCH: { label: "Name doesn't match", tone: "danger" },
+    INVALID: { label: "Account not live", tone: "danger" },
+    REFUSED: { label: "Not confirmed", tone: "warning" },
+    UNAVAILABLE: { label: "Couldn't check", tone: "neutral" },
+};
+
+/** A check that says something is wrong with the method — the desk should look before verifying it. */
+export const isFlaggedCheck = (check: PayoutMethodCheck | null | undefined): boolean =>
+    Boolean(check && (check.outcome === "NOT_FOUND" || check.outcome === "NAME_MISMATCH" || check.outcome === "INVALID" || check.outcome === "REFUSED"));
 
 /** What ops types for a method recorded on a party's behalf (D5). */
 export interface NewPayoutMethodInput {
@@ -296,9 +337,17 @@ export interface TaxRate {
 export interface IncentiveRate {
     id: string;
     event: IncentiveEvent;
-    /** A tier name, or "*" for every tier. */
+    /** A tier name, or "*" for every tier. May be qualified by side: "*:ADVERTISER". */
     tier: string;
     amount: Money;
+    /**
+     * CP-4: this key pays nothing, deliberately — a row that exists to switch
+     * a side off. Only a row can beat a broader one in the resolution order
+     * (`TIER:SIDE → TIER → *:SIDE → *`), and a row priced at ₹0 would be
+     * indistinguishable from a price nobody has set. The screen says "Pays
+     * nothing", never "₹0.00".
+     */
+    paysNothing: boolean;
     effectiveFrom: Timestamp;
     effectiveTo: Timestamp | null;
 }
@@ -321,6 +370,67 @@ export interface LedgerTransaction {
     reversesId: string | null;
     legs: LedgerLeg[];
 }
+
+/**
+ * A row of `GET /finance/ledger?paged=1` — the transaction as the bare read
+ * answers it, plus what the ledger table shows beside the legs.
+ */
+export interface LedgerPageRow extends LedgerTransaction {
+    /** The negative legs as a positive figure: what the transaction moved. */
+    debit: Money;
+    /** Set on a REVERSAL: the reference of the transaction it mirrors. */
+    reversesReference: string | null;
+    /** Set when a later REVERSAL mirrors this one. */
+    reversedBy: { id: string; reference: string } | null;
+}
+
+/** `GET /finance/ledger?paged=1` — one page and what the whole filtered set adds up to. */
+export interface LedgerPage {
+    rows: LedgerPageRow[];
+    /** Every transaction the filters match, not only this page's. */
+    total: number;
+    /** Pass as `cursor` for the next page; null on the last one. */
+    nextCursor: string | null;
+    /** The debit legs and the credit legs of every match. Equal while the books balance. */
+    totals: { debit: Money; credit: Money };
+}
+
+/**
+ * The ledger's filters as the screen holds them. Dates are whole Indian
+ * days (`YYYY-MM-DD`); the query widens them to the day's first and last
+ * instant so a posting at 23:30 IST is inside the day it happened on.
+ */
+export interface LedgerFilter {
+    q?: string;
+    walletId?: string;
+    kind?: LedgerTransactionKind[];
+    from?: string;
+    to?: string;
+    /** A leg of exactly this absolute amount, in rupees. */
+    amount?: string;
+}
+
+/** The ledger filters on the wire — shared by the paged read and the export, so the two never disagree. */
+export function ledgerQuery(
+    filter: LedgerFilter,
+    page: { limit?: number; cursor?: string | null; paged?: boolean } = {}
+): string {
+    return query({
+        q: filter.q?.trim() || undefined,
+        walletId: filter.walletId || undefined,
+        kind: filter.kind?.length ? filter.kind.join(",") : undefined,
+        from: filter.from ? `${filter.from}T00:00:00.000+05:30` : undefined,
+        to: filter.to ? `${filter.to}T23:59:59.999+05:30` : undefined,
+        amount: filter.amount?.trim() || undefined,
+        limit: page.limit,
+        cursor: page.cursor ?? undefined,
+        paged: page.paged ? 1 : undefined,
+    });
+}
+
+/** `ledger-2026-10-02.csv` when the server named nothing. */
+export const ledgerExportFilename = (named: string | null, now = new Date()): string =>
+    named ?? `ledger-${now.toISOString().slice(0, 10)}.csv`;
 
 /** `GET /finance/ledger/verify` — the books checking themselves. */
 export interface LedgerHealth {
@@ -830,6 +940,15 @@ export const financeService = {
         id: string,
         body: { via: PayoutVerificationMethod; reference?: string; nameMatchPct?: Money }
     ) => mutable().post<PayoutMethod>(`${base}/payout-methods/${id}/verify`, body),
+    /**
+     * "Check UPI ID" (2 Oct 2026): the desk's automatic check of a UPI
+     * method — Digio's VPA lookup through the backend's router. Verified on
+     * a live, matching ID (the answer on `check`); a 409 / 503
+     * VERIFICATION_UNAVAILABLE carries the answer on `details.check`
+     * otherwise (`upiCheckFailure`).
+     */
+    checkUpiMethod: (id: string) =>
+        mutable().post<PayoutMethod>(`${base}/payout-methods/${id}/verify`, { via: "PENNY_DROP" }),
 
     rejectPayoutMethod: (id: string, reason: string) =>
         mutable().post<PayoutMethod>(`${base}/payout-methods/${id}/reject`, { reason }),
@@ -901,8 +1020,10 @@ export const financeService = {
         event: IncentiveEvent;
         tier?: string;
         amount: Money;
+        /** CP-4: record the key as switched off; the amount is then ignored. */
+        paysNothing?: boolean;
         effectiveFrom?: string;
-    }) => mutable().post<{ id: string; amount: Money }>(`${base}/incentive-rates`, body),
+    }) => mutable().post<{ id: string; amount: Money; paysNothing: boolean }>(`${base}/incentive-rates`, body),
 
     /* ---------------- The books ---------------- */
 
@@ -910,6 +1031,28 @@ export const financeService = {
         http.get<LedgerTransaction[]>(
             `${base}/ledger${query({ walletId: filter.walletId, limit: filter.limit ?? 200 })}`
         ),
+
+    /**
+     * One page of the ledger under the screen's filters, newest first, with
+     * the total and the debit/credit sums of everything they match. Cursor
+     * paged: `nextCursor` reaches the next page, and the screen keeps the
+     * cursors it used to step back.
+     */
+    ledgerPage: (filter: LedgerFilter, page: { limit: number; cursor?: string | null }) =>
+        http.get<LedgerPage>(`${base}/ledger${ledgerQuery(filter, { ...page, paged: true })}`),
+
+    /**
+     * The filtered ledger as a CSV, one line per leg (`GET
+     * /finance/ledger/export.csv`). Past 50,000 legs the server answers 422
+     * with a sentence asking for a narrower range, which the caller shows.
+     * The server audits `LEDGER_EXPORTED` before the first byte.
+     */
+    exportLedger: async (filter: LedgerFilter): Promise<{ filename: string; bytes: number }> => {
+        const result = await mutable().blob(`${base}/ledger/export.csv${ledgerQuery(filter)}`);
+        const filename = ledgerExportFilename(result.filename);
+        saveBlob(result.blob, filename);
+        return { filename, bytes: result.blob.size };
+    },
 
     /** The only way to undo a posting: a mirrored entry, never a deletion. */
     reverseTransaction: (id: string, reason: string) =>
@@ -1288,9 +1431,29 @@ export function incentiveEventLabel(event: string): string {
  */
 export function incentiveTierLabel(tier: string): string {
     const [rung, side] = tier.split(":");
-    const base = !rung || rung === "*" ? "Every tier" : rung;
+    const base = !rung || rung === "*" ? "Every tier" : rung.charAt(0).toUpperCase() + rung.slice(1).toLowerCase();
     if (!side) return base;
     return `${base} · ${side.toLowerCase()} side`;
+}
+
+/** The ladder's four tiers, as `Agent.tier` stores them — the keys an incentive rate may name. */
+export const INCENTIVE_TIERS = ["BRONZE", "SILVER", "GOLD", "PLATINUM"] as const;
+
+/** The events a lead's side qualifies — the only ones a `*:SIDE` key prices. */
+export const LEAD_INCENTIVE_EVENTS: readonly IncentiveEvent[] = ["LEAD_CONVERTED", "LEAD_ACTIVATED", "LEAD_RETAINED"];
+
+/**
+ * The tier keys the rate form offers for an event, exactly as the backend
+ * resolves them (`TIER:SIDE → TIER → *:SIDE → *`): every tier (`*`), each
+ * tier on its own, and — for the lead events only — every tier on one side.
+ * A key the list does not hold (a row set before, say `GOLD:ADVERTISER`) is
+ * passed as `keep` and offered too, so changing that row keeps its key.
+ */
+export function incentiveTierOptions(event: IncentiveEvent, keep?: string): { value: string; label: string }[] {
+    const keys: string[] = ["*", ...INCENTIVE_TIERS];
+    if (LEAD_INCENTIVE_EVENTS.includes(event)) keys.push("*:ADVERTISER", "*:PUBLISHER");
+    if (keep && !keys.includes(keep)) keys.push(keep);
+    return keys.map((value) => ({ value, label: incentiveTierLabel(value) }));
 }
 
 export const RAIL_LABEL: Record<PayoutRailName, string> = {
@@ -1313,6 +1476,7 @@ export const LEDGER_KIND_LABEL: Record<LedgerTransactionKind, string> = {
     EXPIRY: "Expiry",
     PRINT_COST: "Print cost",
     REVERSAL: "Reversal",
+    PROMOTION_SPEND: "Ads & sponsored",
 };
 
 /** A wallet entry's `type` is the backend's `WalletEntryType`. */
@@ -1329,6 +1493,7 @@ export const ENTRY_TYPE_LABEL: Record<string, string> = {
     PAYOUT: "Payout",
     PENALTY: "Penalty",
     EXPIRY: "Expiry",
+    PROMOTION_DEBIT: "Ads & sponsored",
 };
 
 /** How a payout method was proved. */

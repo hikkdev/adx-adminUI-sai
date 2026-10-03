@@ -100,6 +100,12 @@ in. There are no seeded fixtures left: `src/data/` is empty, `src/services/`
 has no fixture branch, and the signed-in operator comes from `GET /users/me`
 through the auth context.
 
+**Studio (PB-1).** Content › Pages lays a page out in Studio, the website's own
+editor: set `NEXT_PUBLIC_SITE_URL` to where the website is served (default
+`http://localhost:5174`). The console opens
+`${NEXT_PUBLIC_SITE_URL}/studio/pages/<key>` in a new tab with the session's
+tokens in the URL fragment (`src/lib/studio.ts`) — never the query, never a log.
+
 Two screens are the exception, and they are named rather than hidden:
 **`/pricing/rules`** and **`/pricing/simulator`** are the old rate-card
 screens, kept until they are retired. They read the price-model and pricing
@@ -325,7 +331,7 @@ Lot E, `/settings/system-health/ops` and `/history`; since Lot G (CG4) also
 `/regions`, `/incidents` and the public `/status` read, with Subscribe posting
 to the public page's own `/status/subscribe`. It is gated on `apiConfig.live`
 rather than a domain key because it reports on the process, not on records.
-Settings › Reports (`/settings/reports`, formerly `/settings/exports`) reads
+Analytics › Reports (`/analytics/reports`, formerly `/settings/reports`) reads
 `/reports/catalogue`, `/reports/runs` and `/reports/schedules` through
 `src/services/reports.ts`, with Run now and Download through the blob helper.
 Settings › General's Subscriptions card (Lot J2) edits

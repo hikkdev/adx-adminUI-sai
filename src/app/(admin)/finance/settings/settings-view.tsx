@@ -20,15 +20,14 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { ApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { compareMoney, formatDate, formatMoney, formatPct, isZeroMoney } from "@/lib/format";
-import { settingsService, type FinanceSettings, type InstallationCommissionMode } from "@/services/settings";
+import { useAuth } from "@/lib/auth";
+import { settingsService, type AgentPayDefaults, type FinanceSettings, type InstallationCommissionMode } from "@/services/settings";
 import {
-    INCENTIVE_EVENTS,
     SIZE_BAND_LABEL,
     financeService,
     incentiveEventLabel,
     incentiveTierLabel,
     type BankAccount,
-    type IncentiveEvent,
     type IncentiveRate,
     type PartySizeBand,
     type PayoutSchedule,
@@ -38,7 +37,9 @@ import {
     type WithdrawalLimit,
 } from "@/services/finance";
 import type { LegalEntity } from "@/services/invoices";
+import { AgentPayByGrade } from "./agent-pay-by-grade";
 import { BankAccounts } from "./bank-accounts";
+import { IncentiveRateDialog, blankIncentiveDraft, draftFromRate, type IncentiveRateDraft } from "./incentive-rate-dialog";
 import { LegalEntityCard } from "./legal-entity-card";
 import { PayoutCadence } from "./payout-cadence";
 import { RailSettings } from "./rail-settings";
@@ -57,6 +58,8 @@ interface SettingsViewProps {
     rails: RailStatus[];
     /** Lot G (Q124): the weekly draft's clock, for the cadence card. Null when that read failed. */
     schedule: PayoutSchedule | null;
+    /** CP-1: `settings.agents.compensation` off the same platform row. Null when that read failed or the server predates it. */
+    agentPay: AgentPayDefaults | null;
     onChanged: () => void;
 }
 
@@ -79,9 +82,6 @@ interface SettingsViewProps {
  */
 
 const BANDS: PartySizeBand[] = ["INDIVIDUAL", "SMALL_AGENCY", "LARGE_AGENCY"];
-/* Every event the backend can record — DR 05's tier bonus included, because
-   the ladder pays a promotion only when a TIER_BONUS rate exists for the tier. */
-const EVENTS: readonly IncentiveEvent[] = INCENTIVE_EVENTS;
 
 /** An amount as the wire wants it: digits, optionally two decimal places. */
 const AMOUNT = /^\d+(\.\d{1,2})?$/;
@@ -106,13 +106,15 @@ export function SettingsView({
     financeSettings,
     rails,
     schedule,
+    agentPay,
     onChanged,
 }: SettingsViewProps) {
+    const { can } = useAuth();
     return (
         <div className="space-y-5">
             <PageHeader
                 title="Finance settings"
-                subtitle="The legal entity on every invoice, the tiered withdrawal caps, the tax withheld at source, what an agent earns for each kind of work, the accounts ADX pays from and the rails it pays on."
+                subtitle="The legal entity on every invoice, the tiered withdrawal caps, the tax withheld at source, what an agent is paid by grade and earns for each kind of work, the accounts ADX pays from and the rails it pays on."
             />
             {legalEntity && <LegalEntityCard entity={legalEntity} onChanged={onChanged} />}
             <WithdrawalCaps limits={limits} onChanged={onChanged} />
@@ -127,7 +129,14 @@ export function SettingsView({
                 onChanged={onChanged}
             />
             <TaxRates rates={taxRates} onChanged={onChanged} />
-            <IncentiveRates rates={incentiveRates} installationMode={installationMode} onChanged={onChanged} />
+            {/* CP-1: the grade defaults sit directly above the rates — both are what an agent is paid. */}
+            <AgentPayByGrade pay={agentPay} mayEdit={can("settings.edit")} onChanged={onChanged} />
+            <IncentiveRates
+                rates={incentiveRates}
+                installationMode={installationMode}
+                mayEdit={can("finance.edit")}
+                onChanged={onChanged}
+            />
         </div>
     );
 }
@@ -585,19 +594,16 @@ function TaxRates({ rates, onChanged }: { rates: TaxRate[]; onChanged: () => voi
 function IncentiveRates({
     rates,
     installationMode,
+    mayEdit,
     onChanged,
 }: {
     rates: IncentiveRate[];
     installationMode: InstallationCommissionMode | null;
+    /** `finance.edit` — the permission `POST /finance/incentive-rates` asks for. */
+    mayEdit: boolean;
     onChanged: () => void;
 }) {
-    const [form, setForm] = React.useState({
-        event: "PUBLISHER_ONBOARDED" as IncentiveEvent,
-        tier: "*",
-        amount: "",
-        effectiveFrom: today(),
-    });
-    const [busy, setBusy] = React.useState(false);
+    const [dialog, setDialog] = React.useState<{ mode: "set" | "change"; draft: IncentiveRateDraft } | null>(null);
 
     const sorted = React.useMemo(
         () =>
@@ -609,35 +615,18 @@ function IncentiveRates({
         [rates]
     );
 
-    async function save() {
-        if (!AMOUNT.test(form.amount.trim())) {
-            toast.error("An incentive is a rupee amount, with at most two decimal places.");
-            return;
-        }
-        setBusy(true);
-        try {
-            await financeService.setIncentiveRate({
-                event: form.event,
-                ...(form.tier.trim() ? { tier: form.tier.trim() } : {}),
-                amount: form.amount.trim(),
-                effectiveFrom: new Date(form.effectiveFrom).toISOString(),
-            });
-            toast.success(`${incentiveEventLabel(form.event)} set to ${formatMoney(form.amount.trim())}`, {
-                description: `For tier ${form.tier.trim() || "*"} from ${formatDate(form.effectiveFrom)}. Incentives already earned keep the rate they were earned at.`,
-            });
-            setForm((state) => ({ ...state, amount: "" }));
-            onChanged();
-        } catch (cause) {
-            toast.error(cause instanceof ApiError ? cause.message : "Could not save that rate.");
-        } finally {
-            setBusy(false);
-        }
-    }
-
     return (
         <SectionCard
             title="Agent incentive rates"
-            description={`What an agent earns for each kind of work, by tier. "*" covers every tier, so a rate that does not vary needs one row rather than one per tier. A lead reward may be priced per side — "*:ADVERTISER" is every tier's advertiser figure (LH8, D1).`}
+            description="What an agent earns for each kind of work. A rate can apply to every tier or to one tier; lead rewards are priced separately for the advertiser side and the publisher side. Publisher-side lead rewards are switched off, because publisher agents are paid a salary and quota for onboarding."
+            actions={
+                mayEdit ? (
+                    <Button size="sm" variant="outline" onClick={() => setDialog({ mode: "set", draft: blankIncentiveDraft() })}>
+                        <Plus className="mr-1.5 size-4" />
+                        Set a rate
+                    </Button>
+                ) : undefined
+            }
         >
             <div className="space-y-4">
                 <InstallationMode mode={installationMode} onChanged={onChanged} />
@@ -649,25 +638,34 @@ function IncentiveRates({
                                 <th className="px-3 py-2">Tier</th>
                                 <th className="px-3 py-2">Amount</th>
                                 <th className="px-3 py-2">In force</th>
+                                <th className="px-3 py-2">
+                                    <span className="sr-only">Actions</span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
                             {sorted.map((rate) => (
                                 <tr
                                     key={rate.id}
+                                    data-testid="incentive-rate-row"
                                     className={cn(
                                         "border-b last:border-0",
                                         rate.effectiveTo !== null && "text-muted-foreground"
                                     )}
                                 >
-                                    <td className="px-3 py-2.5 font-medium text-foreground">
+                                    <td className={cn("px-3 py-2.5 font-medium", rate.effectiveTo === null && "text-foreground")}>
                                         {incentiveEventLabel(rate.event)}
                                     </td>
                                     <td className="px-3 py-2.5 text-muted-foreground">
                                         {incentiveTierLabel(rate.tier)}
                                     </td>
                                     <td className="px-3 py-2.5 font-medium tabular-nums">
-                                        {formatMoney(rate.amount)}
+                                        {/* CP-4: off is not zero, and must never be printed as ₹0.00. */}
+                                        {rate.paysNothing ? (
+                                            <span className="font-normal text-muted-foreground">Pays nothing</span>
+                                        ) : (
+                                            formatMoney(rate.amount)
+                                        )}
                                     </td>
                                     <td className="px-3 py-2.5">
                                         {rate.effectiveTo === null ? (
@@ -684,11 +682,25 @@ function IncentiveRates({
                                             </span>
                                         )}
                                     </td>
+                                    <td className="px-3 py-2.5 text-right">
+                                        {/* Only a rate in force can be changed; a past one is history. */}
+                                        {mayEdit && rate.effectiveTo === null && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 bg-card"
+                                                aria-label={`Change ${incentiveEventLabel(rate.event)} for ${incentiveTierLabel(rate.tier).toLowerCase()}`}
+                                                onClick={() => setDialog({ mode: "change", draft: draftFromRate(rate) })}
+                                            >
+                                                Change
+                                            </Button>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                             {rates.length === 0 && (
                                 <tr>
-                                    <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                                    <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
                                         No incentive rate has been configured, so nothing is earned
                                         automatically. Ops can still record an incentive by hand.
                                     </td>
@@ -697,79 +709,8 @@ function IncentiveRates({
                         </tbody>
                     </table>
                 </div>
-
-                <div className="rounded-lg border bg-muted/40 p-4">
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Set a rate
-                    </h4>
-                    <div className="mt-3 grid gap-3 lg:grid-cols-5">
-                        <div className="space-y-1.5 lg:col-span-2">
-                            <Label htmlFor="incentive-event">Event</Label>
-                            <Select
-                                value={form.event}
-                                onValueChange={(value) =>
-                                    setForm((state) => ({ ...state, event: value as IncentiveEvent }))
-                                }
-                            >
-                                <SelectTrigger id="incentive-event">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {EVENTS.map((event) => (
-                                        <SelectItem key={event} value={event}>
-                                            {incentiveEventLabel(event)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="incentive-tier">Tier</Label>
-                            <Input
-                                id="incentive-tier"
-                                value={form.tier}
-                                onChange={(event) =>
-                                    setForm((state) => ({ ...state, tier: event.target.value }))
-                                }
-                                placeholder="* for every tier; *:ADVERTISER for one side"
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="incentive-amount">Amount</Label>
-                            <Input
-                                id="incentive-amount"
-                                inputMode="decimal"
-                                placeholder="500.00"
-                                value={form.amount}
-                                onChange={(event) =>
-                                    setForm((state) => ({ ...state, amount: event.target.value }))
-                                }
-                            />
-                        </div>
-                        <div className="flex items-end">
-                            <Button className="w-full" disabled={busy} onClick={save}>
-                                {busy ? "Saving…" : "Set rate"}
-                            </Button>
-                        </div>
-                    </div>
-                    <div className="mt-3 space-y-1.5">
-                        <Label htmlFor="incentive-from">Effective from</Label>
-                        <Input
-                            id="incentive-from"
-                            type="date"
-                            className="max-w-xs"
-                            value={form.effectiveFrom}
-                            onChange={(event) =>
-                                setForm((state) => ({ ...state, effectiveFrom: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                        Effective-dated like a rate card. An incentive already earned keeps the rate and
-                        the tier it was earned at, so a change here never re-rates past work.
-                    </p>
-                </div>
             </div>
+            <IncentiveRateDialog open={dialog} onClose={() => setDialog(null)} onSaved={onChanged} />
         </SectionCard>
     );
 }

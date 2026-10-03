@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 /**
  * The one click — N3-C (the owner, 14 Sep 2026: "ADX Admin/Super Admin
@@ -14,6 +14,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
  * menu and no case to open; a requested row says when and by whom and
  * puts Resend behind a confirm; a verified row offers only the case. The
  * advertiser's one click goes over the PROFILE id.
+ *
+ * Phase D (1 Oct 2026): a click answered 409 `ENTITY_TYPE_REQUIRED` opens
+ * the picker with the server's options and goes again with the chosen
+ * `{ entityType }`; Digio's own failures are said in the owner's words,
+ * and the provider switch's 503 still points at the manual ask.
  */
 
 const session = vi.hoisted(() => ({ permissions: new Set<string>(["kyc.edit"]) }));
@@ -24,14 +29,25 @@ vi.mock("@/lib/auth", () => ({
 
 const backend = vi.hoisted(() => ({
     posts: [] as { path: string; body: unknown }[],
+    /** Phase D: what the next posts are refused with, in order; a post with none left succeeds. */
+    refusals: [] as { status: number; code: string; message: string; details?: unknown }[],
     reset() {
         this.posts = [];
+        this.refusals = [];
     },
     async post(path: string, body?: unknown) {
         this.posts.push({ path, body });
+        const refusal = this.refusals.shift();
+        if (refusal) {
+            const { ApiError } = await import("@/lib/api-client");
+            throw new ApiError(refusal.status, refusal.code, refusal.message, refusal.details);
+        }
         return { kyc: { id: "k1" }, digio: { kycId: "dg_1", validTill: "2026-09-16T00:00:00.000Z" }, notified: false };
     },
 }));
+
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast }));
 
 vi.mock("@/lib/api-config", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/lib/api-config")>();
@@ -57,6 +73,8 @@ import { KycRowActions, type KycRowActionsProps } from "./kyc-row-actions";
 
 beforeEach(() => {
     backend.reset();
+    toast.success.mockReset();
+    toast.error.mockReset();
     session.permissions = new Set(["kyc.edit"]);
 });
 
@@ -120,6 +138,91 @@ describe("KycRowActions — the one click", () => {
     });
 });
 
+describe("KycRowActions — the entity type (Phase D)", () => {
+    const options = [
+        { value: "INDIVIDUAL", label: "Individual" },
+        { value: "SOLE_PROPRIETOR", label: "Sole proprietor" },
+        { value: "COMPANY", label: "Company" },
+    ];
+    const required = { status: 409, code: "ENTITY_TYPE_REQUIRED", message: "Say who the account is for.", details: { party: "PUBLISHER", options } };
+
+    it("on 409 ENTITY_TYPE_REQUIRED opens the picker with the server's options, and sends the click again with the chosen type", async () => {
+        backend.refusals = [required];
+        const { onChanged } = draw({ onDigio: (entityType) => kycService.requestDigio("pub_1", entityType) });
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+
+        const picker = await screen.findByTestId("entity-type-picker");
+        expect(within(picker).getByRole("heading", { name: "Who is this account for?" })).toBeInTheDocument();
+        expect(within(picker).getAllByRole("radio").map((radio) => radio.getAttribute("value"))).toEqual(["INDIVIDUAL", "SOLE_PROPRIETOR", "COMPANY"]);
+        expect(picker).toHaveTextContent("This decides which documents the check asks for. Pick the one their PAN is registered as.");
+        // Nothing was stored or sent: no toast, no re-read, and the button waits for a choice.
+        expect(onChanged).not.toHaveBeenCalled();
+        expect(toast.error).not.toHaveBeenCalled();
+        const go = within(picker).getByRole("button", { name: "Continue to verification" });
+        expect(go).toBeDisabled();
+
+        fireEvent.click(within(picker).getByRole("radio", { name: "Company" }));
+        fireEvent.click(go);
+        await waitFor(() => expect(onChanged).toHaveBeenCalled());
+        expect(backend.posts).toEqual([
+            { path: "/publishers/kyc-queue/pub_1/request", body: undefined },
+            { path: "/publishers/kyc-queue/pub_1/request", body: { entityType: "COMPANY" } },
+        ]);
+        expect(toast.success).toHaveBeenCalledWith("Digio request sent to Sharma Hoardings", expect.anything());
+        expect(screen.queryByTestId("entity-type-picker")).not.toBeInTheDocument();
+    });
+
+    it("an advertiser's and a print partner's picker resend over their own routes; Cancel sends nothing", async () => {
+        backend.refusals = [{ ...required, details: { party: "ADVERTISER", options } }];
+        draw({ onDigio: (entityType) => advertiserKycService.requestDigio("adv_profile_1", entityType) });
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+        const picker = await screen.findByTestId("entity-type-picker");
+        fireEvent.click(within(picker).getByRole("radio", { name: "Sole proprietor" }));
+        fireEvent.click(within(picker).getByRole("button", { name: "Continue to verification" }));
+        await waitFor(() => expect(backend.posts).toHaveLength(2));
+        expect(backend.posts[1]).toEqual({ path: "/advertiser-kyc/adv_profile_1/request", body: { entityType: "SOLE_PROPRIETOR" } });
+
+        backend.reset();
+        backend.refusals = [required];
+        draw({ onDigio: (entityType) => kycService.requestDigio("pub_2", entityType) });
+        fireEvent.click(screen.getAllByRole("button", { name: "Send Digio request" }).at(-1)!);
+        const second = await screen.findByTestId("entity-type-picker");
+        fireEvent.click(within(second).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByTestId("entity-type-picker")).not.toBeInTheDocument());
+        expect(backend.posts).toHaveLength(1);
+    });
+
+    it("says Digio's own failures in the owner's words, and keeps the switch's 503 pointing at the manual ask", async () => {
+        backend.refusals = [{ status: 503, code: "KYC_PROVIDER_UNAVAILABLE", message: "Digio did not answer", details: { provider: "DIGIO", reason: "PROVIDER_ERROR" } }];
+        draw();
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Digio isn't answering right now. Try again in a few minutes."));
+
+        for (const refusal of [
+            { status: 502, code: "KYC_PROVIDER_REFUSED", message: "Digio refused", details: { provider: "DIGIO", status: 404, code: "TEMPLATE_NOT_FOUND" } },
+            { status: 503, code: "KYC_PROVIDER_UNAVAILABLE", message: "No template", details: { provider: "DIGIO", reason: "NO_TEMPLATE" } },
+        ]) {
+            toast.error.mockReset();
+            backend.refusals = [refusal];
+            fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+            await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Online verification isn't available for this account type yet. Please contact ADX support."));
+        }
+
+        toast.error.mockReset();
+        backend.refusals = [{ status: 503, code: "KYC_PROVIDER_UNAVAILABLE", message: "Digio is off", details: { provider: "MANUAL", retryAfter: 300 } }];
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Digio is not available right now", { description: "Ask for the documents by hand instead — Request manual upload." }));
+    });
+
+    it("an agent's click is unchanged: no body, no picker", async () => {
+        const { onChanged } = draw({ onDigio: () => agentKycService.requestDigio("agt_1") });
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+        await waitFor(() => expect(onChanged).toHaveBeenCalled());
+        expect(backend.posts).toEqual([{ path: "/agent-kyc/agt_1/request", body: undefined }]);
+        expect(screen.queryByTestId("entity-type-picker")).not.toBeInTheDocument();
+    });
+});
+
 describe("KycRowActions — by state", () => {
     it("awaiting documents: Send Digio request, and the manual ask and Record at the desk behind the menu; no case to open", () => {
         const { onRecord } = draw({ caseHref: null });
@@ -170,5 +273,53 @@ describe("KycRowActions — by state", () => {
         expect(screen.getByTestId("kyc-open-case")).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "Send Digio request" })).not.toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "More KYC actions" })).not.toBeInTheDocument();
+    });
+});
+
+/**
+ * 2 Oct 2026 (the account lifecycle): a closed account, one suspended from
+ * new work, a deactivated one and an agent who left cannot be asked for
+ * KYC — the asks are drawn disabled with the reason, and the server's 409
+ * `ACCOUNT_CLOSED` / `ACCOUNT_SUSPENDED` (an account that changed under the
+ * row) is said in its own sentence and the queue read again.
+ */
+describe("KycRowActions — an inactive account", () => {
+    it.each([
+        ["CLOSED", /closed/i],
+        ["SUSPENDED", /suspended from new work/i],
+        ["DEACTIVATED", /deactivated/i],
+        ["EXITED", /left ADX/i],
+    ] as const)("%s: the one click and the manual ask are disabled, with the reason", (accountState, reason) => {
+        draw({ accountState });
+        const button = screen.getByRole("button", { name: "Send Digio request" });
+        expect(button).toBeDisabled();
+        expect(button.parentElement).toHaveAttribute("title", expect.stringMatching(reason));
+        expect(screen.getByTestId("kyc-request-blocked")).toHaveTextContent(reason);
+        openMenu();
+        expect(screen.getByRole("menuitem", { name: "Request manual upload" })).toHaveAttribute("data-disabled");
+        // Record at the desk is not an ask of the party, and stays.
+        expect(screen.getByRole("menuitem", { name: "Record at the desk" })).not.toHaveAttribute("data-disabled");
+    });
+
+    it("a suspension without BLOCK_NEW, a working account, and an off-roster shop leave the asks open", () => {
+        draw({ accountState: "SUSPENDED", suspensionScopes: ["FREEZE_WALLET"] });
+        draw({ accountState: "ACTIVE" });
+        draw({ accountState: "DEACTIVATED", deactivationBlocksNew: false });
+        for (const button of screen.getAllByRole("button", { name: "Send Digio request" })) expect(button).toBeEnabled();
+        expect(screen.queryByTestId("kyc-request-blocked")).toBeNull();
+    });
+
+    it("a requested row's Resend is disabled too", () => {
+        draw({ state: "REQUESTED", request: asked, accountState: "CLOSED" });
+        expect(screen.getByRole("button", { name: "Resend" })).toBeDisabled();
+    });
+
+    it("the server's 409 ACCOUNT_CLOSED / ACCOUNT_SUSPENDED is said in its own words, and the queue read again", async () => {
+        backend.refusals = [{ status: 409, code: "ACCOUNT_SUSPENDED", message: "This account is suspended from new work, so KYC can't be requested." }];
+        const { onChanged } = draw();
+        fireEvent.click(screen.getByRole("button", { name: "Send Digio request" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        expect(toast.error).toHaveBeenCalledWith("Can't ask Sharma Hoardings for KYC", { description: "This account is suspended from new work, so KYC can't be requested." });
+        expect(onChanged).toHaveBeenCalled();
     });
 });

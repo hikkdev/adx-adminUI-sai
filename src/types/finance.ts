@@ -1,4 +1,4 @@
-import type { StatusMeta } from "./common";
+import type { AccountState, StatusMeta } from "./common";
 import type { KycQueueState } from "./kyc-state";
 
 /* ------------------------------------------------------------------ */
@@ -98,10 +98,12 @@ export interface KycCheck {
 
 /** A Digio session as ADX holds it: the request, its answer, when, and Digio's message. */
 export interface KycDigio {
+    /** Cashfree Phase 2: who ran the online check — Digio, or Cashfree Secure ID on the backup (the record's `method` CASHFREE). Absent means Digio. */
+    provider?: "DIGIO" | "CASHFREE";
     requestId: string | null;
     /** ADX's own reference sent to Digio — what stays after a purge as proof. */
     referenceId: string | null;
-    /** Digio's own word: pending, approved, rejected, cancelled. */
+    /** Digio's own word: pending, approved, rejected, cancelled — or PROVIDER_FAILED when Digio could not be asked (never printed raw). */
     status: string | null;
     verifiedAt: string | null;
     message: string | null;
@@ -148,6 +150,9 @@ export interface KycCase {
     state: KycQueueState;
     /** N3-B: the record's id, null while the publisher has no record yet (the row is the party alone). */
     kycId: string | null;
+    /** 2 Oct 2026: where the account stands; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     /** When the publisher arrived — the arrival order the awaiting rows sort by. */
     createdAt: string;
     /** The publisher's `User.id`, when they have signed in — who the liveness video belongs to. Null before that. */

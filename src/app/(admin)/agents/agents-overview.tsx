@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Plus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BreakdownTable, CountTile, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
+import { BreakdownTable, CostTile, CountTile, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { SECTION_META, consoleHref, kycMixItems, typedSpellingsHover, type AgentsOverview } from "@/services/section-overviews";
 import { AgentsNav } from "./agents-nav";
@@ -28,7 +28,7 @@ export function AgentsOverviewView() {
             actions={
                 <>
                     <Button variant="outline" className="h-9 bg-card" asChild>
-                        <Link href="/growth/leaderboard">
+                        <Link href="/analytics/leaderboards/agents">
                             <Trophy className="size-4" />
                             Leaderboard
                         </Link>
@@ -49,7 +49,7 @@ export function AgentsOverviewView() {
 }
 
 export function AgentsOverviewBody({ data, link }: { data: AgentsOverview; link: (href: string | null) => string | null }) {
-    const { tiles, money, series, breakdowns, top } = data;
+    const { tiles, money, series, breakdowns, top, cost } = data;
     const roles = tiles.byRole.publisherAgents + tiles.byRole.advertiserAgents;
     return (
         <>
@@ -62,6 +62,10 @@ export function AgentsOverviewBody({ data, link }: { data: AgentsOverview; link:
                 <CountTile label="Visits completed" figure={series.visitsCompleted.total} href="/visits" />
                 <CountTile label="Jobs completed" figure={series.jobsCompleted.total} hint="orders approved complete" href="/orders" />
                 <MoneyTile label="Incentives paid" figure={money.incentivesPaid} hint="credited net" />
+                {/* CP-2: both sides over one denominator. It is NOT the publisher
+                    and advertiser figures added up — an agent holding both roles
+                    is counted on both, because their salary buys both. */}
+                <CostTile label="Cost per onboarding" cost={cost} noun="account" />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-3">
@@ -100,13 +104,24 @@ export function AgentsOverviewBody({ data, link }: { data: AgentsOverview; link:
             <div className="grid gap-4 xl:grid-cols-2">
                 <BreakdownTable
                     title="By city"
-                    hint="Agents per city, as of now — a city narrows this overview and brings its leaderboard."
+                    hint="Agents per city as of now, and what an onboarding cost there in the window — a city narrows this overview and brings its leaderboard."
                     labelHeading="City"
                     page={breakdowns.byCity}
                     initialSort="count"
                     linkFor={(row) => link(row.href)}
                     hoverFor={typedSpellingsHover}
-                    columns={[{ key: "count", label: "Agents", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count }]}
+                    columns={[
+                        { key: "count", label: "Agents", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count },
+                        { key: "onboardings", label: "Onboarded", align: "right", render: (row) => formatNumber(row.onboardings), sortValue: (row) => row.onboardings },
+                        {
+                            key: "cost",
+                            label: "Cost each",
+                            align: "right",
+                            // CP-2: null is "not recorded here", so it prints a dash rather than a free onboarding.
+                            render: (row) => (row.cost === null ? "—" : formatMoney(row.cost)),
+                            sortValue: (row) => (row.cost === null ? -1 : Number(row.cost)),
+                        },
+                    ]}
                 />
                 <BreakdownTable
                     title="By tier"

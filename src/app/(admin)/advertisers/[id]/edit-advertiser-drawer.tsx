@@ -5,6 +5,7 @@ import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
+import type { KycEntityType } from "@/services/kyc-entity-types";
 import type { Advertiser } from "@/types";
 import { AdvertiserOnboardingForm, advertiserValuesOf } from "../advertiser-onboarding-form";
 
@@ -14,7 +15,10 @@ import { AdvertiserOnboardingForm, advertiserValuesOf } from "../advertiser-onbo
  * with `PATCH /advertisers/:id`. Needs `demand.edit` (advertisers are the
  * demand side of the permission groups); without it the button is not
  * drawn. An advertiser with no account yet who is given a first name here
- * gets one opened and linked, the way a fresh onboarding does.
+ * gets one opened and linked, the way a fresh onboarding does. Phase D:
+ * the entity type is edited here too, beside the account type; on a
+ * verified advertiser only Individual → a business form is taken, and that
+ * restarts verification.
  */
 export function EditAdvertiserDrawer({ advertiser, onChanged }: { advertiser: Advertiser; onChanged: () => void }) {
     const { can } = useAuth();
@@ -39,6 +43,7 @@ export function EditAdvertiserDrawer({ advertiser, onChanged }: { advertiser: Ad
                             mode="edit"
                             advertiserId={advertiser.id}
                             initial={advertiserValuesOf(advertiser)}
+                            entity={{ value: (advertiser.entityType ?? null) as KycEntityType | null, verified: advertiser.kycStatus === "VERIFIED", stored: advertiser.entityTypeStored ?? false }}
                             onSaved={() => {
                                 setOpen(false);
                                 onChanged();

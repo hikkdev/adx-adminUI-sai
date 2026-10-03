@@ -38,6 +38,7 @@ import type {
     TemplateParty,
 } from "@/types";
 import { BoardHeader, IssueList, IssueNote, LiveBanner, useIssueJump } from "./board-chrome";
+import { FlowPreviewPanel } from "./flow-preview";
 
 /** A refusal with its place on the ladder board, resolved once against the template that was sent. */
 interface BoardIssue extends FlowIssue {
@@ -297,6 +298,8 @@ export function LadderBoard({ flowKey, template: initial, vocabulary, onSaved }:
                 </div>
             </div>
 
+            {/* FL-2: the board on the left, the phone on the right, following the party and account type in view. */}
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_424px]">
             <div className="grid gap-4 xl:grid-cols-[300px_1fr_320px]">
                 {/* The ladder */}
                 <div className="space-y-2.5" data-issue-anchor="ladder">
@@ -464,6 +467,8 @@ export function LadderBoard({ flowKey, template: initial, vocabulary, onSaved }:
                         </ul>
                     </Card>
                 </div>
+            </div>
+            <FlowPreviewPanel shape="ladder" template={template} party={party} accountType={accountType} />
             </div>
         </div>
     );

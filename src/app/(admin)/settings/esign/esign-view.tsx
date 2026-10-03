@@ -309,7 +309,7 @@ function EsignForm({ policy, onSaved }: { policy: EsignPolicy; onSaved: () => vo
             <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
                     See the requests under{" "}
-                    <Link href="/agreements/signatures" className="text-primary hover:underline">
+                    <Link href="/legal-documents/signatures" className="text-primary hover:underline">
                         Agreements › Signatures
                     </Link>
                     .

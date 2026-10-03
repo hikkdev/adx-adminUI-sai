@@ -19,6 +19,7 @@ import { ApiError } from "@/lib/api-client";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { shortId } from "@/services/finance";
+import { RaiseQuoteRequest } from "./raise-quote-request";
 import {
     QUOTE_REQUEST_STATUS_META,
     canCancelRequest,
@@ -54,8 +55,12 @@ const awaitingAward = (row: PrintQuoteRequestRow): boolean => row.status === "OP
  * of who bid. An awarded request is undone through the job's decline, on
  * the order page.
  *
- * Reading and cancelling are here; awarding is on the order page, where
- * the quotes are ranked and the award opens the job. A row click goes there.
+ * Raising is here too (the owner, 24 September: "there's no way to send
+ * quote request to anyone"). It was only ever on an order's Printing card,
+ * which nothing in this section linked to — so the button asks which order
+ * first and then opens that same dialog. Awarding stays on the order page,
+ * where the quotes are ranked and the award opens the job; a row click goes
+ * there.
  */
 export function QuoteRequestsView({ page, readAt: now, filter, onFilterChange, featureOff, onRefresh }: QuoteRequestsViewProps) {
     const router = useRouter();
@@ -64,6 +69,12 @@ export function QuoteRequestsView({ page, readAt: now, filter, onFilterChange, f
     const [cancelling, setCancelling] = React.useState<PrintQuoteRequestRow | null>(null);
     const [reason, setReason] = React.useState("");
     const [busy, setBusy] = React.useState(false);
+
+    /* The orders already out for quotes, so the picker does not offer one the
+       backend would refuse. It is what this page holds: under the OPEN or ALL
+       chip that is every one of them, and under another chip the picker falls
+       back on the backend's own refusal, which says the same thing. */
+    const openRequestOrderIds = rows.filter((row) => row.status === "OPEN").map((row) => row.orderId);
 
     const awaitingOps = rows.filter(awaitingAward).length;
     const pastDeadline = rows.filter((row) => row.status === "OPEN" && deadlineCountdown(row.deadlineAt, now).passed).length;
@@ -224,6 +235,7 @@ export function QuoteRequestsView({ page, readAt: now, filter, onFilterChange, f
                         <RefreshCw className="mr-1.5 size-4" />
                         Refresh
                     </Button>
+                    <RaiseQuoteRequest openRequestOrderIds={openRequestOrderIds} onRaised={onRefresh} />
                 </div>
             </div>
 
@@ -236,7 +248,14 @@ export function QuoteRequestsView({ page, readAt: now, filter, onFilterChange, f
                     <EmptyState
                         icon={Gavel}
                         title={filter === "OPEN" ? "Nothing is out for quotes" : "No quote request here"}
-                        description="A request goes out from an order's Printing card once the publisher has accepted: the partners in reach quote until the deadline and the lowest is awarded unless ops say why not."
+                        description="A request goes out against one order once the publisher has accepted it: the partners in reach quote until the deadline, and the lowest is awarded unless ops say why not."
+                        action={
+                            <RaiseQuoteRequest
+                                openRequestOrderIds={openRequestOrderIds}
+                                onRaised={onRefresh}
+                                testId="raise-quote-request-empty"
+                            />
+                        }
                     />
                 }
             />

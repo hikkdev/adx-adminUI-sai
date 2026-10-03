@@ -347,7 +347,6 @@ export function RecordAtDeskDialog({
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="desk-liveness-video">Or the liveness video recorded at the desk</Label>
-                                    <p className="text-xs text-muted-foreground">A short clip of the person, uploaded as theirs under USER_KYC and handed in by its file id.</p>
                                     <input
                                         ref={videoRef}
                                         id="desk-liveness-video"
@@ -365,6 +364,10 @@ export function RecordAtDeskDialog({
                                         {uploadingVideo ? "Uploading…" : "Upload the video"}
                                     </Button>
                                 </div>
+                                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                                <p className="-mt-2 text-xs text-muted-foreground md:col-span-2">
+                                    The liveness video is a short clip of the person, uploaded as theirs under USER_KYC and handed in by its file id.
+                                </p>
                             </div>
                         )}
                     </section>

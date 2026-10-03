@@ -26,15 +26,21 @@ import { VerifiedTick } from "@/components/adx/verified-tick";
 import { ScanForSignalsButton } from "@/components/adx/scan-for-signals";
 import { SuspensionActions } from "@/components/adx/suspend-dialog";
 import { SuspensionCard } from "@/components/adx/suspension-card";
+import { CustomFieldsCard } from "@/components/adx/custom-fields-card";
 import { PUBLISHER_READS, ViewAs } from "@/components/adx/view-as-panel";
 import { isLive } from "@/lib/api-config";
 import { formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { WITHDRAWAL_STATUS_META, describeMethod, type Withdrawal } from "@/services/finance";
+import { SignsInAs, personNameOf } from "@/components/adx/app-account";
+import { ID_LABEL } from "@/services/identifiers";
 import { kycService, PUBLISHER_DESK_FACTS, PUBLISHER_KYC_FIELDS, recordedLine, requestLine, requestOf } from "@/services/kyc";
 import { KYC_STATE_META } from "@/services/kyc-state";
 import { LISTING_STATUS_TONE, listingStatusLabel, type AdminListing } from "@/services/listings";
+import { accountTypeLine, entityTypeLabel } from "@/services/kyc-entity-types";
+import { LADDER_ACCOUNT_TYPE, ladderAccountType } from "@/components/adx/flow-renderer";
 import { PUBLISHER_TYPE_LABEL, feedKindLabel, subscriptionLine, type PublisherSummary } from "@/services/publishers";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
+import { accountStateFrom } from "@/services/account-state";
 import { RecordAtDeskDialog } from "@/app/(admin)/kyc/_shared/record-at-desk-dialog";
 import type { SuspensionView } from "@/services/suspension";
 import { onboardingLine } from "@/types";
@@ -86,8 +92,12 @@ export function PublisherDetail({
     const [recording, setRecording] = React.useState(false);
     const [recordingKey, setRecordingKey] = React.useState(0);
     const kycRequest = kycCase?.request ?? requestOf({ requestedAt: publisher.kyc.requestedAt, requestedChannel: publisher.kyc.requestedChannel, submittedAt: publisher.kyc.submittedAt });
-    /* `PublisherType` labelled; a value the picklist grows reads as itself. */
-    const typeLabel = publisher.type ? ((PUBLISHER_TYPE_LABEL as Partial<Record<string, string>>)[publisher.type] ?? publisher.type) : "-";
+    /* DR 08's account type with the entity type beside it when one is known ("Organisation · Government or education"); a legacy value the ladder does not know reads as itself. */
+    const typeLabel = !publisher.type
+        ? "-"
+        : publisher.type in LADDER_ACCOUNT_TYPE.PUBLISHER
+          ? accountTypeLine(ladderAccountType("PUBLISHER", publisher.type), publisher.entityType)
+          : ((PUBLISHER_TYPE_LABEL as Partial<Record<string, string>>)[publisher.type] ?? publisher.type);
     const agent = summary?.publisher.agent ?? null;
     const metrics = summary?.metrics ?? null;
     const unread = "The summary could not be read";
@@ -98,21 +108,35 @@ export function PublisherDetail({
         ["Owner", publisher.contactName ?? publisher.name],
         ["Email", publisher.email ?? publisher.contactEmail ?? "-"],
         ["Phone", publisher.mobile],
+        /* 29 Sep 2026: the person who signs in with that number has one id of
+           their own, beside the account's PUB-… in the header — each named for
+           whose it is. A business's contact person is not that person.
+           2 Oct 2026: named and linked to their account under Users, or the
+           muted "No app account" when nobody signs in for this publisher. */
+        [
+            "Signs in as",
+            <SignsInAs key="signs-in-as" userId={publisher.userId} name={personNameOf(publisher.person)} displayId={publisher.person?.displayId} />,
+        ],
         ["PAN", publisher.pan ?? "-"],
         ["GSTIN", publisher.gstin ?? "-"],
-        ["Business type", typeLabel],
+        ["Account type", typeLabel],
+        /* Phase D: what the publisher verifies as — it picks the Digio workflow; asked at the Digio start while unknown. */
+        ["Entity type", entityTypeLabel(publisher.entityType)],
         [
             "Onboarded by",
             /* P-C: the summary joins the agent — their name is the link, the
-               display id beside it. Without the summary the row's `agentId`
-               still opens the profile, unnamed rather than misnamed. */
+               display id beside it, named as the agent's (29 Sep 2026). Without
+               the summary the row's `agentId` still opens the profile, unnamed
+               rather than misnamed. */
             agent ? (
                 <span className="inline-flex items-center gap-2">
                     <Link href={`/agents/${agent.id}`} className="underline-offset-4 hover:underline">
                         {agent.name}
                     </Link>
                     {agent.displayId && (
-                        <span className="font-mono text-xs font-normal text-muted-foreground">{agent.displayId}</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                            {ID_LABEL.AGENT} <span className="font-mono">{agent.displayId}</span>
+                        </span>
                     )}
                 </span>
             ) : publisher.agentId ? (
@@ -237,7 +261,7 @@ export function PublisherDetail({
         /* Lot A: the closure state of the account behind the profile — the
            banner above the header and the item in the menu share one read. A
            null `userId` (the owner has not signed in yet) offers nothing. */
-        <AccountClosure userId={publisher.userId} name={publisher.name} closed={publisher.user ?? null} onChanged={onChanged}>
+        <AccountClosure userId={publisher.userId} name={publisher.name} closed={publisher.user ?? null} onChanged={onChanged} directoryHref="/publishers/directory">
         {(closure) => (
         <div className="space-y-5">
             <div>
@@ -248,15 +272,16 @@ export function PublisherDetail({
                     <ChevronLeft className="size-4" />
                     Publishers
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div>
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
                             {publisher.name}
                             <VerifiedTick kycStatus={publisher.kycStatus} size={18} />
                         </h1>
+                        {/* The account's own id, named by its kind — the person behind it has their own ADX ID on the Identity card. */}
                         {publisher.displayId && (
-                            <p className="mt-1 font-mono text-xs tracking-wide text-muted-foreground">
-                                {publisher.displayId}
+                            <p className="mt-1 text-xs text-muted-foreground" data-testid="account-id">
+                                {ID_LABEL.PUBLISHER} <span className="font-mono tracking-wide">{publisher.displayId}</span>
                             </p>
                         )}
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -274,7 +299,7 @@ export function PublisherDetail({
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                         {/* QR-13: the desk edits everything the app's onboarding collects. */}
                         <EditPublisherDrawer publisher={publisher} onChanged={onChanged} />
                         {/* Package U: the publisher's listings or rate card, imported
@@ -317,16 +342,20 @@ export function PublisherDetail({
                                                 No sign-in account yet — nothing to view as.
                                             </p>
                                         )}
+                                        {(closure.requestClose || closure.requestDelete) && <DropdownMenuSeparator />}
                                         {closure.requestClose && (
-                                            <>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem
-                                                    className="text-danger focus:text-danger"
-                                                    onSelect={closure.requestClose}
-                                                >
-                                                    Close account
-                                                </DropdownMenuItem>
-                                            </>
+                                            <DropdownMenuItem
+                                                className="text-danger focus:text-danger"
+                                                onSelect={closure.requestClose}
+                                            >
+                                                Close account
+                                            </DropdownMenuItem>
+                                        )}
+                                        {/* 2 Oct 2026: only for an account with no history — the server says which. */}
+                                        {closure.requestDelete && (
+                                            <DropdownMenuItem className="text-danger focus:text-danger" onSelect={closure.requestDelete}>
+                                                Delete account
+                                            </DropdownMenuItem>
                                         )}
                                     </DropdownMenuContent>
                                 </DropdownMenu>
@@ -338,6 +367,7 @@ export function PublisherDetail({
                         <SuspensionActions
                             partyType="PUBLISHER"
                             partyId={publisher.id}
+                            closed={Boolean(closure.closed?.closedAt)}
                             partyName={publisher.name}
                             current={scopes}
                             /* E6: the read counts the non-terminal orders across the
@@ -361,6 +391,9 @@ export function PublisherDetail({
             </div>
 
             <SuspensionCard view={suspension} />
+
+            {/* CF-1 (27 Sep 2026): the extra questions Settings › Custom fields asks of a publisher; draws nothing when there are none. */}
+            <CustomFieldsCard entity="PUBLISHER" entityId={publisher.id} />
 
             {/* Lot J-C: the plan whose rate the bookings carry, with the
                 desk's Grant and End for this publisher. */}
@@ -433,13 +466,15 @@ export function PublisherDetail({
                                         contact={publisher.mobile}
                                         request={kycRequest}
                                         caseHref={kycCase || publisher.kyc.kycId ? `/kyc/${publisher.id}` : null}
-                                        onDigio={() => kycService.requestDigio(publisher.id)}
-                                        onRequest={(channel, note) => kycService.request(publisher.id, channel, note)}
+                                        onDigio={(entityType) => kycService.requestDigio(publisher.id, entityType)}
+                                        onRequest={(channel, note, entityType) => kycService.request(publisher.id, channel, note, entityType)}
                                         onRecord={() => {
                                             setRecordingKey((value) => value + 1);
                                             setRecording(true);
                                         }}
                                         onChanged={onChanged}
+                                        accountState={accountStateFrom({ closedAt: publisher.user?.closedAt, scopes })}
+                                        suspensionScopes={scopes}
                                     />
                                     <RecordAtDeskDialog
                                         key={recordingKey}

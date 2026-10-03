@@ -39,7 +39,7 @@ const row = (over: Partial<AuditRow> = {}): AuditRow => ({
     metadata: null,
     diff: null,
     createdAt: "2026-09-12T10:00:00.000Z",
-    user: { id: "cl_user_1", name: "Priya Rao", email: "priya@adx.co.in" },
+    user: { id: "cl_user_1", name: "Priya Rao", email: "priya@adx.in" },
     ...over,
 });
 
@@ -69,7 +69,7 @@ describe("buildExportQuery", () => {
 describe("how the page reads a row", () => {
     it("names the actor by name, then email, then id", () => {
         expect(actorName(row())).toBe("Priya Rao");
-        expect(actorName(row({ user: { id: "u", name: "  ", email: "ops@adx.co.in" } }))).toBe("ops@adx.co.in");
+        expect(actorName(row({ user: { id: "u", name: "  ", email: "ops@adx.in" } }))).toBe("ops@adx.in");
         expect(actorName(row({ user: null }))).toBe("cl_user_1");
     });
 

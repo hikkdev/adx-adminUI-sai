@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Print partners" };
  * owner: out of Settings, into the main navigation). Package O-C: the
  * section's landing tab is the overview over
  * `GET /section-overviews/print-partners`; the roster is at
- * `/print-partners/roster` and the quote requests beside it. Suspense
+ * `/print-partners/directory` and the quote requests beside it. Suspense
  * because the loader keeps the window in the URL.
  */
 export default function PrintPartnersPage() {

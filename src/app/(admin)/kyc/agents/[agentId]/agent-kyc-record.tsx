@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { ONLINE_PROVIDER_LABEL, PROVIDER_FAILED_META, isProviderFailed } from "@/services/verification";
+import { KycCaseHeader } from "../../_shared/case-header";
+import { ResendOnBackupButton } from "../../_shared/resend-on-backup";
+import { VerificationChecksPanel, backupStateOf, useCaseAttempts } from "../../_shared/verification-checks-panel";
 import {
     AGENT_KYC_SLOTS,
     AGENT_KYC_STATUS_META,
@@ -20,6 +23,7 @@ import {
     type AgentKycDocuments,
     type AgentKycSlot,
 } from "@/services/agent-kyc";
+import { idLine } from "@/services/identifiers";
 import type { Agent } from "@/types";
 import { DocumentSlot } from "./document-slot";
 
@@ -59,6 +63,13 @@ export function AgentKycRecord({ agent, kyc, live, onChanged }: AgentKycRecordPr
     const [reason, setReason] = React.useState("");
     const [confirmAction, setConfirmAction] = React.useState<"verify" | "reject" | null>(null);
     const [deciding, setDeciding] = React.useState(false);
+    /* Cashfree Phase 2: every provider call for this case and whether the backup can be sent. */
+    const checks = useCaseAttempts("AGENT_KYC", agent.id);
+    const backup = backupStateOf("AGENT_KYC", agent.id, checks.data);
+    const afterBackup = () => {
+        checks.reload();
+        onChanged();
+    };
 
     const set = <K extends keyof AgentKycDocuments>(key: K, value: AgentKycDocuments[K]) =>
         setForm((current) => ({ ...current, [key]: value }));
@@ -104,47 +115,52 @@ export function AgentKycRecord({ agent, kyc, live, onChanged }: AgentKycRecordPr
 
     return (
         <div className="space-y-5">
-            <div>
-                <Link
-                    href="/kyc/agents"
-                    className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                    <ChevronLeft className="size-4" />
-                    Agent KYC
-                </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Agent KYC record</p>
-                        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{name}</h1>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {[agent.displayId, agent.city, agent.mobile].filter(Boolean).join(" · ")}
-                            {" · "}
-                            <Link href={`/agents/${agent.id}`} className="underline-offset-4 hover:underline">
-                                Open the agent
-                            </Link>
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {kyc ? (
-                            <>
-                                <StatusBadge status={AGENT_KYC_STATUS_META[kyc.status]} />
-                                {/* E7-3: hours waiting while PENDING, against the SLA the read named. */}
-                                {kyc.ageHours !== null && (
-                                    <StatusBadge
-                                        status={
-                                            kyc.slaBreached
-                                                ? { label: `Waiting ${Math.floor(kyc.ageHours)}h · past SLA`, tone: "danger" }
-                                                : { label: `Waiting ${Math.floor(kyc.ageHours)}h${kyc.slaHours ? ` of ${kyc.slaHours}h` : ""}`, tone: "neutral" }
-                                        }
-                                    />
-                                )}
-                            </>
-                        ) : (
-                            <StatusBadge status={{ label: "Nothing recorded yet", tone: "neutral" }} />
-                        )}
-                    </div>
-                </div>
-            </div>
+            <KycCaseHeader
+                backHref="/kyc/agents"
+                backLabel="Agent KYC"
+                eyebrow="KYC review · agent"
+                title={name}
+                badges={
+                    kyc ? (
+                        <>
+                            <StatusBadge status={AGENT_KYC_STATUS_META[kyc.status]} />
+                            {/* Cashfree Phase 2: the online provider on the record — and never the raw PROVIDER_FAILED. */}
+                            {isProviderFailed(kyc.digioStatus) ? (
+                                <span data-testid="kyc-provider-failed">
+                                    <StatusBadge status={PROVIDER_FAILED_META} />
+                                </span>
+                            ) : kyc.provider ? (
+                                <StatusBadge status={{ label: ONLINE_PROVIDER_LABEL[kyc.provider], tone: "info" }} />
+                            ) : null}
+                            {/* E7-3: hours waiting while PENDING, against the SLA the read named. */}
+                            {kyc.ageHours !== null && (
+                                <StatusBadge
+                                    status={
+                                        kyc.slaBreached
+                                            ? { label: `Waiting ${Math.floor(kyc.ageHours)}h · past SLA`, tone: "danger" }
+                                            : { label: `Waiting ${Math.floor(kyc.ageHours)}h${kyc.slaHours ? ` of ${kyc.slaHours}h` : ""}`, tone: "neutral" }
+                                    }
+                                />
+                            )}
+                        </>
+                    ) : (
+                        <StatusBadge status={{ label: "Nothing recorded yet", tone: "neutral" }} />
+                    )
+                }
+                actions={
+                    <>
+                        <Link href={`/agents/${agent.id}`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
+                            Open the agent
+                        </Link>
+                        {kyc && isProviderFailed(kyc.digioStatus) && <ResendOnBackupButton backup={backup} onSent={afterBackup} />}
+                    </>
+                }
+            >
+                <p className="mt-1 text-sm text-muted-foreground">
+                    {/* 29 Sep 2026: the profile's id under the agent's name, named as the agent's. */}
+                    {[idLine("AGENT", agent.displayId), agent.city, agent.mobile].filter(Boolean).join(" · ")}
+                </p>
+            </KycCaseHeader>
 
             {!live && (
                 <Card className="rounded-lg border-border p-5 shadow-none">
@@ -304,6 +320,8 @@ export function AgentKycRecord({ agent, kyc, live, onChanged }: AgentKycRecordPr
                             </Button>
                         </div>
                     </Card>
+
+                    <VerificationChecksPanel caseType="AGENT_KYC" caseId={agent.id} resource={checks} />
 
                     <Card className="rounded-lg border-border p-5 shadow-none">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why the desk</h3>

@@ -12,6 +12,8 @@ interface SimpleTableProps<T> {
     columns: SimpleColumn<T>[];
     rows: T[];
     rowKey: (row: T) => string;
+    /** An `id` for the row, so a link can land on it (`#WEB_LISTING_SIDEBAR`); the row lights while it is the page's target, or once a page marks it `data-target="true"` (rows drawn after the page loaded never match `:target`). */
+    rowId?: (row: T) => string | undefined;
     emptyMessage?: string;
     className?: string;
 }
@@ -21,6 +23,7 @@ export function SimpleTable<T>({
     columns,
     rows,
     rowKey,
+    rowId,
     emptyMessage = "Nothing here yet.",
     className,
 }: SimpleTableProps<T>) {
@@ -42,7 +45,7 @@ export function SimpleTable<T>({
                     </thead>
                     <tbody>
                         {rows.map((row) => (
-                            <tr key={rowKey(row)} className="border-b last:border-0">
+                            <tr key={rowKey(row)} id={rowId?.(row)} className={cn("border-b last:border-0", rowId && "scroll-mt-24 target:bg-muted/60 data-[target=true]:bg-muted/60")}>
                                 {columns.map((column) => (
                                     <td key={column.key} className={cn("px-4 py-3", column.className)}>
                                         {column.render(row)}

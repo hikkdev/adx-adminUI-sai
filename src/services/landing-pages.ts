@@ -1,6 +1,7 @@
 import { api as http } from "@/lib/api-client";
 import { apiConfig, isLive } from "@/lib/api-config";
 import type { CampaignStatus } from "@/services/campaigns";
+import type { OrderPlacedBy } from "@/types";
 
 /**
  * Landing pages — Lot E (Q7/Q106), wired.
@@ -67,6 +68,42 @@ export interface LandingPageRow {
         advertiserId: string;
         advertiser: { id: string; name: string; companyName: string | null };
     } | null;
+    /*
+     * 2 Oct 2026 — the admin list's added columns, each optional so the
+     * table draws before the backend sends them.
+     */
+    /** The advertiser in the orders' `placedBy` shape — business + ADV-…, person + ADX-…. */
+    advertiser?: OrderPlacedBy | null;
+    /** The hero block's headline, read on the server so the list need not carry the blocks. */
+    heroTitle?: string | null;
+    /** Lifetime counts off the page's tracking events. */
+    views?: number | null;
+    ctaClicks?: number | null;
+    enquiries?: number | null;
+}
+
+/** The page's title: the server's hero title, else the hero block's headline, else the slug. */
+export function landingTitle(row: Pick<LandingPageRow, "heroTitle" | "blocks" | "slug">): string {
+    if (row.heroTitle?.trim()) return row.heroTitle.trim();
+    const hero = (row.blocks ?? []).find((block): block is Extract<LandingBlock, { type: "hero" }> => block.type === "hero");
+    return hero?.headline?.trim() || `/p/${row.slug}`;
+}
+
+/**
+ * The advertiser in the shared party shape — the row's own `advertiser`
+ * when the server sends it, else the narrow join the list has always
+ * carried (business name only, no person, no ids beyond the profile's).
+ */
+export function landingAdvertiser(row: Pick<LandingPageRow, "advertiser" | "campaign">): OrderPlacedBy | null {
+    if (row.advertiser !== undefined) return row.advertiser;
+    const joined = row.campaign?.advertiser;
+    if (!joined) return null;
+    return {
+        userId: "",
+        name: joined.name,
+        displayId: null,
+        business: { id: joined.id, name: joined.companyName ?? joined.name, displayId: null },
+    };
 }
 
 export interface LandingPagesPage {
@@ -77,10 +114,11 @@ export interface LandingPagesPage {
     counts: Partial<Record<LandingPageStatus, number>>;
 }
 
-/** The query string the list takes, with nothing sent that was not asked for. */
-export function landingPagesPath(query: { status?: LandingPageStatus; page?: number; pageSize?: number } = {}): string {
+/** The query string the list takes, with nothing sent that was not asked for. `q` (2 Oct 2026) matches the campaign, the advertiser and the slug. */
+export function landingPagesPath(query: { status?: LandingPageStatus; q?: string; page?: number; pageSize?: number } = {}): string {
     const params = new URLSearchParams();
     if (query.status) params.set("status", query.status);
+    if (query.q?.trim()) params.set("q", query.q.trim());
     if (query.page && query.page > 1) params.set("page", String(query.page));
     params.set("pageSize", String(query.pageSize ?? 50));
     return `/campaigns/landing-pages?${params.toString()}`;
@@ -124,4 +162,22 @@ export const landingPageService = {
      */
     unpublish: (campaignId: string, reason: string): Promise<LandingPageRow> =>
         live().post<LandingPageRow>(`/campaigns/${encodeURIComponent(campaignId)}/landing-page/unpublish`, { reason: reason.trim() }),
+
+    /** One campaign's page with its blocks — the campaign page's Landing page card. 404 when the campaign has none. */
+    get: (campaignId: string): Promise<LandingPageDetail> => live().get<LandingPageDetail>(`/campaigns/${encodeURIComponent(campaignId)}/landing-page`),
 };
+
+/** `GET /campaigns/:id/landing-page` — the row with its blocks and its public `url`. */
+export interface LandingPageDetail {
+    id: string;
+    campaignId: string;
+    slug: string;
+    blocks: LandingBlock[];
+    theme: LandingTheme | null;
+    version: number;
+    status: LandingPageStatus;
+    generatedByAi: boolean;
+    publishedAt: string | null;
+    updatedAt: string;
+    url?: string;
+}

@@ -286,8 +286,10 @@ function ScoringForm({ policy, onSaved }: { policy: LeadScoringPolicy; onSaved: 
                     <NumberField id="ls-default" label="Unlisted category" value={draft.defaultCategory} invalid={bad(draft.defaultCategory, "leads.scoring.fit.points")} onChange={(v) => set("defaultCategory", v)} />
                     <NumberField id="ls-key" label="Key account +" value={draft.keyBonus} invalid={bad(draft.keyBonus, "leads.scoring.fit.points")} onChange={(v) => set("keyBonus", v)} />
                     <NumberField id="ls-enterprise" label="Enterprise +" value={draft.enterpriseBonus} invalid={bad(draft.enterpriseBonus, "leads.scoring.fit.points")} onChange={(v) => set("enterpriseBonus", v)} />
-                    <NumberField id="ls-locality" label="Locality +" hint="Thin supply for a publisher lead, rich for an advertiser" value={draft.localityBonus} invalid={bad(draft.localityBonus, "leads.scoring.fit.points")} onChange={(v) => set("localityBonus", v)} />
+                    <NumberField id="ls-locality" label="Locality +" value={draft.localityBonus} invalid={bad(draft.localityBonus, "leads.scoring.fit.points")} onChange={(v) => set("localityBonus", v)} />
                     <NumberField id="ls-radius" label="Locality radius (m)" value={draft.localityRadiusM} invalid={bad(draft.localityRadiusM, "leads.scoring.fit.localityRadiusM")} onChange={(v) => set("localityRadiusM", v)} />
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2 lg:col-span-5">The locality bonus is for thin supply on a publisher lead, rich supply on an advertiser lead.</p>
                 </div>
                 <div className="mt-5 grid gap-6 lg:grid-cols-2">
                     {categoryEditor("publisherCategories", "Publisher leads")}

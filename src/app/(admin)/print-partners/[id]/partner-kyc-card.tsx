@@ -8,12 +8,15 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { isLive } from "@/lib/api-config";
 import { formatDateTime } from "@/lib/format";
 import { useApiResource } from "@/lib/use-api-resource";
+import { accountStateFrom } from "@/services/account-state";
 import { recordedLine, requestLine, requestOf } from "@/services/kyc";
+import { entityTypeLabel } from "@/services/kyc-entity-types";
 import { KYC_STATE_META, shapeKycSummary } from "@/services/kyc-state";
 import { PARTNER_DESK_FACTS, printPartnerKycService, PRINT_PARTNER_KYC_FIELDS, type PrintPartnerKycCase } from "@/services/print-partner-kyc";
 import type { PrintPartner } from "@/services/print-partners";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
 import { RecordAtDeskDialog } from "@/app/(admin)/kyc/_shared/record-at-desk-dialog";
+import { methodWord, onlineWordOf } from "@/services/verification";
 
 interface PartnerKycCardProps {
     partner: PrintPartner;
@@ -33,6 +36,8 @@ interface PartnerKycCardProps {
  * ask, Record at the desk, Open the case. When
  * `kyc.printPartnerActivationRequiresKyc` is on, activation is refused
  * until the record is VERIFIED, and that refusal is explained on this card.
+ * Phase D: the shop's entity type heads the facts — "Not chosen yet" until
+ * the desk sets it under Edit, or the picker asks at the Digio start.
  */
 export function PartnerKycCard({ partner, activationRefusal, onChanged }: PartnerKycCardProps) {
     const router = useRouter();
@@ -71,7 +76,9 @@ export function PartnerKycCard({ partner, activationRefusal, onChanged }: Partne
             <FieldList
                 className="mt-4"
                 items={[
-                    ["Method", kycCase ? (kycCase.method === "DIGIO" ? "Digio" : "Documents") : partner.kyc ? (partner.kyc.method === "DIGIO" ? "Digio" : "Documents") : "—"],
+                    /* Phase D: what the shop verifies as — it picks the Digio workflow; asked at the Digio start while unknown. */
+                    ["Entity type", entityTypeLabel(partner.entityType)],
+                    ["Method", kycCase ? (onlineWordOf(kycCase.digio) ?? "Documents") : partner.kyc ? (methodWord(partner.kyc.method, null) ?? "Documents") : "—"],
                     [
                         "Submitted",
                         kycCase?.submittedAt ? formatDateTime(kycCase.submittedAt) : partner.kyc?.submittedAt ? formatDateTime(partner.kyc.submittedAt) : "Nothing yet",
@@ -99,12 +106,12 @@ export function PartnerKycCard({ partner, activationRefusal, onChanged }: Partne
                         contact={partner.mobile}
                         request={request}
                         caseHref={caseId ? `/kyc/print-partners/${caseId}` : null}
-                        onDigio={async () => {
-                            const result = await printPartnerKycService.requestDigio(caseId ?? partner.id);
+                        onDigio={async (entityType) => {
+                            const result = await printPartnerKycService.requestDigio(caseId ?? partner.id, entityType);
                             return { digio: result.digio, notified: true };
                         }}
-                        onRequest={async (channel, note) => {
-                            const result = await printPartnerKycService.request(caseId ?? partner.id, channel, note);
+                        onRequest={async (channel, note, entityType) => {
+                            const result = await printPartnerKycService.request(caseId ?? partner.id, channel, note, entityType);
                             return { digio: result.digio, notified: true };
                         }}
                         onRecord={() => {
@@ -112,6 +119,8 @@ export function PartnerKycCard({ partner, activationRefusal, onChanged }: Partne
                             setRecording(true);
                         }}
                         onChanged={reload}
+                        accountState={accountStateFrom({ active: partner.isActive })}
+                        deactivationBlocksNew={false}
                     />
                     <RecordAtDeskDialog
                         key={recordingKey}

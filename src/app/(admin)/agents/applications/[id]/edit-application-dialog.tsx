@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CityCombobox } from "@/components/adx/city-combobox";
+import { ADDRESS_LINE_PLACEHOLDER, AddressFinder, PIN_CODE, PIN_CODE_PLACEHOLDER, placeFill } from "@/components/adx/pin-picker";
 import { ApiError } from "@/lib/api-client";
 import {
     AGENT_EDUCATION_LEVELS,
@@ -52,6 +54,10 @@ interface Draft {
     vehicleType: AgentVehicleType | "";
     vehicleNumber: string;
     currentAddress: string;
+    currentPostalCode: string;
+    /** Where they live, pinned — never shown: set by the address bar's pick, kept as the record had it otherwise. */
+    currentLatitude: number | null;
+    currentLongitude: number | null;
     permanentAddress: string;
     emergencyContactName: string;
     emergencyContactRelation: string;
@@ -83,6 +89,9 @@ export function draftOf(view: ApplicationView): Draft {
         vehicleType: p.vehicleType ?? "",
         vehicleNumber: p.vehicleNumber ?? "",
         currentAddress: p.currentAddress ?? "",
+        currentPostalCode: p.currentPostalCode ?? "",
+        currentLatitude: p.currentLatitude ?? null,
+        currentLongitude: p.currentLongitude ?? null,
         permanentAddress: p.permanentAddress ?? "",
         emergencyContactName: p.emergencyContactName ?? "",
         emergencyContactRelation: p.emergencyContactRelation ?? "",
@@ -105,6 +114,8 @@ export function draftOf(view: ApplicationView): Draft {
  */
 export function patchOf(d: Draft, side: ApplicationView["agent"]["side"]): ApplicationProfilePatch {
     const nullable = (value: string) => (value.trim() ? value.trim() : null);
+    /* The pin goes whole or not at all — never half a pair. */
+    const pinned = d.currentLatitude !== null && d.currentLongitude !== null;
     const common: ApplicationProfilePatch = {
         ...(text(d.name) ? { name: text(d.name) } : {}),
         ...(d.dateOfBirth ? { dateOfBirth: d.dateOfBirth } : {}),
@@ -115,6 +126,9 @@ export function patchOf(d: Draft, side: ApplicationView["agent"]["side"]): Appli
         vehicleType: d.vehicleType || null,
         vehicleNumber: nullable(d.vehicleNumber),
         currentAddress: nullable(d.currentAddress),
+        currentPostalCode: nullable(d.currentPostalCode),
+        currentLatitude: pinned ? d.currentLatitude : null,
+        currentLongitude: pinned ? d.currentLongitude : null,
         permanentAddress: nullable(d.permanentAddress),
         emergencyContactName: nullable(d.emergencyContactName),
         emergencyContactRelation: nullable(d.emergencyContactRelation),
@@ -175,12 +189,15 @@ function EditApplicationForm({ view, onCancel, onSaved }: { view: ApplicationVie
     const [errors, setErrors] = React.useState<Record<string, string[]>>({});
     const [formError, setFormError] = React.useState<string | null>(null);
     const publisher = view.agent.side === "PUBLISHER";
+    /* The backend's PIN rule, said before the save rather than after it. */
+    const pinProblem = d.currentPostalCode.trim() !== "" && !PIN_CODE.test(d.currentPostalCode.trim()) ? "Six digits, not starting with 0." : null;
 
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setD((cur) => ({ ...cur, [key]: value }));
     const field = (key: keyof Draft) => (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value as never);
 
     const save = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (pinProblem) return;
         setBusy(true);
         setErrors({});
         setFormError(null);
@@ -240,17 +257,46 @@ function EditApplicationForm({ view, onCancel, onSaved }: { view: ApplicationVie
 
                     <Section title="Where they are">
                         <div className="grid gap-4 sm:grid-cols-2">
+                            {/* The one address bar, no map: a pick fills the current address, the city, the state and the PIN, and keeps the pin silently for the save. */}
+                            <AddressFinder
+                                id="ap-current-find"
+                                className="sm:col-span-2"
+                                near={d.currentLatitude !== null && d.currentLongitude !== null ? { latitude: d.currentLatitude, longitude: d.currentLongitude } : null}
+                                onPlace={(place) =>
+                                    setD((cur) => {
+                                        const next = placeFill(place, { address: cur.currentAddress, city: cur.city, state: cur.state, postalCode: cur.currentPostalCode });
+                                        return { ...cur, currentAddress: next.address, city: next.city, state: next.state, currentPostalCode: next.postalCode, currentLatitude: next.latitude, currentLongitude: next.longitude };
+                                    })
+                                }
+                            />
+                            <Field id="ap-current" label="Current address" errors={errors.currentAddress} className="sm:col-span-2">
+                                <Input id="ap-current" value={d.currentAddress} onChange={field("currentAddress")} placeholder={ADDRESS_LINE_PLACEHOLDER} autoComplete="off" />
+                            </Field>
                             <Field id="ap-city" label="City" errors={errors.city}>
                                 <CityCombobox id="ap-city" value={d.city} onChange={(city, picked) => setD((cur) => ({ ...cur, city, state: picked ? (picked.geoState?.name ?? picked.state ?? cur.state) : cur.state }))} stages={["LAUNCHED", "SEEDING"]} placeholder="Bengaluru" />
                             </Field>
                             <Field id="ap-state" label="State" errors={errors.state}>
-                                <Input id="ap-state" value={d.state} onChange={field("state")} autoComplete="off" />
+                                <Input id="ap-state" value={d.state} onChange={field("state")} placeholder="Maharashtra" autoComplete="off" />
                             </Field>
-                            <Field id="ap-current" label="Current address" errors={errors.currentAddress}>
-                                <Input id="ap-current" value={d.currentAddress} onChange={field("currentAddress")} autoComplete="off" />
+                            <Field id="ap-pin" label="PIN code" errors={errors.currentPostalCode ?? (pinProblem ? [pinProblem] : undefined)}>
+                                <Input
+                                    id="ap-pin"
+                                    value={d.currentPostalCode}
+                                    onChange={field("currentPostalCode")}
+                                    placeholder={PIN_CODE_PLACEHOLDER}
+                                    inputMode="numeric"
+                                    maxLength={6}
+                                    autoComplete="off"
+                                    className="tabular-nums"
+                                    aria-invalid={pinProblem ? true : undefined}
+                                />
                             </Field>
+                            {/* The PIN code sits alone on its row, left — the next field is another address. */}
+                            <div className="hidden sm:block" aria-hidden />
+                            {/* The same "Find the address" bar, without a map: the permanent address is a line on the record, not a place anyone travels to — no pin, and the city and state above stay the current ones. */}
+                            <AddressFinder id="ap-permanent-find" className="sm:col-span-2" label="Find the permanent address" onPlace={(place) => set("permanentAddress", place.formattedAddress || d.permanentAddress)} />
                             <Field id="ap-permanent" label="Permanent address" errors={errors.permanentAddress}>
-                                <Input id="ap-permanent" value={d.permanentAddress} onChange={field("permanentAddress")} autoComplete="off" />
+                                <Input id="ap-permanent" value={d.permanentAddress} onChange={field("permanentAddress")} placeholder={ADDRESS_LINE_PLACEHOLDER} autoComplete="off" />
                             </Field>
                             <Field id="ap-languages" label="Languages" errors={errors.languages}>
                                 <Input id="ap-languages" value={d.languages} onChange={field("languages")} placeholder="Kannada, Hindi, English" autoComplete="off" />
@@ -456,7 +502,7 @@ function EditApplicationForm({ view, onCancel, onSaved }: { view: ApplicationVie
                         <Button type="button" variant="outline" className="bg-card" onClick={onCancel} disabled={busy}>
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={busy}>
+                        <Button type="submit" disabled={busy || pinProblem !== null}>
                             {busy ? "Saving…" : "Save details"}
                         </Button>
                     </DialogFooter>
@@ -493,10 +539,10 @@ function RemoveRow({ onClick }: { onClick: () => void }) {
     );
 }
 
-function Field({ id, label, hint, errors, children }: { id: string; label: string; hint?: string; errors?: string[]; children: React.ReactNode }) {
+function Field({ id, label, hint, errors, className, children }: { id: string; label: string; hint?: string; errors?: string[]; className?: string; children: React.ReactNode }) {
     const error = errors?.[0];
     return (
-        <div className="grid content-start gap-1.5">
+        <div className={cn("grid content-start gap-1.5", className)}>
             <Label htmlFor={id}>{label}</Label>
             {children}
             {error ? <p className="text-xs text-danger">{error}</p> : hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}

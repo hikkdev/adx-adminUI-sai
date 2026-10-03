@@ -273,7 +273,7 @@ function WaitingCard({
                     href="/listings/verification"
                     className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
-                    Verification queue <ArrowRight className="size-3" />
+                    Spot re-checks <ArrowRight className="size-3" />
                 </Link>
             )}
         </Card>

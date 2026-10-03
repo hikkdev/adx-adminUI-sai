@@ -96,7 +96,7 @@ export default function LoginPage() {
             <h1 className="mt-8 text-xl font-semibold tracking-tight text-foreground">
                 {`Sign in to ${consoleTitle}`}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">Use your @adx.co work email</p>
+            <p className="mt-1 text-sm text-muted-foreground">Use your @adx.in work email</p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
                 <div className="space-y-1.5">
@@ -109,7 +109,7 @@ export default function LoginPage() {
                             value={email}
                             onChange={(event) => setEmail(event.target.value)}
                             required
-                            placeholder="name@adx.co"
+                            placeholder="name@adx.in"
                             className="h-11 pl-9"
                             autoComplete="email"
                         />

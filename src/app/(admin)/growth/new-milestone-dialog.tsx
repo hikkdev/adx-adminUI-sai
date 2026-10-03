@@ -158,9 +158,11 @@ function MilestoneForm({
                         </SelectContent>
                     </Select>
                 </Field>
-                <Field id="ms-order" label="Order" hint="Where it sits on the board; lower first." error={errorFor("sortOrder")}>
+                <Field id="ms-order" label="Order" error={errorFor("sortOrder")}>
                     <Input id="ms-order" type="number" min={0} inputMode="numeric" value={values.sortOrder} onChange={set("sortOrder")} />
                 </Field>
+                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">The order is where it sits on the board; lower first.</p>
             </div>
 
             <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">

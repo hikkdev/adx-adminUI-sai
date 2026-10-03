@@ -18,6 +18,18 @@ export interface PageParams {
 }
 
 /* ------------------------------------------------------------------ */
+/* The account lifecycle — 2 Oct 2026                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where an account stands, the same words for every party — the server's
+ * `accountState` on each queue and roster row (`@/services/account-state`
+ * holds the labels and the rules). EXITED is an agent who left ADX.
+ */
+export const ACCOUNT_STATES = ["ACTIVE", "SUSPENDED", "DEACTIVATED", "CLOSED", "EXITED"] as const;
+export type AccountState = (typeof ACCOUNT_STATES)[number];
+
+/* ------------------------------------------------------------------ */
 /* Suspension — Lot A                                                  */
 /* ------------------------------------------------------------------ */
 

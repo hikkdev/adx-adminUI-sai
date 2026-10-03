@@ -65,6 +65,9 @@ describe("shapePublisherDetail", () => {
             person: null,
             // QR-14: no stamp on a fresh desk row from an older server.
             onboarding: null,
+            // Phase D: no entity type from a server older than the column — asked at the Digio start.
+            entityType: null,
+            entityTypeStored: false,
             // N3-B: a row with nothing submitted is awaiting documents — derived from the mirror when the read predates `state`.
             kyc: { state: "AWAITING_DOCUMENTS", kycId: null, submittedAt: null, requestedAt: null, requestedChannel: null, method: null },
         });
@@ -112,6 +115,26 @@ describe("shapePublisherDetail", () => {
     it("tolerates a row older than the optional columns", () => {
         const { kyc: _kyc, listings: _listings, user: _user, openOrders: _open, ...bare } = fresh;
         expect(shapePublisherDetail(bare)).toMatchObject({ pan: null, sites: 0, user: null, openOrders: 0 });
+    });
+});
+
+describe("the entity type (Phase D)", () => {
+    it("carries the effective entity type and whether it is stored, on the detail row and the roster row alike", () => {
+        const stored = { ...fresh, type: "BUSINESS", entityType: "COMPANY" as const, entityTypeStored: true };
+        expect(shapePublisherDetail(stored)).toMatchObject({ entityType: "COMPANY", entityTypeStored: true });
+        expect(shapePublisher(stored)).toMatchObject({ entityType: "COMPANY", entityTypeStored: true });
+        // Derived from the legacy type: effective, not stored.
+        const derived = { ...fresh, entityType: "INDIVIDUAL" as const, entityTypeStored: false };
+        expect(shapePublisherDetail(derived)).toMatchObject({ entityType: "INDIVIDUAL", entityTypeStored: false });
+        expect(shapePublisher(derived)).toMatchObject({ entityType: "INDIVIDUAL", entityTypeStored: false });
+    });
+
+    it("is null and not stored while the server knows none — a business whose form nobody has said", () => {
+        const unknown = { ...fresh, type: "BUSINESS", entityType: null, entityTypeStored: false };
+        expect(shapePublisherDetail(unknown)).toMatchObject({ entityType: null, entityTypeStored: false });
+        expect(shapePublisher(unknown)).toMatchObject({ entityType: null, entityTypeStored: false });
+        // A server older than the column sends neither field.
+        expect(shapePublisher(fresh)).toMatchObject({ entityType: null, entityTypeStored: false });
     });
 });
 

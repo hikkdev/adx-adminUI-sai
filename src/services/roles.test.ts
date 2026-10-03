@@ -63,10 +63,12 @@ import { ApiError } from "@/lib/api-client";
 import {
     capabilitiesOf,
     countHeld,
+    entryLabel,
     rolesService,
     tierOf,
     tiersOf,
     toggled,
+    withEntryToggled,
     withTier,
     type PermissionGroup,
 } from "./roles";
@@ -98,6 +100,23 @@ const dpo: PermissionGroup = {
     id: "dpo",
     label: "Data protection",
     permissions: [{ id: "dpo.erasure", label: "Erase a person", kind: "capability" }],
+};
+
+const kyc: PermissionGroup = {
+    id: "kyc",
+    label: "KYC",
+    permissions: [
+        { id: "kyc.view", label: "View", kind: "view" },
+        { id: "kyc.edit", label: "Edit", kind: "edit" },
+        { id: "kyc.approve", label: "Approve", kind: "approve" },
+    ],
+};
+
+/** Flows has an edit tier and nothing beneath it. */
+const flows: PermissionGroup = {
+    id: "flows",
+    label: "Flows",
+    permissions: [{ id: "flows.edit", label: "Edit", kind: "edit" }],
 };
 
 describe("the matrix", () => {
@@ -147,6 +166,37 @@ describe("the matrix", () => {
     it("toggles a named capability without touching anything else", () => {
         expect(toggled(["finance.view"], "system.roles")).toEqual(["finance.view", "system.roles"]);
         expect(toggled(["finance.view", "system.roles"], "system.roles")).toEqual(["finance.view"]);
+    });
+
+    it("names a tier after its group and leaves a named capability as it is", () => {
+        expect(entryLabel(finance, finance.permissions[0])).toBe("View finance");
+        expect(entryLabel(finance, finance.permissions[2])).toBe("Approve finance");
+        expect(entryLabel(kyc, kyc.permissions[0])).toBe("View KYC");
+        expect(entryLabel(system, system.permissions[2])).toBe("Read the platform as a party sees it");
+    });
+
+    it("keeps the tiers nested when one box is ticked or unticked", () => {
+        /* Ticking Approve grants the two beneath it. */
+        expect(withEntryToggled([], finance, finance.permissions[2])).toEqual([
+            "finance.view",
+            "finance.edit",
+            "finance.approve",
+        ]);
+        /* Unticking Edit drops Approve with it and keeps View. */
+        const all = ["finance.view", "finance.edit", "finance.approve"];
+        expect(withEntryToggled(all, finance, finance.permissions[1])).toEqual(["finance.view"]);
+        /* Unticking View clears the group's tiers and leaves its capabilities. */
+        expect(withEntryToggled(["system.view", "system.edit", "system.roles"], system, system.permissions[0])).toEqual([
+            "system.roles",
+        ]);
+        /* A group whose only tier is edit ticks and unticks on its own. */
+        expect(withEntryToggled([], flows, flows.permissions[0])).toEqual(["flows.edit"]);
+        expect(withEntryToggled(["flows.edit"], flows, flows.permissions[0])).toEqual([]);
+        /* A named capability is on its own. */
+        expect(withEntryToggled(["finance.view"], system, system.permissions[2])).toEqual([
+            "finance.view",
+            "system.impersonate",
+        ]);
     });
 
     it("counts only ids the catalogue knows, for the 'n of total' on the list", () => {

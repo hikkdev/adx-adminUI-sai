@@ -100,7 +100,7 @@ export const listingHit = (row: AdminListing): SearchHit => ({
     href: `/listings/${row.id}`,
 });
 
-export const campaignHit = (row: CampaignRow): SearchHit => ({
+export const campaignHit = (row: Pick<CampaignRow, "id" | "name" | "reference" | "brandName" | "status"> & Partial<CampaignRow>): SearchHit => ({
     id: row.id,
     title: row.name,
     subtitle: join([row.reference, row.brandName, campaignStatusLabel(row.status)]),
@@ -146,7 +146,7 @@ export const searchService = {
         const sources: Promise<SearchGroup>[] = [
             supplyService.search(q, SEARCH_LIMIT).then((rows) => groupOf("publishers", rows.map(publisherHit))),
             http
-                .get<AdvertiserPage>(`/advertisers?q=${encoded}&limit=${SEARCH_LIMIT}`)
+                .get<AdvertiserPage>(`/advertisers?q=${encoded}&limit=${SEARCH_LIMIT}&status=ALL`)
                 .then((page) => groupOf("advertisers", (page.rows ?? []).map((row) => advertiserHit(shapeAdvertiser(row))))),
             agentService.search(q, SEARCH_LIMIT).then((rows) => groupOf("agents", (rows ?? []).map(agentHit))),
             orderService

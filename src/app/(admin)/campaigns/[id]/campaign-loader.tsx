@@ -16,17 +16,21 @@ import { formatCompactINR, formatDateTime, formatINR } from "@/lib/format";
 import { isLive } from "@/lib/api-config";
 import { useApiResource } from "@/lib/use-api-resource";
 import { FeatureGate } from "@/lib/use-feature";
+import { useAuth } from "@/lib/auth";
 import { agreementService, type AgreementAcceptance } from "@/services/agreements";
-import { orderService } from "@/services/orders";
+import { orderLabel, orderService } from "@/services/orders";
 import { refundsService } from "@/services/refunds";
 import {
     campaignService,
     campaignStatusLabel,
-    flightLabel,
+    canQuoteDesign,
+    campaignFlightLabel,
+    designQuoteOf,
     shapeCampaign,
     spendShare,
     type CampaignAnalytics,
     type CampaignDetail,
+    type CampaignPerformance,
     type CampaignRefundSummary,
     type CampaignReview,
     type ContentCategory,
@@ -35,7 +39,12 @@ import {
 import { ORDER_STATUS_META, type Order } from "@/types";
 import { COMMISSION_SOURCE_LABEL, type CommissionSource } from "@/types/revenue";
 import { AuthorizeDialog } from "../authorize-dialog";
-import { CreativesCard, EngineCard, InsertionOrderCard, InteractionsCard, RefundRow, TrackingCard } from "./campaign-cards";
+import { CancelCampaignDialog } from "../campaign-actions";
+import { DesignQuoteDialog } from "../../creatives/design-quote-dialog";
+import { PlacedByLine } from "@/components/adx/placed-by";
+import { landingPageService, type LandingPageDetail } from "@/services/landing-pages";
+import { LandingPageCard, PerformanceCard, WaitingOnBanner } from "./campaign-insight-cards";
+import { BillCard, CreativesCard, DesignQuoteCard, EngineCard, InsertionOrderCard, InteractionsCard, RefundRow, ReservationCard, SpotsCard, TrackingCard } from "./campaign-cards";
 
 /** A fraction on the wire, a percentage on screen: "0.1500" → "15%". */
 const formatCommissionPct = (fraction: string) =>
@@ -57,6 +66,10 @@ interface Loaded {
     acceptance: AgreementAcceptance | null;
     /** The refund the cancel recorded: the detail's own field, or — when the detail has none — the refund desk's row for this campaign. */
     refund: CampaignRefundSummary | null;
+    /** 2 Oct 2026: lifetime and daily counts over the flight; null when the read failed. */
+    performance: CampaignPerformance | null;
+    /** The landing page with its blocks; null when there is none (or the read failed). */
+    landing: LandingPageDetail | null;
 }
 
 /**
@@ -75,16 +88,23 @@ interface Loaded {
  */
 export function CampaignLoader({ id }: { id: string }) {
     const live = isLive("campaigns");
+    const { can } = useAuth();
     const [cancelOpen, setCancelOpen] = React.useState(false);
     const [authorizeOpen, setAuthorizeOpen] = React.useState(false);
+    /* DQ-1: the quote dialog, open against this campaign; the button needs `content.edit`, as the route does. */
+    const [quoteOpen, setQuoteOpen] = React.useState(false);
     const [busy, setBusy] = React.useState(false);
 
     const resource = useApiResource<Loaded>(`campaign:${id}:${live}`, async () => {
         const campaign = await campaignService.get(id);
-        if (!campaign) return { campaign, orders: [], review: null, codes: [], analytics: null, categories: [], acceptance: null, refund: null };
+        if (!campaign) return { campaign, orders: [], review: null, codes: [], analytics: null, categories: [], acceptance: null, refund: null, performance: null, landing: null };
         const quiet = <T,>(promise: Promise<T>, fallback: T): Promise<T> => promise.catch(() => fallback);
-        const [orders, review, codes, analytics, categories, acceptances, refund] = await Promise.all([
-            orderService.list(),
+        const [orders, review, codes, analytics, categories, acceptances, refund, performance, landing] = await Promise.all([
+            /* OM-2: the campaign's own orders, by id. This used to be the first
+               hundred orders on the platform filtered here by campaign *name* —
+               which lost rows past a hundred and would have crossed two campaigns
+               called the same thing. */
+            quiet<Order[]>(orderService.page({ campaignId: id, pageSize: 100 }).then((page) => page.items), []),
             quiet<CampaignReview | null>(campaignService.review(id), null),
             quiet<TrackingCode[]>(campaignService.trackingCodes(id), []),
             quiet<CampaignAnalytics | null>(campaignService.analytics(id), null),
@@ -104,16 +124,21 @@ export function CampaignLoader({ id }: { id: string }) {
                       }),
                       null,
                   ),
+            quiet<CampaignPerformance | null>(campaignService.performance(campaign.id), null),
+            // Only asked when the detail says there is a page; a campaign without one answers 404.
+            campaign.landingPage ? quiet<LandingPageDetail | null>(landingPageService.get(campaign.id), null) : Promise.resolve(null),
         ]);
         return {
             campaign,
-            orders: orders.filter((order) => order.campaignName === campaign.name),
+            orders,
             review,
             codes,
             analytics,
             categories,
             acceptance: acceptances.rows[0] ?? null,
             refund,
+            performance,
+            landing,
         };
     });
 
@@ -129,7 +154,7 @@ export function CampaignLoader({ id }: { id: string }) {
 
     return (
         <ResourceBoundary resource={resource}>
-            {({ campaign, orders, review, codes, analytics, categories, acceptance, refund }) => {
+            {({ campaign, orders, review, codes, analytics, categories, acceptance, refund, performance, landing }) => {
                 if (!campaign) {
                     return (
                         <EmptyState
@@ -170,10 +195,17 @@ export function CampaignLoader({ id }: { id: string }) {
                 return (
                     <>
                         <DetailShell
-                            backHref="/campaigns"
+                            backHref="/campaigns/directory"
                             backLabel="Campaigns"
                             title={campaign.name}
-                            subtitle={[row.brandName, row.area].filter(Boolean).join(" · ")}
+                            subtitle={[row.reference, row.brandName, row.area].filter(Boolean).join(" · ")}
+                            /* 2 Oct 2026: the advertiser as the orders' "Placed by" line — the business opens the advertiser, the person the user. */
+                            byline={
+                                campaign.placedBy ? (
+                                    <PlacedByLine placedBy={campaign.placedBy} lead="Advertiser" when={null} fallback="" testId="campaign-advertiser-line" />
+                                ) : null
+                            }
+                            notice={<WaitingOnBanner campaign={campaign} onChanged={resource.reload} />}
                             actions={
                                 <>
                                     {canAuthorise ? (
@@ -198,7 +230,7 @@ export function CampaignLoader({ id }: { id: string }) {
                                             className="bg-card text-danger hover:text-danger"
                                             onClick={() => setCancelOpen(true)}
                                         >
-                                            Cancel campaign
+                                            Cancel…
                                         </Button>
                                     ) : null}
                                     <Button variant="outline" className="bg-card" asChild>
@@ -226,7 +258,7 @@ export function CampaignLoader({ id }: { id: string }) {
                                     id: "status",
                                     label: "Status",
                                     value: campaignStatusLabel(row.status),
-                                    hint: flightLabel(row),
+                                    hint: campaignFlightLabel(row),
                                 },
                             ]}
                             tabs={[
@@ -235,6 +267,8 @@ export function CampaignLoader({ id }: { id: string }) {
                                     label: "Overview",
                                     content: (
                                         <div className="grid gap-4 lg:grid-cols-2">
+                                            {/* 2 Oct 2026: what the campaign did, first — lifetime and by day. */}
+                                            <PerformanceCard performance={performance} />
                                             {/* CG5: the multi-market card is a surface of
                                                 `campaigns.multi-market`; off, a second market is
                                                 refused 409 and the card has nothing to warn about. */}
@@ -299,7 +333,7 @@ export function CampaignLoader({ id }: { id: string }) {
                                                                 <span key="nocat" className="text-warning">Not chosen — the venue check cannot run</span>
                                                             ),
                                                         ],
-                                                        ["Flight", flightLabel(row)],
+                                                        ["Flight", campaignFlightLabel(row)],
                                                         ["Wizard step", `${campaign.step} of 17`],
                                                         [
                                                             "Sent to pay",
@@ -318,7 +352,23 @@ export function CampaignLoader({ id }: { id: string }) {
                                                     </div>
                                                 )}
                                             </Card>
+                                            <LandingPageCard
+                                                campaign={campaign}
+                                                landing={landing}
+                                                numbers={performance ? { views: performance.lifetime.views, ctaClicks: performance.lifetime.ctaClicks, enquiries: performance.lifetime.enquiries } : null}
+                                                onChanged={resource.reload}
+                                            />
+                                            <SpotsCard campaign={campaign} />
                                             <CreativesCard campaign={campaign} onChanged={resource.reload} />
+                                            {/* DQ-1: ADX's price for the artwork, on the ADX Design Agency path only. */}
+                                            <DesignQuoteCard
+                                                campaign={campaign}
+                                                onQuote={can("content.edit") && canQuoteDesign(campaign, designQuoteOf(campaign)) ? () => setQuoteOpen(true) : null}
+                                            />
+                                            {/* The bill as the review prices it — GST-D, the design fee, who prints each line, the reservation offer. */}
+                                            <BillCard campaign={campaign} review={review} />
+                                            {/* RF-1: the reservation, when one was taken. */}
+                                            <ReservationCard reservation={campaign.reservation} />
                                             <InsertionOrderCard review={review} acceptance={acceptance} />
                                             <RefundRow refund={refund} />
                                         </div>
@@ -403,6 +453,16 @@ export function CampaignLoader({ id }: { id: string }) {
                                             emptyMessage="No fulfilment orders raised for this campaign yet."
                                             columns={[
                                                 {
+                                                    key: "order",
+                                                    label: "Order",
+                                                    /* BK-1: the booking id once minted, the short id until the backfill runs. */
+                                                    render: (order) => (
+                                                        <Link href={`/orders/${order.id}`} className="font-mono text-xs text-foreground underline-offset-4 hover:underline">
+                                                            {orderLabel(order)}
+                                                        </Link>
+                                                    ),
+                                                },
+                                                {
                                                     key: "listing",
                                                     label: "Spot",
                                                     render: (order) => order.listing,
@@ -420,6 +480,15 @@ export function CampaignLoader({ id }: { id: string }) {
                                 },
                             ]}
                         />
+                        <DesignQuoteDialog
+                            campaign={quoteOpen ? { id: campaign.id, name: campaign.name, reference: campaign.reference } : null}
+                            standing={designQuoteOf(campaign)}
+                            onOpenChange={(open) => !open && setQuoteOpen(false)}
+                            onQuoted={() => {
+                                setQuoteOpen(false);
+                                resource.reload();
+                            }}
+                        />
                         <AuthorizeDialog
                             campaign={
                                 authorizeOpen
@@ -432,40 +501,12 @@ export function CampaignLoader({ id }: { id: string }) {
                                 resource.reload();
                             }}
                         />
-                        <ConfirmDialog
-                            open={cancelOpen}
+                        {/* 2 Oct 2026: the list's Cancel… — the refund it would open shown first, and a reason the advertiser is told. */}
+                        <CancelCampaignDialog
+                            campaign={cancelOpen ? { id: campaign.id, name: campaign.name, reference: campaign.reference, status: campaign.status } : null}
                             onOpenChange={setCancelOpen}
-                            title="Cancel this campaign?"
-                            description="The booked spots are released and the advertiser is told. Money already committed is refunded through the wallet, which finance releases separately."
-                            confirmLabel="Cancel campaign"
-                            destructive
-                            onConfirm={async () => {
-                                setCancelOpen(false);
-                                try {
-                                    await campaignService.cancel(
-                                        campaign.id,
-                                        "Cancelled by ADX from the console",
-                                    );
-                                    toast.success(`${campaign.name} cancelled`);
-                                    resource.reload();
-                                } catch (error) {
-                                    toast.error(
-                                        error instanceof Error
-                                            ? error.message
-                                            : "Could not cancel it",
-                                    );
-                                }
-                            }}
-                        >
-                            <p className="text-xs text-muted-foreground">
-                                The unused days are recorded as a pending campaign refund. Finance releases or
-                                refuses it at the{" "}
-                                <Link href="/finance/refunds" className="underline underline-offset-4">
-                                    refund desk
-                                </Link>
-                                .
-                            </p>
-                        </ConfirmDialog>
+                            onDone={resource.reload}
+                        />
                     </>
                 );
             }}

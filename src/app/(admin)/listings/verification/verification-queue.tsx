@@ -2,27 +2,47 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ApiError } from "@/lib/api-client";
 import { supplyService } from "@/services/supply";
 import { Button } from "@/components/ui/button";
+import { BulkActions } from "@/components/adx/bulk-actions";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { KpiCard } from "@/components/adx/kpi-card";
 import { DataTable, SortableHeader } from "@/components/adx/data-table";
 import { EmptyState } from "@/components/adx/empty-state";
+import { FilterChips } from "@/components/adx/filter-chips";
 import { LoadMore } from "@/components/adx/load-more";
+import { ROSTER_MENU_LABEL, RosterRowMenu, type RosterMenuEntry } from "@/components/adx/party-roster-columns";
+import { useRosterPermission, useRosterSuspension } from "@/components/adx/party-roster-row-actions";
+import { SuspendedChip } from "@/components/adx/suspended-chip";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
+import type { BulkOutcome } from "@/lib/bulk";
+import {
+    RECHECK_PAGE,
+    RECHECK_STATE_META,
+    VERIFICATION_ACTION_PERMISSION,
+    caseReference,
+    caseRowLabel,
+    caseWaiting,
+    inChip,
+    queueRowLabel,
+    verificationChips,
+    verificationCounts,
+    verificationQueueSubtitle,
+    type VerificationChip,
+} from "@/services/verification-queue";
 import { VerificationReview } from "./verification-review";
+import { QueueLines } from "./queue-lines";
+import { RowActionDialog, useCaseActions, useRowAction, useVerificationActions } from "./verification-actions";
 import {
     REMOVABILITY_META,
-    VERIFICATION_STATE_META,
     type ComplianceCase,
     type VerificationQueueRow,
-    type VerificationState,
     COMPLIANCE_STATUS_META,
 } from "@/types";
 
@@ -39,133 +59,27 @@ interface Props {
     onChanged?: () => void;
 }
 
-const FILTERS: (VerificationState | "all")[] = ["all", "LAPSED", "RISKY"];
-
 /** Days until (positive) or since (negative) the verification falls due. */
 function daysTo(iso: string | null): number | null {
     if (!iso) return null;
     return Math.round((new Date(iso).getTime() - Date.now()) / 86_400_000);
 }
 
-const queueColumns = (
-    onReview: (row: VerificationQueueRow) => void
-): ColumnDef<VerificationQueueRow>[] => [
-    {
-        accessorKey: "title",
-        header: ({ column }) => <SortableHeader column={column}>Listing</SortableHeader>,
-        cell: ({ row }) => (
-            <Link
-                href={`/listings/${row.original.listingId}`}
-                className="font-medium text-foreground hover:underline"
-            >
-                {row.original.title}
-            </Link>
-        ),
-    },
-    {
-        accessorKey: "publisherName",
-        header: "Publisher",
-        cell: ({ row }) => (
-            <span className="text-muted-foreground">
-                {row.original.publisherName ?? "Unclaimed"}
-            </span>
-        ),
-    },
-    {
-        accessorKey: "removability",
-        header: "Cadence",
-        cell: ({ row }) => (
-            <span className="text-xs text-muted-foreground">
-                {REMOVABILITY_META[row.original.removability].label} ·{" "}
-                {REMOVABILITY_META[row.original.removability].cadenceDays}d
-            </span>
-        ),
-    },
-    {
-        accessorKey: "verifiedAt",
-        header: "Last verified",
-        cell: ({ row }) => (
-            <span className="text-xs text-muted-foreground">
-                {row.original.verifiedAt ? formatDate(row.original.verifiedAt) : "Never"}
-            </span>
-        ),
-    },
-    {
-        accessorKey: "verificationExpiresAt",
-        header: ({ column }) => <SortableHeader column={column}>Due</SortableHeader>,
-        cell: ({ row }) => {
-            const days = daysTo(row.original.verificationExpiresAt);
-            return (
-                <span
-                    className={cn(
-                        "text-xs tabular-nums",
-                        days !== null && days < 0
-                            ? "font-medium text-danger"
-                            : "text-muted-foreground"
-                    )}
-                >
-                    {days === null ? "—" : days < 0 ? `${Math.abs(days)}d overdue` : `in ${days}d`}
-                </span>
-            );
-        },
-    },
-    {
-        accessorKey: "state",
-        header: "State",
-        cell: ({ row }) => <StatusBadge status={VERIFICATION_STATE_META[row.original.state]} />,
-    },
-    {
-        id: "review",
-        header: "",
-        enableHiding: false,
-        cell: ({ row }) => (
-            <Button
-                size="sm"
-                variant="outline"
-                className="h-7 px-2 text-xs"
-                onClick={() => onReview(row.original)}
-            >
-                Photos
-            </Button>
-        ),
-    },
-];
+/** The keys of the queue actions the row menu lists, in the menu's order — the status slot (Suspend… / Reinstate) is the rosters' own. */
+const ROW_MENU_KEYS = ["remind", "site-check", "extend"] as const;
 
-const caseColumns: ColumnDef<ComplianceCase>[] = [
-    {
-        accessorKey: "id",
-        header: "Case",
-        cell: ({ row }) => (
-            <span className="font-medium text-foreground">{row.original.id}</span>
-        ),
-    },
-    { accessorKey: "listingTitle", header: "Listing" },
-    {
-        accessorKey: "publisherName",
-        header: "Publisher",
-        cell: ({ row }) => row.original.publisherName ?? "—",
-    },
-    {
-        accessorKey: "attemptCount",
-        header: "Attempts",
-        cell: ({ row }) => (
-            <span className="tabular-nums">{row.original.attemptCount} of 4</span>
-        ),
-    },
-    {
-        accessorKey: "dueAt",
-        header: ({ column }) => <SortableHeader column={column}>Due</SortableHeader>,
-        cell: ({ row }) => (
-            <span className="text-xs text-muted-foreground">{formatDate(row.original.dueAt)}</span>
-        ),
-    },
-    {
-        accessorKey: "status",
-        header: "Status",
-        cell: ({ row }) => <StatusBadge status={COMPLIANCE_STATUS_META[row.original.status]} />,
-    },
-];
-
+/**
+ * Listings › Verification ("Spot re-checks" — the photo re-check that the
+ * spot still stands, never the lease or permit, which is Renewals') — since 3 Oct 2026 the other queues' layout (the
+ * owner: "If verifications lapsed, what action can we take here? There's no
+ * actionable button or bulk action or selection option"): the summary line
+ * under the title where the four number cards were, the state chips with
+ * their counts, the shared table with its checkboxes, Columns and paging,
+ * the rosters' row menu and the shared bulk bar. The compliance cases below
+ * are the same table with their own menu and bar.
+ *
+ * What each action does and the route behind it is in `verification-actions`.
+ */
 export function VerificationQueue({
     rows,
     cases,
@@ -175,14 +89,201 @@ export function VerificationQueue({
     onLoadMoreCases,
     onChanged,
 }: Props) {
-    const [filter, setFilter] = React.useState<VerificationState | "all">("all");
+    const router = useRouter();
+    const changed = React.useCallback(() => onChanged?.(), [onChanged]);
+    const [chip, setChip] = React.useState<VerificationChip>("all");
     const [sweeping, setSweeping] = React.useState(false);
     /* Which listing's submitted photographs are open for review, if any. */
     const [reviewing, setReviewing] = React.useState<VerificationQueueRow | null>(null);
-    const columns = React.useMemo(() => queueColumns(setReviewing), []);
+
+    const maySweep = useRosterPermission(VERIFICATION_ACTION_PERMISSION.sweep);
+    const listingActions = useVerificationActions();
+    const caseActions = useCaseActions();
+    const listingRow = useRowAction(listingActions);
+    const caseRow = useRowAction(caseActions);
+    const suspension = useRosterSuspension("LISTING", "LISTING", changed);
+    const statusActionsFor = suspension.statusActions;
+
+    /* The row menu's queue items: only those the viewer may take, and only where the action applies. */
+    const rowActions = React.useMemo(
+        () => listingActions.filter((action) => (ROW_MENU_KEYS as readonly string[]).includes(action.key)),
+        [listingActions],
+    );
+    const openListingAction = listingRow.open;
+    const openCaseAction = caseRow.open;
+
+    const columns = React.useMemo<ColumnDef<VerificationQueueRow>[]>(
+        () => [
+            {
+                id: "listing",
+                accessorFn: (row) => `${row.title} ${row.displayId ?? ""} ${row.city ?? ""}`,
+                header: ({ column }) => <SortableHeader column={column}>Listing</SortableHeader>,
+                cell: ({ row }) => (
+                    <div className="min-w-0">
+                        <Link href={`/listings/${row.original.listingId}`} className="font-medium text-foreground hover:underline">
+                            {row.original.title}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">{[row.original.displayId, row.original.city].filter(Boolean).join(" · ") || "—"}</p>
+                    </div>
+                ),
+            },
+            {
+                id: "publisher",
+                accessorFn: (row) => row.publisherName ?? "",
+                header: "Publisher",
+                cell: ({ row }) => <span className="text-muted-foreground">{row.original.publisherName ?? "Unclaimed"}</span>,
+            },
+            {
+                id: "cadence",
+                accessorFn: (row) => row.removability,
+                header: "Cadence",
+                cell: ({ row }) => (
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
+                        {REMOVABILITY_META[row.original.removability].label} · {REMOVABILITY_META[row.original.removability].cadenceDays}d
+                    </span>
+                ),
+            },
+            {
+                id: "verified",
+                accessorFn: (row) => row.verifiedAt ?? "",
+                header: "Last verified",
+                cell: ({ row }) => (
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">{row.original.verifiedAt ? formatDate(row.original.verifiedAt) : "Never"}</span>
+                ),
+            },
+            {
+                id: "due",
+                accessorFn: (row) => row.verificationExpiresAt ?? "",
+                header: ({ column }) => <SortableHeader column={column}>Due</SortableHeader>,
+                cell: ({ row }) => {
+                    const days = daysTo(row.original.verificationExpiresAt);
+                    return (
+                        <span className={cn("whitespace-nowrap text-xs tabular-nums", days !== null && days < 0 ? "font-medium text-danger" : "text-muted-foreground")}>
+                            {days === null ? "—" : days < 0 ? `${Math.abs(days)}d overdue` : `in ${days}d`}
+                        </span>
+                    );
+                },
+            },
+            {
+                id: "state",
+                accessorFn: (row) => row.state,
+                header: "State",
+                cell: ({ row }) => (
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={RECHECK_STATE_META[row.original.state]} />
+                        {row.original.status === "SUSPENDED" && (row.original.suspensionScopes ?? []).length === 0 ? (
+                            <StatusBadge status={{ label: "Suspended", tone: "danger" }} />
+                        ) : (
+                            <SuspendedChip scopes={row.original.suspensionScopes} />
+                        )}
+                    </span>
+                ),
+            },
+            {
+                id: "actions",
+                enableHiding: false,
+                enableSorting: false,
+                size: 48,
+                cell: ({ row }) => {
+                    /* The rosters' menu: Photos first, the listing, then what can be done about the overdue re-check, then the status slot. */
+                    const listing = row.original;
+                    const queueItems = rowActions.filter((action) => !action.skip?.(listing));
+                    const statusActions = statusActionsFor({ id: listing.listingId, name: listing.title, scopes: listing.suspensionScopes, accountState: null });
+                    const entries: RosterMenuEntry[] = [
+                        { kind: "label", label: ROSTER_MENU_LABEL },
+                        { kind: "item", label: "Photos", onSelect: () => setReviewing(listing) },
+                        { kind: "item", label: "View listing", onSelect: () => router.push(`/listings/${listing.listingId}`) },
+                        ...(queueItems.length > 0 ? ([{ kind: "separator" }] as RosterMenuEntry[]) : []),
+                        ...queueItems.map((action): RosterMenuEntry => ({ kind: "item", label: action.label, onSelect: () => openListingAction(action.key, listing) })),
+                        ...(statusActions.length > 0 ? ([{ kind: "separator" }] as RosterMenuEntry[]) : []),
+                        ...statusActions.map((action): RosterMenuEntry => ({ kind: "item", ...action })),
+                    ];
+                    return <RosterRowMenu entries={entries} />;
+                },
+            },
+        ],
+        [router, rowActions, statusActionsFor, openListingAction],
+    );
+
+    const caseColumns = React.useMemo<ColumnDef<ComplianceCase>[]>(
+        () => [
+            {
+                /* No raw database id: what the case is about, the listing's LST- reference, and the day it opened. */
+                id: "case",
+                accessorFn: (item) => caseReference(item),
+                header: "Case",
+                cell: ({ row }) => (
+                    <div className="min-w-0 whitespace-nowrap">
+                        <p className="text-sm font-medium text-foreground">{caseReference(row.original)}</p>
+                        <p className="text-xs text-muted-foreground">opened {formatDate(row.original.openedAt)}</p>
+                    </div>
+                ),
+            },
+            {
+                id: "listing",
+                accessorFn: (item) => `${item.listingTitle} ${item.listingDisplayId ?? ""}`,
+                header: "Listing",
+                cell: ({ row }) => (
+                    <div className="min-w-0">
+                        <Link href={`/listings/${row.original.listingId}`} className="font-medium text-foreground hover:underline">
+                            {row.original.listingTitle || "—"}
+                        </Link>
+                        {row.original.listingDisplayId ? <p className="text-xs text-muted-foreground">{row.original.listingDisplayId}</p> : null}
+                    </div>
+                ),
+            },
+            {
+                id: "publisher",
+                accessorFn: (item) => item.publisherName ?? "",
+                header: "Publisher",
+                cell: ({ row }) => <span className="text-muted-foreground">{row.original.publisherName ?? "—"}</span>,
+            },
+            {
+                id: "attempts",
+                accessorFn: (item) => item.attemptCount,
+                header: "Attempts",
+                cell: ({ row }) => (
+                    <span className="whitespace-nowrap tabular-nums">
+                        {row.original.attemptCount} of 4
+                        {row.original.lastAttemptAt ? <span className="block text-xs text-muted-foreground">last {formatDate(row.original.lastAttemptAt)}</span> : null}
+                    </span>
+                ),
+            },
+            {
+                id: "due",
+                accessorFn: (item) => item.dueAt,
+                header: ({ column }) => <SortableHeader column={column}>Due</SortableHeader>,
+                cell: ({ row }) => <span className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(row.original.dueAt)}</span>,
+            },
+            {
+                id: "status",
+                accessorFn: (item) => item.status,
+                header: "Status",
+                cell: ({ row }) => <StatusBadge status={COMPLIANCE_STATUS_META[row.original.status]} />,
+            },
+            {
+                id: "actions",
+                enableHiding: false,
+                enableSorting: false,
+                size: 48,
+                cell: ({ row }) => {
+                    const item = row.original;
+                    const offered = caseActions.filter((action) => !action.skip?.(item));
+                    const entries: RosterMenuEntry[] = [
+                        { kind: "label", label: ROSTER_MENU_LABEL },
+                        { kind: "item", label: "View listing", onSelect: () => router.push(`/listings/${item.listingId}`) },
+                        ...(offered.length > 0 ? ([{ kind: "separator" }] as RosterMenuEntry[]) : []),
+                        ...offered.map((action): RosterMenuEntry => ({ kind: "item", label: action.label, onSelect: () => openCaseAction(action.key, item) })),
+                    ];
+                    return <RosterRowMenu entries={entries} />;
+                },
+            },
+        ],
+        [router, caseActions, openCaseAction],
+    );
 
     /**
-     * The sweep walks lapsed listings one step down the enforcement ladder. It
+     * The sweep walks overdue re-checks one step down the enforcement ladder. It
      * is idempotent on the backend, so a double click costs a round trip and
      * nothing else.
      */
@@ -192,108 +293,67 @@ export function VerificationQueue({
             const result = await supplyService.runEnforcementSweep();
             toast.success(
                 result.lapsed === 0 && result.suspended === 0
-                    ? "Nothing to do — no listing has lapsed."
+                    ? "Nothing to do — no re-check is overdue."
                     : `${result.holdsOpened} holds opened, ${result.casesOpened} cases opened, ${result.suspended} suspended.`
             );
-            onChanged?.();
+            changed();
         } catch (cause) {
-            toast.error(
-                cause instanceof ApiError ? cause.message : "Could not run the enforcement sweep."
-            );
+            toast.error(cause instanceof ApiError ? cause.message : "Could not run the enforcement sweep.");
         } finally {
             setSweeping(false);
         }
     };
 
-    const lapsed = rows.filter((row) => row.state === "LAPSED");
-    const risky = rows.filter((row) => row.state === "RISKY");
-    const visible = filter === "all" ? rows : rows.filter((row) => row.state === filter);
-    const openCases = cases.filter((c) => c.status === "OPEN" || c.status === "CONTACTED");
+    const counts = verificationCounts(rows);
+    const visible = rows.filter((row) => inChip(row, chip));
+    const waiting = cases.filter(caseWaiting).length;
+
+    /* After a run from the bar: the failures stay ticked, the rest go, and the queue reloads once. */
+    const settle =
+        <T,>(keep: (rows: T[]) => void) =>
+        (outcome: BulkOutcome<T>) => {
+            keep(outcome.failed.map((failure) => failure.row));
+            changed();
+        };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             <PageHeader
-                title="Verification queue"
-                subtitle="Listings inside their re-verification window or past it. A lapse pauses earnings, not the campaign."
+                title={RECHECK_PAGE.title}
+                subtitle={RECHECK_PAGE.subtitle}
                 actions={
-                    <Button size="sm" variant="outline" onClick={runSweep} disabled={sweeping}>
-                        {sweeping ? "Running…" : "Run enforcement sweep"}
-                    </Button>
+                    maySweep ? (
+                        <Button size="sm" variant="outline" onClick={runSweep} disabled={sweeping}>
+                            {sweeping ? "Running…" : "Run enforcement sweep"}
+                        </Button>
+                    ) : undefined
                 }
             />
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <KpiCard
-                    stat={{
-                        id: "lapsed",
-                        label: "Lapsed",
-                        value: String(lapsed.length),
-                        hint: "earnings paused",
-                        deltaTone: "negative",
-                    }}
-                />
-                <KpiCard
-                    stat={{
-                        id: "risky",
-                        label: "In the risk window",
-                        value: String(risky.length),
-                        hint: "shown to advertisers as due",
-                    }}
-                />
-                <KpiCard
-                    stat={{
-                        id: "cases",
-                        label: "Compliance cases",
-                        value: String(openCases.length),
-                        hint: "awaiting contact",
-                    }}
-                />
-                <KpiCard
-                    stat={{
-                        id: "suspended",
-                        label: "Suspended",
-                        value: String(rows.filter((r) => r.status === "SUSPENDED").length),
-                        hint: "past the 48-hour window",
-                    }}
-                />
-            </div>
+            <QueueLines crossLink={RECHECK_PAGE.crossLink} summary={verificationQueueSubtitle(counts, waiting)} />
 
-            <div>
-                <div className="flex flex-wrap items-center gap-2 pb-3">
-                    {FILTERS.map((value) => {
-                        const count =
-                            value === "all" ? rows.length : rows.filter((r) => r.state === value).length;
-                        return (
-                            <button
-                                key={value}
-                                type="button"
-                                onClick={() => setFilter(value)}
-                                className={cn(
-                                    "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                                    filter === value
-                                        ? "border-primary bg-primary text-primary-foreground"
-                                        : "border-border text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                {value === "all" ? "All" : VERIFICATION_STATE_META[value].label} {count}
-                            </button>
-                        );
-                    })}
-                </div>
+            <FilterChips<VerificationChip> value={chip} onChange={setChip} chips={verificationChips(counts)} />
 
-                <DataTable
-                    columns={columns}
-                    data={visible}
-                    searchPlaceholder="Search listings or publisher"
-                    emptyState={
-                        <EmptyState
-                            icon={ShieldCheck}
-                            title="Nothing due"
-                            description="Every live listing is inside its verification window."
-                        />
-                    }
-                />
-            </div>
+            <DataTable
+                columns={columns}
+                data={visible}
+                searchPlaceholder="Search listings, reference, city, publisher"
+                initialPageSize={10}
+                getRowId={(row) => row.listingId}
+                /* No action the viewer may take, no checkboxes. */
+                bulkActions={
+                    listingActions.length > 0
+                        ? (selected, _clear, keep) => <BulkActions<VerificationQueueRow> rows={selected} actions={listingActions} label={queueRowLabel} onSettled={settle(keep)} />
+                        : undefined
+                }
+                emptyState={
+                    <EmptyState
+                        icon={ShieldCheck}
+                        title={chip === "all" ? "Nothing due" : "Nothing under this chip"}
+                        description={chip === "all" ? "Every live spot is inside its re-check window." : "Choose another state, or All."}
+                    />
+                }
+            />
 
             <VerificationReview
                 row={reviewing}
@@ -307,21 +367,21 @@ export function VerificationQueue({
                 <PageHeader
                     size="section"
                     title="Compliance cases"
-                    subtitle="Opened three days into a lapse. Suspension falls due 48 hours after opening."
+                    subtitle="Opened three days after a re-check falls overdue. Suspension falls due 48 hours after opening."
                 />
                 <div className="mt-3">
                     <DataTable
                         columns={caseColumns}
                         data={cases}
-                        searchPlaceholder="Search cases"
-                        showColumnToggle={false}
-                        emptyState={
-                            <EmptyState
-                                icon={ShieldCheck}
-                                title="No open cases"
-                                description="Cases open three days into a lapse."
-                            />
+                        searchPlaceholder="Search cases, listing, publisher"
+                        initialPageSize={10}
+                        getRowId={(item) => item.id}
+                        bulkActions={
+                            caseActions.length > 0
+                                ? (selected, _clear, keep) => <BulkActions<ComplianceCase> rows={selected} actions={caseActions} label={caseRowLabel} onSettled={settle(keep)} />
+                                : undefined
                         }
+                        emptyState={<EmptyState icon={ShieldCheck} title="No open cases" description="A case opens three days after a re-check falls overdue." />}
                     />
                     {/* The read is one page of the server's largest size, due-soonest
                         first; the next page is a click away rather than quietly cut off. */}
@@ -336,6 +396,16 @@ export function VerificationQueue({
                     />
                 </div>
             </div>
+
+            <RowActionDialog<VerificationQueueRow>
+                actions={listingActions}
+                pending={listingRow.pending}
+                label={queueRowLabel}
+                onClose={listingRow.close}
+                onSettled={changed}
+            />
+            <RowActionDialog<ComplianceCase> actions={caseActions} pending={caseRow.pending} label={caseRowLabel} onClose={caseRow.close} onSettled={changed} />
+            {suspension.dialogs}
         </div>
     );
 }

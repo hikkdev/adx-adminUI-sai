@@ -4,11 +4,13 @@ import * as React from "react";
 import { LocateFixed, Minus, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { MapSurface, type MapPoint, type MarkerTone } from "@/components/adx/map";
+import { MapToneSwitch, mapControlButton, mapControlSurface } from "@/components/adx/map-tone-switch";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { formatNumber } from "@/lib/format";
 import { cameraInto, stepZoom, type Camera } from "@/lib/map-geometry";
 import { useApiResource } from "@/lib/use-api-resource";
+import { useMapTone } from "@/lib/use-map-tone";
 import { cn } from "@/lib/utils";
 import { CITY_STAGES, CITY_STAGE_LABEL, CITY_STAGE_TONE, geoService, type CityStage, type GeoMapPoint } from "@/services/geo";
 import { mapsService, type MapsClientConfig } from "@/services/maps";
@@ -56,6 +58,7 @@ export function MapTab({ nonce, onOpenCity }: { nonce: number; onOpenCity: (slug
     const [stages, setStages] = React.useState<CityStage[]>(DEFAULT_MAP_STAGES);
     const [camera, setCamera] = React.useState<Camera>(INDIA);
     const [selected, setSelected] = React.useState<string | null>(null);
+    const [tone, setTone] = useMapTone();
     const stageKey = stages.join(",");
 
     const resource = useApiResource<MapData>(`geo:map:${stageKey}:${nonce}`, async () => {
@@ -106,6 +109,7 @@ export function MapTab({ nonce, onOpenCity }: { nonce: number; onOpenCity: (slug
                             <div className="absolute inset-0">
                                 <MapSurface
                                     config={mapsConfig}
+                                    tone={tone}
                                     points={pins}
                                     camera={camera}
                                     onCameraChange={setCamera}
@@ -118,14 +122,15 @@ export function MapTab({ nonce, onOpenCity }: { nonce: number; onOpenCity: (slug
                                     caption={`Cities at ${stages.length ? stages.map((stage) => CITY_STAGE_LABEL[stage]).join(", ") : "no stage"}, coloured by stage; a pin opens the city.`}
                                 />
                             </div>
-                            <div className="absolute right-4 top-4 z-10 flex flex-col overflow-hidden rounded-md border bg-card shadow-sm">
-                                <button type="button" aria-label="Zoom in" className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted" onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, 1) }))}>
+                            <MapToneSwitch tone={tone} onChange={setTone} className="absolute left-4 top-4 z-10" />
+                            <div className={cn("absolute right-4 top-4 z-10 flex flex-col overflow-hidden rounded-md", mapControlSurface(tone))}>
+                                <button type="button" aria-label="Zoom in" className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))} onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, 1) }))}>
                                     <Plus className="size-4" />
                                 </button>
-                                <button type="button" aria-label="Zoom out" className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted" onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, -1) }))}>
+                                <button type="button" aria-label="Zoom out" className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))} onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, -1) }))}>
                                     <Minus className="size-4" />
                                 </button>
-                                <button type="button" aria-label="Reset view" className="flex size-8 items-center justify-center transition-colors hover:bg-muted" onClick={() => setCamera(INDIA)}>
+                                <button type="button" aria-label="Reset view" className={cn("flex size-8 items-center justify-center transition-colors", mapControlButton(tone))} onClick={() => setCamera(INDIA)}>
                                     <LocateFixed className="size-4" />
                                 </button>
                             </div>

@@ -249,12 +249,14 @@ function ResourceForm({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 <Input id="rs-title" value={values.title} onChange={set("title")} autoComplete="off" />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-                <Field id="rs-category" label="Category" hint="The app's filter tab — Onboarding, Sales, Compliance…" error={errorFor("category")}>
+                <Field id="rs-category" label="Category" error={errorFor("category")}>
                     <Input id="rs-category" value={values.category} onChange={set("category")} autoComplete="off" />
                 </Field>
                 <Field id="rs-topic" label="Topic" optional error={errorFor("topic")}>
                     <Input id="rs-topic" value={values.topic} onChange={set("topic")} autoComplete="off" />
                 </Field>
+                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">The category is the app&apos;s filter tab — Onboarding, Sales, Compliance…</p>
             </div>
             <Field id="rs-subtitle" label="Subtitle" optional error={errorFor("subtitle")}>
                 <Input id="rs-subtitle" value={values.subtitle} onChange={set("subtitle")} autoComplete="off" />

@@ -76,3 +76,27 @@
         scrollbar-width: thin;
     }
 }
+
+/*
+ * The maps' dark style (MapSurface `tone="dark"`, OpenStreetMap). The tiles
+ * are recoloured in place — inverted, turned back to their own hues, then
+ * muted towards a cool slate — so any tile server the platform is set to
+ * gets a dark style with no second tile source. Only the tile pane is
+ * filtered: markers, shapes and clusters keep their true colours.
+ */
+[data-map-tone="dark"] .leaflet-container {
+    background: #15181e;
+}
+
+[data-map-tone="dark"] .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(185deg) brightness(0.92) contrast(0.9) saturate(0.45);
+}
+
+[data-map-tone="dark"] .leaflet-control-attribution {
+    background: rgb(17 19 24 / 0.72);
+    color: #a1a1aa;
+}
+
+[data-map-tone="dark"] .leaflet-control-attribution a {
+    color: #d4d4d8;
+}

@@ -10,16 +10,22 @@ import { PrivateFile, fetchPrivateBlob } from "@/components/adx/private-file";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { imageSize } from "@/lib/image-size";
 import { useAuth } from "@/lib/auth";
 import type { AgreementAcceptance } from "@/services/agreements";
 import {
     campaignService,
+    designQuoteOf,
+    designQuoteStatusMeta,
+    fulfilmentLabel,
+    reservationStatusMeta,
     trackingCodeImageUrl,
     trackingCodeSvgUrl,
     type CampaignAnalytics,
     type CampaignCreativeRow,
     type CampaignDetail,
     type CampaignRefundSummary,
+    type CampaignReservation,
     type CampaignReview,
     type TrackingCode,
 } from "@/services/campaigns";
@@ -155,29 +161,11 @@ function CreativeLine({ creative, campaign }: { creative: CampaignCreativeRow; c
             </div>
             {creative.fileUrl && (
                 <Button size="sm" variant="ghost" className="h-7 shrink-0" asChild>
-                    <Link href={`/moderation/${creative.id}`}>Review</Link>
+                    <Link href={`/creatives/${creative.id}`}>Review</Link>
                 </Button>
             )}
         </li>
     );
-}
-
-/** The pixel size of an image file, for the dimensions check; null for anything that is not an image. */
-function imageSize(file: File): Promise<{ width: number; height: number } | null> {
-    if (!file.type.startsWith("image/") || typeof window === "undefined") return Promise.resolve(null);
-    return new Promise((resolve) => {
-        const url = URL.createObjectURL(file);
-        const image = new window.Image();
-        image.onload = () => {
-            URL.revokeObjectURL(url);
-            resolve({ width: image.naturalWidth, height: image.naturalHeight });
-        };
-        image.onerror = () => {
-            URL.revokeObjectURL(url);
-            resolve(null);
-        };
-        image.src = url;
-    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -534,6 +522,293 @@ export function RefundRow({ refund }: { refund: CampaignRefundSummary | null | u
                     },
                 ]}
             />
+        </Card>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* OM-1: the spots and their orders                                    */
+/* ------------------------------------------------------------------ */
+
+/** What each spot's fulfilment state is called on the card. */
+const SPOT_STATUS_LABEL: Record<string, string> = {
+    RESERVED: "Reserved",
+    BOOKED: "Booked",
+    LIVE: "Live",
+    COMPLETED: "Completed",
+    CANCELLED: "Cancelled",
+};
+
+/**
+ * OM-1: the spots on the campaign, each linked to the order that puts it
+ * up. Campaigns never linked down to Orders before — the page looked spots
+ * up only to label creatives and tracking codes. A spot with no order yet
+ * has not been authorised, or was placed before the campaign existed.
+ */
+export function SpotsCard({ campaign }: { campaign: CampaignDetail }) {
+    const spots = campaign.spots ?? [];
+    const withOrder = spots.filter((spot) => spot.orderId).length;
+
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="campaign-spots">
+            <div>
+                <h3 className="text-base font-semibold text-foreground">Spots</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                    {spots.length === 0
+                        ? "No spots chosen yet."
+                        : `${spots.length} spot${spots.length === 1 ? "" : "s"}, ${withOrder} with an order to put it up.`}
+                </p>
+            </div>
+            {spots.length > 0 && (
+                <SimpleTable
+                    className="mt-4"
+                    rows={spots}
+                    rowKey={(spot) => spot.id}
+                    emptyMessage="No spots chosen yet."
+                    columns={[
+                        {
+                            key: "listing",
+                            label: "Site",
+                            render: (spot) =>
+                                spot.listing ? (
+                                    <Link href={`/listings/${spot.listing.id}`} className="text-foreground underline-offset-4 hover:underline">
+                                        {spot.listing.title}
+                                        {spot.listing.city ? <span className="text-muted-foreground"> · {spot.listing.city}</span> : null}
+                                    </Link>
+                                ) : (
+                                    spot.listingId
+                                ),
+                        },
+                        {
+                            key: "status",
+                            label: "Status",
+                            render: (spot) => <span className="text-muted-foreground">{SPOT_STATUS_LABEL[spot.status] ?? spot.status}</span>,
+                        },
+                        {
+                            key: "value",
+                            label: "Value",
+                            render: (spot) => <span className="tabular-nums">{spot.lineTotal ? formatMoney(spot.lineTotal) : "—"}</span>,
+                        },
+                        {
+                            key: "order",
+                            label: "Order",
+                            render: (spot) =>
+                                spot.orderId ? (
+                                    <Link
+                                        href={`/orders/${spot.orderId}`}
+                                        className="text-primary underline-offset-4 hover:underline"
+                                        data-testid={`spot-order-${spot.id}`}
+                                    >
+                                        Open order
+                                    </Link>
+                                ) : (
+                                    <span className="text-muted-foreground/60">Not yet</span>
+                                ),
+                        },
+                    ]}
+                />
+            )}
+        </Card>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* DQ-1: the design quote                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * DQ-1: ADX&rsquo;s price for designing the artwork, on a campaign that chose
+ * ADX Design Agency. The desk names it here or on the design-requests
+ * desk; the advertiser answers from the app. Accepted, it is a fee on the
+ * booking (the bill card shows it); declined or unanswered, it may be
+ * quoted again. Drawn only on the ADX path: elsewhere there is nothing
+ * to price.
+ */
+export function DesignQuoteCard({ campaign, onQuote }: { campaign: CampaignDetail; onQuote: (() => void) | null }) {
+    if (campaign.creativePath !== "ADX_DESIGN_AGENCY") return null;
+    const quote = designQuoteOf(campaign);
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="campaign-design-quote">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h3 className="text-base font-semibold text-foreground">Design quote</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        The advertiser asked ADX to design the artwork. The fee named here goes on the booking once they accept it.
+                    </p>
+                </div>
+                <StatusBadge status={designQuoteStatusMeta(quote)} />
+            </div>
+            {quote ? (
+                <FieldList
+                    className="mt-4"
+                    items={[
+                        ["Design fee", <span key="amt" className="tabular-nums">{formatMoney(quote.amount)} + GST</span>],
+                        ["Quoted", quote.quotedAt ? formatDateTime(quote.quotedAt) : "—"],
+                        ["Answered", quote.respondedAt ? formatDateTime(quote.respondedAt) : "Not yet"],
+                        ...(quote.note ? ([["Note", quote.note]] as [string, React.ReactNode][]) : []),
+                    ]}
+                />
+            ) : (
+                <p className="mt-4 text-sm text-muted-foreground">No price named yet. The advertiser cannot accept a design fee until there is one.</p>
+            )}
+            {onQuote && (
+                <div className="mt-4 flex justify-end">
+                    <Button size="sm" variant="outline" className="h-8 bg-card" onClick={onQuote} data-testid="campaign-quote-button">
+                        {quote ? "Re-quote" : "Quote the design"}
+                    </Button>
+                </div>
+            )}
+        </Card>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* RF-1: the reservation                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * RF-1: the reservation on the campaign: the fee that held its spots,
+ * where it stands, and what the checkout still asks for. Absent when none
+ * was ever taken; most bookings pay in full and never see one.
+ */
+export function ReservationCard({ reservation }: { reservation: CampaignReservation | null | undefined }) {
+    if (!reservation) return null;
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="campaign-reservation">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h3 className="text-base font-semibold text-foreground">Reservation</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        The spots were held against a fee. Folded into the checkout when the advertiser goes ahead; part of it kept when they do not.
+                    </p>
+                </div>
+                <StatusBadge status={reservationStatusMeta(reservation.status)} />
+            </div>
+            <FieldList
+                className="mt-4"
+                items={[
+                    ["Fee", <span key="fee" className="tabular-nums">{formatMoney(reservation.fee)}</span>],
+                    ["Fee due by", reservation.dueAt ? formatDateTime(reservation.dueAt) : "—"],
+                    ["Fee paid", reservation.paidAt ? formatDateTime(reservation.paidAt) : "Not paid"],
+                    ["Spots held until", reservation.holdUntil ? formatDateTime(reservation.holdUntil) : "—"],
+                    ["Still payable", reservation.payable ? <span key="pay" className="tabular-nums">{formatMoney(reservation.payable)}</span> : "—"],
+                    ...(reservation.retained
+                        ? ([["Retained", <span key="ret" className="tabular-nums">{formatMoney(reservation.retained)}</span>]] as [string, React.ReactNode][])
+                        : []),
+                    [
+                        "Payment",
+                        reservation.paymentId ? (
+                            <Link key="p" href="/finance/payments" className="font-mono text-xs underline-offset-4 hover:underline">
+                                {reservation.paymentId}
+                            </Link>
+                        ) : (
+                            "—"
+                        ),
+                    ],
+                ]}
+            />
+        </Card>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* The bill, as the review prices it                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the advertiser is asked to pay, exactly as `GET /campaigns/:id/review`
+ * prices it and Review &amp; pay draws it: spots + fees − discount + GST = total.
+ * GST-D: the discount comes off the taxable value, so the GST shown is net
+ * and the tax the discount took with it is printed under the discount. DQ-1:
+ * an accepted design quote is a fee line of its own. PS-1: each spot says
+ * who prints it. RF-1: the reservation offer, when the total earns one.
+ */
+export function BillCard({ campaign, review }: { campaign: CampaignDetail; review: CampaignReview | null }) {
+    if (!review || review.total === undefined) return null;
+    const lines = review.lines ?? [];
+    const money = (value: string | null | undefined) => (value === null || value === undefined ? "—" : formatMoney(value));
+    const discount = Number(review.discount ?? "0") > 0;
+    const offer = review.reservationFee ?? null;
+
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="campaign-bill">
+            <h3 className="text-base font-semibold text-foreground">The bill</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">As Review &amp; pay prices it: spots, fees, the discount off the taxable value, GST on what is paid.</p>
+
+            {lines.length > 0 && (
+                <ul className="mt-4 divide-y text-sm" data-testid="bill-lines">
+                    {lines.map((line) => {
+                        const printing = fulfilmentLabel(line.fulfilment, campaign.fulfilment);
+                        return (
+                            <li key={line.spotId} className="flex items-start justify-between gap-3 py-2">
+                                <div className="min-w-0">
+                                    <p className="truncate text-foreground">
+                                        {line.title}
+                                        {line.city ? <span className="text-muted-foreground"> · {line.city}</span> : null}
+                                    </p>
+                                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                        <span>
+                                            {line.days} day{line.days === 1 ? "" : "s"}
+                                            {line.quantity > 1 ? ` × ${line.quantity}` : ""}
+                                        </span>
+                                        {printing && <StatusBadge status={{ label: printing, tone: line.fulfilment ? "info" : "neutral" }} />}
+                                    </p>
+                                </div>
+                                <span className="shrink-0 tabular-nums text-foreground">{formatMoney(line.gross)}</span>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+
+            <dl className="mt-4 space-y-2 border-t pt-3 text-sm" data-testid="bill-totals">
+                <div className="flex items-center justify-between gap-4">
+                    <dt className="text-muted-foreground">Spots</dt>
+                    <dd className="tabular-nums text-foreground">{money(review.spotsSubtotal)}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                    <dt className="text-muted-foreground">Fees{review.designFee ? " (design included)" : ""}</dt>
+                    <dd className="tabular-nums text-foreground">{money(review.feesTotal)}</dd>
+                </div>
+                {review.designFee && (
+                    <div className="flex items-start justify-between gap-4 pl-4" data-testid="bill-design-fee">
+                        <dt className="text-muted-foreground">
+                            Design by ADX
+                            {review.designFee.note ? <span className="block text-xs">{review.designFee.note}</span> : null}
+                        </dt>
+                        <dd className="shrink-0 text-right tabular-nums text-foreground">
+                            {formatMoney(review.designFee.amount)}
+                            <span className="block text-xs text-muted-foreground">+ {formatMoney(review.designFee.gst)} GST</span>
+                        </dd>
+                    </div>
+                )}
+                {discount && (
+                    <div className="flex items-start justify-between gap-4" data-testid="bill-discount">
+                        <dt className="text-muted-foreground">
+                            Discount{review.promo ? ` (${review.promo.code})` : ""}
+                            {Number(review.discountGst ?? "0") > 0 ? (
+                                <span className="block text-xs">GST on the discounted part, {formatMoney(review.discountGst)}, comes off too</span>
+                            ) : null}
+                        </dt>
+                        <dd className="shrink-0 tabular-nums text-foreground">− {money(review.discount)}</dd>
+                    </div>
+                )}
+                <div className="flex items-center justify-between gap-4">
+                    <dt className="text-muted-foreground">GST{discount ? " (net)" : ""}</dt>
+                    <dd className="tabular-nums text-foreground">{money(review.gstAmount)}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t pt-2 font-medium">
+                    <dt className="text-foreground">Total</dt>
+                    <dd className="tabular-nums text-foreground">{money(review.total)}</dd>
+                </div>
+            </dl>
+
+            {offer && offer.enabled && offer.offered && (
+                <p className="mt-3 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground" data-testid="bill-reservation-offer">
+                    Reservable: {formatMoney(offer.amount)} ({offer.pct}% of the total) holds the spots for {offer.holdHours} hours, due within{" "}
+                    {offer.payWithinMinutes} minutes; {offer.retainPct}% is kept if the advertiser walks away.
+                </p>
+            )}
         </Card>
     );
 }

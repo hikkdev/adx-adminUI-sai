@@ -146,12 +146,13 @@ export function TaskEditForm({ task, projects, patch = workService.tasks.patch }
                                     emptyText="No active project matches."
                                     disabled={Boolean(task.parent)}
                                 />
-                                {task.parent && <p className="text-xs text-muted-foreground">A sub-task follows its parent&apos;s project.</p>}
                             </div>
                             <div className="space-y-1.5">
                                 <Label>Parent task</Label>
                                 <p className="flex h-10 items-center text-sm text-foreground">{task.parent ? task.parent.title : "None"}</p>
                             </div>
+                            {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                            {task.parent && <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">A sub-task follows its parent&apos;s project.</p>}
                         </div>
                         <div className="mt-4 border-t pt-4">
                             <LinkedRecordPicker
@@ -245,8 +246,9 @@ export function TaskEditForm({ task, projects, patch = workService.tasks.patch }
                             <div className="space-y-1.5">
                                 <Label htmlFor="progress">Progress (%)</Label>
                                 <Input id="progress" type="number" min={0} max={100} value={form.progress} onChange={(event) => set("progress", event.target.value)} className="tabular-nums" disabled={task.children.length > 0} />
-                                {task.children.length > 0 && <p className="text-xs text-muted-foreground">The mean of the sub-tasks&apos; progress — set theirs.</p>}
                             </div>
+                            {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                            {task.children.length > 0 && <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">Progress is the mean of the sub-tasks&apos; progress — set theirs.</p>}
                         </div>
                     </SectionCard>
                 </div>

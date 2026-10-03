@@ -161,15 +161,15 @@ describe("the test email", () => {
 
     it("opens a dialog prefilled with the operator's address and posts { to } to the email test route", async () => {
         backend.answer = verdict();
-        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.in" />);
 
         fireEvent.click(screen.getByRole("button", { name: "Send test email" }));
         const dialog = await screen.findByRole("dialog");
-        expect(within(dialog).getByLabelText("To")).toHaveValue("priya@adx.test");
+        expect(within(dialog).getByLabelText("To")).toHaveValue("priya@adx.in");
         fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
 
         await waitFor(() => expect(screen.getByTestId("email-test-verdict")).toBeInTheDocument());
-        expect(backend.calls).toEqual([{ method: "POST", path: "/integrations/email/test", body: { to: "priya@adx.test" } }]);
+        expect(backend.calls).toEqual([{ method: "POST", path: "/integrations/email/test", body: { to: "priya@adx.in" } }]);
     });
 
     it("starts blank without a session address and will not send until the address is one", async () => {
@@ -192,7 +192,7 @@ describe("the test email", () => {
             response: "250 Accepted [STATUS=new MSGID=Zt1.abc]",
             message: "Sent to the Ethereal test inbox - nothing was delivered; open the preview link to read it.",
         });
-        render(<EmailTestControl settings={{ email: email({ mode: "ETHEREAL" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ mode: "ETHEREAL" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         await sendTo();
 
         const panel = await screen.findByTestId("email-test-verdict");
@@ -207,7 +207,7 @@ describe("the test email", () => {
 
     it("prints an SMTP verdict: sent, the id, no preview link", async () => {
         backend.answer = verdict();
-        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         await sendTo();
 
         const panel = await screen.findByTestId("email-test-verdict");
@@ -226,7 +226,7 @@ describe("the test email", () => {
             response: null,
             message: "Invalid login: 535-5.7.8 Username and Password not accepted.",
         });
-        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         await sendTo();
 
         const panel = await screen.findByTestId("email-test-verdict");
@@ -238,33 +238,33 @@ describe("the test email", () => {
 
     it("sends to the address typed over the prefill", async () => {
         backend.answer = verdict();
-        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         await sendTo("  ops@adx.in ");
         await screen.findByTestId("email-test-verdict");
         expect(backend.calls[0].body).toEqual({ to: "ops@adx.in" });
     });
 
     it("is disabled with the reason while SMTP has no host and the mode is not Ethereal", () => {
-        render(<EmailTestControl settings={{ email: email(), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email(), resend: resend() }} operatorEmail="priya@adx.in" />);
         expect(screen.getByRole("button", { name: "Send test email" })).toBeDisabled();
         expect(screen.getByText(/SMTP has no host on file/)).toBeInTheDocument();
     });
 
     it("is disabled with the reason while Resend is primary without a key", () => {
-        render(<EmailTestControl settings={{ email: email({ primary: "RESEND" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ primary: "RESEND" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         expect(screen.getByRole("button", { name: "Send test email" })).toBeDisabled();
         expect(screen.getByText(/Resend is the primary door but has no API key/)).toBeInTheDocument();
     });
 
     it("is enabled under Ethereal with no host, and names the door it will use", () => {
-        render(<EmailTestControl settings={{ email: email({ mode: "ETHEREAL" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ mode: "ETHEREAL" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         expect(screen.getByRole("button", { name: "Send test email" })).toBeEnabled();
         expect(screen.getByText(EMAIL_DOOR_LABEL.ETHEREAL)).toBeInTheDocument();
     });
 
     it("says why when the route itself fails, and keeps the dialog open", async () => {
         backend.failure = new Error("Forbidden");
-        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.test" />);
+        render(<EmailTestControl settings={{ email: email({ host: "smtp.gmail.com" }), resend: resend() }} operatorEmail="priya@adx.in" />);
         await sendTo();
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Forbidden"));
         expect(screen.getByRole("dialog")).toBeInTheDocument();

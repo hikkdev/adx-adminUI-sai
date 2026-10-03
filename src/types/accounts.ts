@@ -1,5 +1,5 @@
 import type { KycQueueState } from "./kyc-state";
-import type { StatusMeta } from "./common";
+import type { AccountState, StatusMeta } from "./common";
 import type { KycDigio, KycDocumentReview, KycEscalation, KycLiveness, KycRecorded, KycRequest } from "./finance";
 
 /* ------------------------------------------------------------------ */
@@ -73,6 +73,9 @@ export interface AdvertiserKycCase {
     userId: string | null;
     /** N3-B: the party's state as the server derives it — AWAITING_DOCUMENTS from the moment the profile exists. */
     state: KycQueueState;
+    /** 2 Oct 2026: where the account stands; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     /** N3-B: the record's id, null while the profile has no record yet. */
     kycId: string | null;
     displayId: string | null;

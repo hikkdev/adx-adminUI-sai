@@ -146,7 +146,7 @@ describe("PinPicker — the address search", () => {
         fireEvent.focus(searchInput());
         fireEvent.change(searchInput(), { target: { value: "MG Road" } });
 
-        const options = await screen.findAllByRole("option", {}, { timeout: 2000 });
+        const options = await screen.findAllByRole("option");
         expect(options).toHaveLength(2);
         expect(options[1]).toHaveTextContent("Pune, Maharashtra");
 
@@ -168,7 +168,12 @@ describe("PinPicker — the address search", () => {
         expect(searchInput().value).toBe("MG Road, Bengaluru, Karnataka 560001");
         /* The marker the seam draws is the picked point. */
         expect(screen.getByTestId("marker")).toHaveAttribute("data-at", "12.9752,77.6057");
-        expect(screen.getByTestId("map-stub").getAttribute("data-camera")).toBe("12.9752,77.6057,16");
+        /* The camera is an effect's output, not the render's: `points` is computed
+           while rendering, so the marker is in the same commit as the inputs, but
+           `setCamera` runs after that commit. Asserting it synchronously reads the
+           PREVIOUS camera under load — the wide-India rest — which is a race, not a
+           bug in the picker. */
+        await waitFor(() => expect(screen.getByTestId("map-stub")).toHaveAttribute("data-camera", "12.9752,77.6057,16"));
     });
 
     it("falls back to the geocoder on Enter when nothing was predicted", async () => {
@@ -178,7 +183,7 @@ describe("PinPicker — the address search", () => {
 
         fireEvent.focus(searchInput());
         fireEvent.change(searchInput(), { target: { value: "Connaught Place" } });
-        await screen.findByText(/Nothing matches/, {}, { timeout: 2000 });
+        await screen.findByText(/Nothing matches/);
 
         fireEvent.keyDown(searchInput(), { key: "Enter" });
         await waitFor(() => expect(latInput().value).toBe("28.6315"));
@@ -191,7 +196,7 @@ describe("PinPicker — the address search", () => {
         render(<Harness />);
         fireEvent.focus(searchInput());
         fireEvent.change(searchInput(), { target: { value: "Nowhere at all" } });
-        await screen.findByText(/Nothing matches/, {}, { timeout: 2000 });
+        await screen.findByText(/Nothing matches/);
         fireEvent.keyDown(searchInput(), { key: "Enter" });
         expect(await screen.findByRole("alert")).toHaveTextContent("No address is known for that point.");
         expect(latInput().value).toBe("");
@@ -210,15 +215,15 @@ describe("PinPicker — the pin and the inputs", () => {
         expect(lngInput().value).toBe("72.987654");
         expect(screen.getByTestId("payload")).toHaveTextContent("19.123457|72.987654");
 
-        const line = await screen.findByTestId("pin-picker-reverse", {}, { timeout: 2000 });
-        await waitFor(() => expect(line).toHaveTextContent("Under the pin: Powai, Mumbai, Maharashtra 400076"), { timeout: 2000 });
+        const line = await screen.findByTestId("pin-picker-reverse");
+        await waitFor(() => expect(line).toHaveTextContent("Under the pin: Powai, Mumbai, Maharashtra 400076"));
         expect(backend.calls.filter((call) => call.path.startsWith("/geo/reverse"))).toEqual([{ method: "GET", path: "/geo/reverse?latitude=19.1234567&longitude=72.9876543" }]);
 
         fireEvent.click(screen.getByRole("button", { name: "Use this address" }));
         expect(onAddress).toHaveBeenCalledWith(expect.objectContaining({ formattedAddress: "Powai, Mumbai, Maharashtra 400076" }));
     });
 
-    it("moves the marker when a coordinate is typed, and draws none while the pair is incomplete or off the planet", () => {
+    it("moves the marker when a coordinate is typed, and draws none while the pair is incomplete or off the planet", async () => {
         render(<Harness />);
         expect(screen.queryByTestId("marker")).not.toBeInTheDocument();
 
@@ -227,7 +232,8 @@ describe("PinPicker — the pin and the inputs", () => {
 
         fireEvent.change(lngInput(), { target: { value: "77.59" } });
         expect(screen.getByTestId("marker")).toHaveAttribute("data-at", "12.97,77.59");
-        expect(screen.getByTestId("map-stub")).toHaveAttribute("data-camera", "12.97,77.59,16");
+        // The camera follows in an effect, one commit behind the marker.
+        await waitFor(() => expect(screen.getByTestId("map-stub")).toHaveAttribute("data-camera", "12.97,77.59,16"));
 
         fireEvent.change(latInput(), { target: { value: "28.61" } });
         expect(screen.getByTestId("marker")).toHaveAttribute("data-at", "28.61,77.59");
@@ -257,7 +263,7 @@ describe("PinPicker — without a vendor", () => {
 
         fireEvent.focus(searchInput());
         fireEvent.change(searchInput(), { target: { value: "MG Road" } });
-        expect(await screen.findByRole("option", {}, { timeout: 2000 })).toHaveTextContent("MG Road");
+        expect(await screen.findByRole("option")).toHaveTextContent("MG Road");
     });
 
     it("on fixtures disables the search, says why, and leaves the inputs alone", () => {

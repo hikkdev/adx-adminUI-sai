@@ -1,6 +1,9 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
+import type { KycEntityType } from "./kyc-entity-types";
 import { shapeKycSummary } from "./kyc-state";
+import { accountStateOf, accountStatusCountsOf, type AccountState } from "./account-state";
+import { rosterParams, type PartyRosterPage, type PartyRosterQuery } from "./party-roster";
 import { shapeListing, type AdminListing, type WireOwnListing } from "@/services/listings";
 import type {
     ComplianceCase,
@@ -18,6 +21,7 @@ import type {
     WireKycSummary,
     PublisherPerson,
     OnboardingFacts,
+    KycSummary,
 } from "@/types";
 
 /**
@@ -113,14 +117,32 @@ export interface WirePublisher {
     agentId: string | null;
     createdAt: string;
     listings?: { id: string }[];
+    /** 29 Sep 2026: the spots, counted on the `?page=` roster instead of joined; absent on the bare array, which joins them. */
+    listingCount?: number;
+    /**
+     * 29 Sep 2026: where the publisher stands on KYC — on the `?page=` roster
+     * the six facts with the server's `state`; on the bare array the record's
+     * own columns. Either shapes through `shapeKycSummary`.
+     */
+    kyc?: WireKycSummary | null;
     /** N2-B: the account behind the profile, on every roster row (the bare `?q=` array and the `?page=` list alike); null until somebody registers against it. */
     userId?: string | null;
     /** QR-14: who onboarded them; absent on a server older than the stamp. */
     onboarding?: OnboardingFacts | null;
+    /**
+     * Phase D: the entity type the publisher verifies as — the effective
+     * value (the stored column, else what `type` says, else null: asked at
+     * the Digio start) and whether it is the stored one. Absent on a server
+     * older than the column.
+     */
+    entityType?: KycEntityType | null;
+    entityTypeStored?: boolean;
     /* Lot A. Optional on the wire for rows older than the columns. */
     suspensionScopes?: SuspensionScope[];
     suspensionReason?: string | null;
     suspendedAt?: string | null;
+    /** 2 Oct 2026: ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED) — on a roster row. Absent from a server one release behind. */
+    accountState?: string | null;
 }
 
 /**
@@ -138,15 +160,24 @@ export interface RosterPublisher extends SuspensionColumns {
     userId: string | null;
     name: string;
     mobile: string;
+    /** 29 Sep 2026: the roster's Contact prints it beneath the phone. */
+    email: string | null;
     city: string | null;
     type: string | null;
     kycStatus: string;
+    /** 29 Sep 2026: the KYC state the queue row and the publisher page print — the roster's KYC status column. */
+    kyc: KycSummary;
     onboardingStatus: string | null;
     listingCount: number;
     onboardedByAgent: boolean;
     /** QR-14: who onboarded them, and how — null on a row older than the stamp. */
     onboarding: OnboardingFacts | null;
+    /** Phase D: the entity type the publisher verifies as (effective), null until one is known; and whether it is stored on the row. */
+    entityType: KycEntityType | null;
+    entityTypeStored: boolean;
     createdAt: string;
+    /** 2 Oct 2026 (the account lifecycle): where the account stands, on a roster row; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
 }
 
 /** `GET /publishers?page=` — E10-1: the list contract; `counts` is by `kycStatus`, counted with the KYC tab removed. */
@@ -156,6 +187,8 @@ export interface WirePublishersPage {
     page: number;
     pageSize: number;
     counts: Record<string, number>;
+    /** 2 Oct 2026: the count per account state (`?status=`), when the server sends it apart from the KYC `counts`. */
+    statusCounts?: Record<string, number>;
 }
 
 export function shapePublisher(wire: WirePublisher): RosterPublisher {
@@ -165,19 +198,25 @@ export function shapePublisher(wire: WirePublisher): RosterPublisher {
         userId: wire.userId ?? null,
         name: wire.name,
         mobile: wire.mobile,
+        email: wire.email ?? null,
         city: wire.city,
         type: wire.type,
         kycStatus: wire.kycStatus,
+        kyc: shapeKycSummary(wire.kyc, wire.kycStatus),
         onboardingStatus: wire.onboardingStatus ?? null,
-        listingCount: wire.listings?.length ?? 0,
+        // The `?page=` roster counts the spots; the bare array joins them.
+        listingCount: wire.listingCount ?? wire.listings?.length ?? 0,
         // DR 08 lets a publisher sign up with no agent at all; the roster says
         // which arrived that way rather than leaving the column blank.
         onboardedByAgent: wire.agentId !== null,
         onboarding: wire.onboarding ?? null,
+        entityType: wire.entityType ?? null,
+        entityTypeStored: wire.entityTypeStored ?? false,
         createdAt: wire.createdAt,
         suspensionScopes: wire.suspensionScopes ?? [],
         suspensionReason: wire.suspensionReason ?? null,
         suspendedAt: wire.suspendedAt ?? null,
+        accountState: accountStateOf(wire.accountState),
     };
 }
 
@@ -251,6 +290,9 @@ export function shapePublisherDetail(wire: WirePublisherDetail): Publisher {
         longitude: wire.longitude ?? null,
         person: wire.person ?? null,
         onboarding: wire.onboarding ?? null,
+        // Phase D: the entity type the publisher verifies as; null means it is asked at the Digio start.
+        entityType: wire.entityType ?? null,
+        entityTypeStored: wire.entityTypeStored ?? false,
     };
 }
 
@@ -354,6 +396,9 @@ function live() {
     return http;
 }
 
+/** The list contract's ceiling on `pageSize` — one directory read. */
+export const PUBLISHER_ROSTER_PAGE_SIZE = 100;
+
 export const supplyService = {
     /**
      * The roster. ADX sees every publisher; the same route answers an agent
@@ -364,8 +409,26 @@ export const supplyService = {
      * inside a domain this file already declares live.
      */
     roster: async (): Promise<RosterPublisher[]> => {
-        const rows = await http.get<WirePublisher[]>("/publishers");
+        /* 2 Oct 2026: the roster answers working accounts by default; a picker or a name lookup needs everyone. */
+        const rows = await http.get<WirePublisher[]>("/publishers?status=ALL");
         return (rows ?? []).map(shapePublisher);
+    },
+
+    /**
+     * 29 Sep 2026 — the directory, on the list contract, cut on the server
+     * by the five filters every party roster takes (`services/party-roster`).
+     * `cursor` is the page number to read (the first when null); the next is
+     * offered while the pages read so far fall short of `total`.
+     */
+    rosterPage: async (query: PartyRosterQuery, cursor: string | null): Promise<PartyRosterPage<RosterPublisher>> => {
+        const page = cursor ? Math.max(1, Number(cursor) || 1) : 1;
+        const params = rosterParams(query);
+        params.set("page", String(page));
+        params.set("pageSize", String(PUBLISHER_ROSTER_PAGE_SIZE));
+        const wire = await live().get<WirePublishersPage>(`/publishers?${params.toString()}`);
+        const rows = (wire.items ?? []).map(shapePublisher);
+        const read = (page - 1) * (wire.pageSize || PUBLISHER_ROSTER_PAGE_SIZE) + rows.length;
+        return { rows, total: wire.total, nextCursor: rows.length > 0 && read < wire.total ? String(page + 1) : null, statusCounts: accountStatusCountsOf(wire) };
     },
 
     /**
@@ -375,7 +438,8 @@ export const supplyService = {
      * the whole roster.
      */
     search: async (q: string, limit: number): Promise<RosterPublisher[]> => {
-        const params = new URLSearchParams({ q: q.trim(), page: "1", pageSize: String(limit) });
+        /* 2 Oct 2026: the roster answers working accounts by default; a picker or a name lookup needs everyone. */
+        const params = new URLSearchParams({ q: q.trim(), page: "1", pageSize: String(limit), status: "ALL" });
         const page = await http.get<WirePublishersPage>(`/publishers?${params.toString()}`);
         return (page.items ?? []).map(shapePublisher);
     },
@@ -423,6 +487,9 @@ export const supplyService = {
 
     /** QR-24: `POST /supply/rights/sweep` — the reminders and lapses the job would do at its next tick, now. */
     runRightsSweep: () => http.post<{ considered: number; lapsed: number; reminded: number }>("/supply/rights/sweep"),
+
+    /** 3 Oct 2026: `POST /supply/listings/:id/rights/remind` — the renewals desk asks the publisher to renew now (in-app, opens the listing); once a day per listing (429 inside it). `supply.edit`. */
+    remindRightsRenewal: (listingId: string) => http.post<unknown>(`/supply/listings/${listingId}/rights/remind`),
 
     /** `GET /supply/attempts` — one cursor page of the largest size, shaped; `cursor` reads the page after it. */
     attempts: async (cursor: string | null = null): Promise<CursorPage<ListingAttempt>> => {
@@ -508,6 +575,23 @@ export const supplyService = {
         body: { channel: string; outcome: string; note?: string }
     ) => http.post<unknown>(`/supply/compliance/cases/${caseId}/attempts`, body),
 
-    resolveComplianceCase: (caseId: string) =>
-        http.patch<unknown>(`/supply/compliance/cases/${caseId}/resolve`),
+    /** `PATCH /supply/compliance/cases/:caseId/resolve` — 3 Oct 2026: how it ended (`outcome`) and a `note`, onto the audit row. `supply.approve`. */
+    resolveComplianceCase: (caseId: string, body: { outcome?: string; note?: string } = {}) =>
+        http.patch<unknown>(`/supply/compliance/cases/${caseId}/resolve`, body),
+
+    /*
+     * 3 Oct 2026 — the verification queue's actions on a listing whose check
+     * is due or lapsed. None marks the listing verified.
+     */
+
+    /** `POST …/reverification/remind` — push + in-app to the publisher, opening the listing's photo check; once a day per listing (429 inside it). `supply.edit`. */
+    remindReverification: (listingId: string) => http.post<unknown>(`/supply/listings/${listingId}/reverification/remind`),
+
+    /** `POST …/reverification/site-check { agentId?, note? }` — an AUDIT field visit offered to a free agent in the listing's city (or the one named). `supply.edit`. */
+    dispatchSiteCheck: (listingId: string, body: { agentId?: string; note?: string } = {}) =>
+        http.post<unknown>(`/supply/listings/${listingId}/reverification/site-check`, body),
+
+    /** `POST …/reverification/extend { days: 1–30, reason }` — moves the due date and lifts the earnings pause until it; refused for a suspended listing. `supply.approve`. */
+    extendReverification: (listingId: string, body: { days: number; reason: string }) =>
+        http.post<unknown>(`/supply/listings/${listingId}/reverification/extend`, body),
 };

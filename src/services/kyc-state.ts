@@ -91,12 +91,16 @@ export function shapeKycStateCounts(counts: Record<string, number | undefined> |
     };
 }
 
-/** The chip strip — the six states and Escalated with the server's counts, "All" with the total. */
-export function kycStateChips(counts: KycStateCounts, total: number): { value: KycStateChip; label: string; count: number }[] {
+/**
+ * The chip strip — the six states and Escalated with the server's counts,
+ * "All" with the total. A party that is never escalated (agents,
+ * employees) passes `{ escalated: false }` and the strip stops at Verified.
+ */
+export function kycStateChips(counts: KycStateCounts, total: number, opts: { escalated?: boolean } = {}): { value: KycStateChip; label: string; count: number }[] {
     return [
         { value: "all", label: "All", count: total },
         ...KYC_QUEUE_STATES.map((state) => ({ value: state, label: KYC_STATE_META[state].label, count: counts[state] })),
-        { value: "ESCALATED", label: "Escalated", count: counts.escalated },
+        ...(opts.escalated === false ? [] : [{ value: "ESCALATED" as const, label: "Escalated", count: counts.escalated }]),
     ];
 }
 
@@ -106,15 +110,27 @@ export function kycStateTotal(counts: KycStateCounts): number {
 }
 
 /**
- * The header's count: "N awaiting documents · N under review · N past SLA".
+ * The header's count: "N awaiting documents · N under review · N past SLA"
+ * (the last part left off when `breached` is null — a queue with no clock).
  * Under review is what the desk has in hand — PENDING and NEEDS_INFO, the
  * two open record states; awaiting documents is the party-only state (a
  * REQUESTED party is still waiting on documents, so it is counted there too).
  */
-export function kycHeadline(counts: KycStateCounts, breached: number): string {
+export function kycHeadline(counts: KycStateCounts, breached: number | null): string {
     const awaiting = counts.AWAITING_DOCUMENTS + counts.REQUESTED;
     const review = counts.PENDING + counts.NEEDS_INFO;
-    return `${awaiting} awaiting documents · ${review} under review · ${breached} past SLA`;
+    const line = `${awaiting} awaiting documents · ${review} under review`;
+    return breached === null ? line : `${line} · ${breached} past SLA`;
+}
+
+/**
+ * The one-line summary under every KYC tab's title (2 Oct 2026 — one
+ * layout for the five tabs): "9 awaiting documents · 2 under review · 1 past
+ * SLA · 48h review SLA". A queue whose read carries no review clock (agents,
+ * employees) passes null and the line stops at what is under review.
+ */
+export function kycQueueSubtitle(counts: KycStateCounts, sla: { breached: number; slaHours: number } | null): string {
+    return sla ? `${kycHeadline(counts, sla.breached)} · ${sla.slaHours}h review SLA` : kycHeadline(counts, null);
 }
 
 /**

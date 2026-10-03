@@ -1,4 +1,4 @@
-import type { StatusMeta } from "./common";
+import type { StatusMeta, SuspensionScope } from "./common";
 
 /**
  * The publisher supply lifecycle, mirroring the backend `supply` module.
@@ -84,6 +84,8 @@ export const RIGHTS_STATE_META: Record<RightsState, StatusMeta> = {
 export interface RightsQueueRow {
     id: string;
     title: string;
+    /** 3 Oct 2026: the LST- reference; optional for a server one release behind. */
+    displayId?: string | null;
     publisherId: string | null;
     publisherName: string | null;
     status: ListingLifecycleStatus;
@@ -114,6 +116,14 @@ export interface VerificationQueueRow {
     verificationExpiresAt: string | null;
     status: ListingLifecycleStatus;
     state: VerificationState;
+    /* 3 Oct 2026 — the queue's actions read these; optional for a server one release behind. */
+    /** The LST- reference. */
+    displayId?: string | null;
+    /** Where the spot is — "Send an agent" picks one in this city. */
+    city?: string | null;
+    cityId?: string | null;
+    /** The desk's suspension sections in force (a lapse suspension has none). */
+    suspensionScopes?: SuspensionScope[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -237,7 +247,7 @@ export function funnelGate(row: PublisherFunnelRow): FunnelGate {
 /* Attempts                                                            */
 /* ------------------------------------------------------------------ */
 
-export type AttemptOrigin = "SELF" | "AGENT" | "ADMIN_SINGLE" | "ADMIN_BULK" | "SCRAPE";
+export type AttemptOrigin = "SELF" | "AGENT" | "ADMIN_SINGLE" | "ADMIN_BULK" | "SCRAPE" | "PUBLISHER_BULK";
 export type AttemptStatus = "DRAFT" | "AWAITING_ACCEPTANCE" | "ACCEPTED" | "ABANDONED";
 
 export const ATTEMPT_ORIGIN_META: Record<AttemptOrigin, string> = {
@@ -245,6 +255,8 @@ export const ATTEMPT_ORIGIN_META: Record<AttemptOrigin, string> = {
     AGENT: "Field agent",
     ADMIN_SINGLE: "Ops",
     ADMIN_BULK: "Bulk import",
+    /* BL-1: a publisher's own CSV/XLSX upload on the website. */
+    PUBLISHER_BULK: "Publisher bulk upload",
     SCRAPE: "Seeded",
 };
 
@@ -308,4 +320,7 @@ export interface ComplianceCase {
     openedAt: string;
     dueAt: string;
     attemptCount: number;
+    /** 3 Oct 2026: the listing's LST- reference and the last contact attempt; optional for a server one release behind. */
+    listingDisplayId?: string | null;
+    lastAttemptAt?: string | null;
 }

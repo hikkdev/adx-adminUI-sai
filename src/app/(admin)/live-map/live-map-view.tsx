@@ -2,19 +2,23 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { LocateFixed, Minus, Plus, RefreshCw, Search, X } from "lucide-react";
+import { Loader2, LocateFixed, Minus, Plus, RefreshCw, Search, Users, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FilterChips } from "@/components/adx/filter-chips";
 import { MapSurface, type MapPoint } from "@/components/adx/map";
+import { MapToneSwitch, mapControlButton, mapControlSurface } from "@/components/adx/map-tone-switch";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { cameraFor, cameraInto, stepZoom, type Camera } from "@/lib/map-geometry";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import { useApiResource } from "@/lib/use-api-resource";
+import { useCurrentPosition } from "@/lib/use-current-position";
+import { useMapTone } from "@/lib/use-map-tone";
 import {
     AGENT_STATES,
     AGENT_STATE_META,
@@ -45,10 +49,13 @@ interface LiveMapViewProps {
 
 type StateChip = AgentState | "ALL" | "ALERTS";
 
-/** Bengaluru, the platform's first city, when no agent has a fix to centre on. */
+/** Bengaluru, the platform's first city — only when neither the operator's own position nor any agent's fix is known. */
 const HOME: Camera = { latitude: 12.9716, longitude: 77.5946, zoom: 11 };
+/** The operator's own position opens at neighbourhood scale; the "my location" button closes in a step further. */
+const HERE_ZOOM = 13;
+const LOCATE_ZOOM = 14;
 
-type LivePoint = MapPoint & { kind: "agent" | "trail" | "destination"; agentId: string };
+type LivePoint = MapPoint & { kind: "agent" | "trail" | "destination" | "self"; agentId: string };
 
 /** The console route the trip's context opens. */
 function tripHref(trip: NonNullable<LiveAgent["trip"]>): string | null {
@@ -68,8 +75,14 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
     const [chip, setChip] = React.useState<StateChip>("ALL");
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [draft, setDraft] = React.useState(filter.q ?? "");
-    // The operator's camera, once they have moved it; until then the map frames the placed agents.
+    // The operator's camera, once they have moved it; until then the default view below.
     const [ownCamera, setOwnCamera] = React.useState<Camera | null>(null);
+    // The browser's position for the operator — asked when the page opens, remembered in this browser.
+    const here = useCurrentPosition();
+    // Light or dark map — the operator's choice, shared with the console's other maps.
+    const [tone, setTone] = useMapTone();
+    const hereLat = here.position?.latitude;
+    const hereLng = here.position?.longitude;
 
     const agents = React.useMemo(() => {
         const rows = snapshot?.agents ?? [];
@@ -81,14 +94,17 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
     const selected = agents.find((row) => row.agent.id === selectedId) ?? snapshot?.agents.find((row) => row.agent.id === selectedId) ?? null;
     const trail = useApiResource<TrailView | null>(`agent-locations:trail:${selectedId ?? "none"}:${selected?.fix?.at ?? ""}`, () => (selectedId ? agentLocationsService.trail(selectedId) : Promise.resolve(null)));
 
-    // The frame around every placed agent, recomputed only when the set of placed agents changes
-    // (not with every fix); the operator owns the camera from their first pan or zoom.
+    // The default view (the owner, 30 Sep 2026: "fetch my current location as default"): the operator's
+    // own position; without one, the frame around every placed agent, recomputed only when the set of
+    // placed agents changes (not with every fix); without either, Bengaluru. The operator owns the
+    // camera from their first pan or zoom.
     const placedKey = (snapshot?.agents ?? []).filter((row) => row.fix).map((row) => row.agent.id).join(",");
     const autoCamera = React.useMemo<Camera>(() => {
+        if (hereLat !== undefined && hereLng !== undefined) return { latitude: hereLat, longitude: hereLng, zoom: HERE_ZOOM };
         const placed = (snapshot?.agents ?? []).filter((row) => row.fix).map((row) => ({ id: row.agent.id, latitude: row.fix!.latitude, longitude: row.fix!.longitude }));
         return cameraFor(placed) ?? HOME;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [placedKey]);
+    }, [placedKey, hereLat, hereLng]);
     const camera = ownCamera ?? autoCamera;
     const setCamera = React.useCallback((next: Camera | ((current: Camera) => Camera)) => setOwnCamera((current) => (typeof next === "function" ? next(current ?? autoCamera) : next)), [autoCamera]);
 
@@ -108,8 +124,10 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
                 out.push({ id: `${selected.agent.id}:dest`, kind: "destination", agentId: selected.agent.id, latitude: trail.data.destination.latitude, longitude: trail.data.destination.longitude, tone: "info", title: trail.data.label ?? "Destination" });
             }
         }
+        // The operator themselves; it belongs to no agent, so picking it opens nothing.
+        if (hereLat !== undefined && hereLng !== undefined) out.push({ id: "you", kind: "self", agentId: "", latitude: hereLat, longitude: hereLng, tone: "info", title: "You are here" });
         return out;
-    }, [agents, selected, trail.data]);
+    }, [agents, selected, trail.data, hereLat, hereLng]);
 
     const counts = snapshot?.counts ?? { OFFLINE: 0, AVAILABLE: 0, TRAVELLING: 0, ON_SITE: 0, STILL: 0 };
     const chips: { value: StateChip; label: string; count?: number }[] = [
@@ -117,6 +135,26 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
         { value: "ALERTS", label: "Alerts", count: snapshot?.alerts ?? 0 },
         ...AGENT_STATES.map((state) => ({ value: state as StateChip, label: AGENT_STATE_META[state].label, count: counts[state] })),
     ];
+
+    const showMyLocation = async () => {
+        const result = await here.locate();
+        if (result.ok) {
+            setCamera((current) => ({ latitude: result.position.latitude, longitude: result.position.longitude, zoom: Math.max(current.zoom, LOCATE_ZOOM) }));
+            return;
+        }
+        if (result.reason === "denied") {
+            toast.error("Location is blocked for this site", { description: "Allow location in your browser's site settings — the icon left of the address — then press the button again." });
+        } else {
+            toast.error("Couldn't find your location", { description: "The browser gave no position. Check that location is switched on for this computer." });
+        }
+    };
+
+    const frameEveryone = () => {
+        const placed = (snapshot?.agents ?? []).filter((row) => row.fix).map((row) => ({ id: row.agent.id, latitude: row.fix!.latitude, longitude: row.fix!.longitude }));
+        const frame = cameraFor(placed);
+        if (frame) setCamera(frame);
+        else toast.info("No agent is sharing a position right now.");
+    };
 
     const select = (row: LiveAgent) => {
         setSelectedId(row.agent.id);
@@ -188,6 +226,7 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
                     <div className="absolute inset-0">
                         <MapSurface<LivePoint>
                             config={mapsConfig}
+                            tone={tone}
                             points={points}
                             camera={camera}
                             onCameraChange={setCamera}
@@ -200,23 +239,26 @@ export function LiveMapView({ snapshot, loading, error, phase, filter, onFilter,
                             caption="Every agent with a fix, coloured by state — red for late or gone dark, amber for idle or off route. A marker opens the agent; their trail and destination are drawn."
                         />
                     </div>
-                    <div className="absolute right-4 top-4 z-10 flex flex-col overflow-hidden rounded-md border bg-card shadow-sm">
-                        <button type="button" aria-label="Zoom in" className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted" onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, 1) }))}>
+                    <MapToneSwitch tone={tone} onChange={setTone} className="absolute left-4 top-4 z-10" />
+                    <div className={cn("absolute right-4 top-4 z-10 flex flex-col overflow-hidden rounded-md", mapControlSurface(tone))}>
+                        <button type="button" aria-label="Zoom in" className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))} onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, 1) }))}>
                             <Plus className="size-4" />
                         </button>
-                        <button type="button" aria-label="Zoom out" className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted" onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, -1) }))}>
+                        <button type="button" aria-label="Zoom out" className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))} onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, -1) }))}>
                             <Minus className="size-4" />
                         </button>
                         <button
                             type="button"
-                            aria-label="Frame everyone"
-                            className="flex size-8 items-center justify-center transition-colors hover:bg-muted"
-                            onClick={() => {
-                                const placed = (snapshot?.agents ?? []).filter((row) => row.fix).map((row) => ({ id: row.agent.id, latitude: row.fix!.latitude, longitude: row.fix!.longitude }));
-                                setCamera(cameraFor(placed) ?? HOME);
-                            }}
+                            aria-label="Show my location"
+                            title="Show my location"
+                            disabled={here.status === "locating"}
+                            className={cn("flex size-8 items-center justify-center border-b transition-colors disabled:opacity-60", mapControlButton(tone))}
+                            onClick={() => void showMyLocation()}
                         >
-                            <LocateFixed className="size-4" />
+                            {here.status === "locating" ? <Loader2 className="size-4 animate-spin" /> : <LocateFixed className="size-4" />}
+                        </button>
+                        <button type="button" aria-label="Frame everyone" title="Frame every agent with a position" className={cn("flex size-8 items-center justify-center transition-colors", mapControlButton(tone))} onClick={frameEveryone}>
+                            <Users className="size-4" />
                         </button>
                     </div>
                     {selected ? <SelectedCard row={selected} trail={trail.data ?? null} onClose={() => setSelectedId(null)} /> : null}

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 /**
  * Lot K2 — the Admin users tab.
@@ -79,6 +79,12 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
         backend.calls.push({ method, path, body });
         if (method === "GET" && path === "/users/me") return { id: "u_me", roleConfig: null, isSuperAdmin: true, roles: ["ADMIN"] };
         if (method === "GET" && path === "/roles-config") return [];
+        if (method === "GET" && path === "/users/invites")
+            return [
+                { id: "inv_1", email: "new.ops@adx.in", method: "PASSWORD", roleConfigId: null, expiresAt: "2026-10-09T00:00:00.000Z", acceptedAt: null, revokedAt: null, createdAt: "2026-10-02T00:00:00.000Z", status: "OPEN" },
+                { id: "inv_2", email: "late@adx.in", method: "GOOGLE", roleConfigId: null, expiresAt: "2026-09-20T00:00:00.000Z", acceptedAt: null, revokedAt: null, createdAt: "2026-09-13T00:00:00.000Z", status: "EXPIRED" },
+                { id: "inv_3", email: "joined@adx.in", method: "PASSWORD", roleConfigId: null, expiresAt: "2026-09-20T00:00:00.000Z", acceptedAt: "2026-09-14T00:00:00.000Z", revokedAt: null, createdAt: "2026-09-13T00:00:00.000Z", status: "ACCEPTED" },
+            ];
         if (method === "PUT") return { userId: "u_ops", roleConfig: { id: "r_sys", name: "Super admin" } };
         return { message: "ok" };
     };
@@ -142,6 +148,29 @@ describe("the facet path", () => {
         expect(screen.getByText("7 codes left")).toBeInTheDocument();
         expect(screen.getByText("SMS")).toBeInTheDocument();
         expect(screen.getByText("Never signed in")).toBeInTheDocument();
+    });
+});
+
+/**
+ * 2 Oct 2026: Pending invitations moved here from Users › Accounts (which
+ * keeps a one-line notice): the open and the expired ones, each with its
+ * expiry and its actions; accepted ones are history and are not listed.
+ */
+describe("Pending invitations", () => {
+    it("is a section of the tab, with each invitation's expiry and the resend and revoke actions", async () => {
+        render(<AdminsLoader />);
+        const section = await screen.findByTestId("pending-invitations");
+        expect(section).toHaveAttribute("id", "invitations");
+        expect(within(section).getByRole("heading", { name: "Pending invitations" })).toBeInTheDocument();
+        expect(section).toHaveTextContent("new.ops@adx.in");
+        expect(section).toHaveTextContent(/Expires 9 Oct 2026/);
+        expect(section).toHaveTextContent("late@adx.in");
+        expect(section).toHaveTextContent(/Expired 20 Sept? 2026/);
+        expect(section).not.toHaveTextContent("joined@adx.in");
+        expect(within(section).getAllByRole("button", { name: "Resend" })).toHaveLength(2);
+        expect(within(section).getAllByRole("button", { name: "Revoke" })).toHaveLength(1);
+        // Drawn once on the tab.
+        expect(screen.getAllByTestId("pending-invitations")).toHaveLength(1);
     });
 });
 

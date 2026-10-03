@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advertiserStatus, lastActivityAt, shapeAdvertiser } from "./advertisers";
+import { advertiserBody, advertiserStatus, lastActivityAt, shapeAdvertiser } from "./advertisers";
 
 /**
  * Whether an advertiser can spend, and how the console says so.
@@ -77,6 +77,25 @@ describe("shaping the row", () => {
     });
 });
 
+describe("the entity type (Phase D)", () => {
+    const wire = { id: "adv_1", name: "Zomato", displayId: null, contact: "9876543210", email: null, type: "COMMERCIAL" as const, companyName: null, gstin: null, city: null, state: null, kycStatus: "PENDING" as const, activatedAt: null, createdAt: "2026-01-08T00:00:00.000Z" };
+
+    it("carries the effective entity type and whether it is stored, off the by-id read and a roster row alike", () => {
+        expect(shapeAdvertiser({ ...wire, entityType: "LLP_PARTNERSHIP", entityTypeStored: true })).toMatchObject({ entityType: "LLP_PARTNERSHIP", entityTypeStored: true });
+        expect(shapeAdvertiser({ ...wire, type: "INDIVIDUAL", entityType: "INDIVIDUAL", entityTypeStored: false })).toMatchObject({ entityType: "INDIVIDUAL", entityTypeStored: false });
+    });
+
+    it("is null and not stored for a commercial account nobody has typed, and on a server older than the column", () => {
+        expect(shapeAdvertiser({ ...wire, entityType: null, entityTypeStored: false })).toMatchObject({ entityType: null, entityTypeStored: false });
+        expect(shapeAdvertiser(wire)).toMatchObject({ entityType: null, entityTypeStored: false });
+    });
+
+    it("rides the PATCH only when the desk names one", () => {
+        expect(advertiserBody({ city: "Pune", entityType: "COMPANY" })).toEqual({ city: "Pune", entityType: "COMPANY" });
+        expect(advertiserBody({ city: "Pune" })).not.toHaveProperty("entityType");
+    });
+});
+
 describe("the last activity — Lot G (CG3)", () => {
     it("is the newest `at` on the summary's feed, whatever order the server merged it in", () => {
         expect(
@@ -101,5 +120,20 @@ describe("the last activity — Lot G (CG3)", () => {
         const base = { id: "adv_1", name: "Zomato", displayId: null, contact: "9876543210", email: null, type: "COMMERCIAL" as const, companyName: null, gstin: null, city: null, state: null, kycStatus: "VERIFIED" as const, activatedAt: null, createdAt: "2026-01-08T00:00:00.000Z" };
         expect(shapeAdvertiser({ ...base, industry: "Food & beverage" }).industry).toBe("Food & beverage");
         expect(shapeAdvertiser(base).industry).toBeNull();
+    });
+});
+
+describe("the roster's contact and KYC (29 Sep 2026)", () => {
+    const wire = { id: "adv_9", name: "Satyapal Raj", displayId: "ADV-2509-2603", mobile: "+919507842149", email: "satya@example.com", type: "INDIVIDUAL", companyName: null, gstin: null, city: null, state: null, kycStatus: "PENDING", activatedAt: null, createdAt: "2026-09-25T00:00:00.000Z" };
+
+    it("reads the phone the backend sends (mobile) into the Contact column, with the email beside it", () => {
+        const row = shapeAdvertiser(wire as never);
+        expect(row.contact).toBe("+919507842149");
+        expect(row.email).toBe("satya@example.com");
+    });
+
+    it("carries the KYC state the roster read sends", () => {
+        expect(shapeAdvertiser({ ...wire, kyc: { state: "PENDING", kycId: "kyc_1", submittedAt: "2026-09-26T00:00:00.000Z" } } as never).kyc?.state).toBe("PENDING");
+        expect(shapeAdvertiser({ ...wire, kyc: { state: "AWAITING_DOCUMENTS" } } as never).kyc?.state).toBe("AWAITING_DOCUMENTS");
     });
 });

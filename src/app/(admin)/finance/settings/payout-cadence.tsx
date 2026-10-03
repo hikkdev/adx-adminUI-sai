@@ -140,8 +140,9 @@ function CadenceForm({ cadence, schedule, onChanged }: PayoutCadenceProps & { ca
                             onChange={(event) => setDraft((state) => ({ ...state, hourIst: event.target.value }))}
                             aria-invalid={hour === null}
                         />
-                        <p className="text-xs text-muted-foreground">The whole hour, 0 to 23. The first tick at or after it drafts.</p>
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-1 text-xs text-muted-foreground sm:col-span-2">The hour is a whole hour, 0 to 23. The first tick at or after it drafts.</p>
                 </div>
 
                 <dl className="grid gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-xs sm:grid-cols-2">

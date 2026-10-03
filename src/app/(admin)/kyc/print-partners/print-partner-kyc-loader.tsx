@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { isLive } from "@/lib/api-config";
 import { kycStateFilter } from "@/services/kyc-state";
 import { printPartnerKycService, type PrintPartnerKycQueue } from "@/services/print-partner-kyc";
+import { useShowInactive } from "../_shared/show-inactive";
 import { useStateChip } from "../_shared/use-state-chip";
 import { PrintPartnerKycQueueView } from "./print-partner-kyc-queue";
 
@@ -26,11 +27,13 @@ export interface LoadedPartnerQueue {
 export function PrintPartnerKycLoader() {
     const live = isLive("kyc");
     const [chip, setChip] = useStateChip();
+    /* 2 Oct 2026: working accounts only, unless the switch asks for the inactive too. */
+    const [inactive, setInactive] = useShowInactive();
 
-    const resource = useApiResource<LoadedPartnerQueue>(`print-partner-kyc:queue:${chip}:${live}`, async () => {
+    const resource = useApiResource<LoadedPartnerQueue>(`print-partner-kyc:queue:${chip}:${inactive}:${live}`, async () => {
         const [everything, visible] = await Promise.all([
-            printPartnerKycService.queue(),
-            chip === "all" ? Promise.resolve(null) : printPartnerKycService.queue(kycStateFilter(chip)),
+            printPartnerKycService.queue({ includeInactive: inactive }),
+            chip === "all" ? Promise.resolve(null) : printPartnerKycService.queue({ ...kycStateFilter(chip), includeInactive: inactive }),
         ]);
         return { everything, visible: visible ?? everything };
     });
@@ -47,7 +50,7 @@ export function PrintPartnerKycLoader() {
 
     return (
         <ResourceBoundary resource={resource}>
-            {(data) => <PrintPartnerKycQueueView loaded={data} chip={chip} onChip={setChip} onChanged={resource.reload} />}
+            {(data) => <PrintPartnerKycQueueView loaded={data} chip={chip} onChip={setChip} showInactive={inactive} onShowInactive={setInactive} onChanged={resource.reload} />}
         </ResourceBoundary>
     );
 }

@@ -2,7 +2,7 @@ import type { StatusMeta } from "./common";
 import type { KycSummary } from "./kyc-state";
 import type { AdvertiserType } from "./advertisers";
 import type { AdvertiserKycStatus } from "./accounts";
-import type { SuspensionColumns } from "./common";
+import type { AccountState, SuspensionColumns } from "./common";
 
 /* ------------------------------------------------------------------ */
 /* Publishers                                                          */
@@ -84,12 +84,23 @@ export interface Publisher extends SuspensionColumns {
     /** QR-13: the address the ladder collects, its state and its pin. */
     address: string | null;
     state: string | null;
+    /** The address's PIN — optional on the type while an older backend answers without it. */
+    postalCode?: string | null;
     latitude: number | null;
     longitude: number | null;
     /** QR-13: the person behind the account — what the desk's Edit details drawer prefills from. Null while no account backs the profile. */
     person: PublisherPerson | null;
     /** QR-14: who onboarded them, and how. */
     onboarding: OnboardingFacts | null;
+    /**
+     * Phase D: `KycEntityType` — what the publisher verifies as, which picks
+     * the Digio workflow. The effective value: the stored column, else what
+     * `type` says, else null (asked when verification starts). Labelled by
+     * `services/kyc-entity-types`.
+     */
+    entityType: string | null;
+    /** Phase D: whether `entityType` is the stored column rather than derived from `type`. */
+    entityTypeStored: boolean;
 }
 
 /** QR-14: who onboarded a party, and how — the stamp every door writes, with the person named. */
@@ -168,6 +179,9 @@ export const ADVERTISER_STATUS_META: Record<AdvertiserStatus, StatusMeta> = {
  */
 export interface Advertiser extends SuspensionColumns {
     id: string;
+    /** 2 Oct 2026 (the account lifecycle): where the account stands, on a roster row; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     /** AG-5: the importance band — INDIVIDUAL, SMALL_AGENCY or LARGE_AGENCY; null from an older server. */
     sizeBand?: string | null;
     name: string;
@@ -198,10 +212,24 @@ export interface Advertiser extends SuspensionColumns {
     joinedAt: string;
     /** QR-15: the billing address the app's profile gate collects. */
     billingAddress?: string | null;
+    /** AD-1 (DR 12 board 04): the PIN (six digits) and the country on the billing address. Absent on a row older than the columns. */
+    postalCode?: string | null;
+    country?: string | null;
     /** QR-15: the person behind the account, off `GET /advertisers/:id` — what the desk's Edit details drawer prefills from. Null while no account backs the profile; absent on a list row. */
     person?: PartyPerson | null;
     /** QR-14/15: who onboarded them, and how. Absent on a row older than the stamp. */
     onboarding?: OnboardingFacts | null;
+    /** 29 Sep 2026: the campaigns, counted on the roster read — the roster's Activity. Absent on the by-id read. */
+    campaignCount?: number | null;
+    /**
+     * Phase D: `KycEntityType` — what the advertiser verifies as, which picks
+     * the Digio workflow. The effective value: the stored column, else what
+     * `type` says, else null (asked when verification starts). Labelled by
+     * `services/kyc-entity-types`. Absent on a row older than the column.
+     */
+    entityType?: string | null;
+    /** Phase D: whether `entityType` is the stored column rather than derived from `type`. */
+    entityTypeStored?: boolean;
 }
 
 /** QR-15: the same person block on both parties. */
@@ -244,11 +272,16 @@ export type AgentTier = string;
  */
 export interface Agent extends SuspensionColumns {
     id: string;
+    /** 2 Oct 2026 (the account lifecycle): where the account stands, on a roster row; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     userId: string;
     /** N3-B: the party's KYC state and the record's facts, as `GET /agents/:id` derives them — the queue row's word. */
     kyc: KycSummary;
     /** AGT-1009-2601; null on rows older than the identifier migration. */
     displayId: string | null;
+    /** 28 Sep 2026: the person's own ADX-… id (`User.displayId`), on the by-id read; null where the read does not carry it. */
+    personDisplayId?: string | null;
     /** `User.name` is nullable — a row created from a bare number has none. */
     name: string | null;
     /** Normalised, +91 and ten digits. */
@@ -289,6 +322,12 @@ export interface Agent extends SuspensionColumns {
      * the columns; an old row reads ACTIVE.
      */
     engagement: AgentEngagement | null;
+    /** 29 Sep 2026: the side the agent works, on the roster read — the roster's Type. Absent elsewhere. */
+    side?: "PUBLISHER" | "ADVERTISER" | null;
+    /** 29 Sep 2026: where the profile came from (`AgentSourceKind`) — the roster's Onboarded. */
+    sourceKind?: string | null;
+    /** 29 Sep 2026: the publishers and advertisers the agent brought in, counted on the roster read — the roster's Activity. */
+    onboardedCount?: number | null;
 }
 
 /** AG-1: the ladder stage, the grade and the engagement as `GET /agents/:id` carries them. */

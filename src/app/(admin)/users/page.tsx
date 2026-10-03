@@ -6,7 +6,7 @@ import { UsersOverviewView } from "./users-overview";
 export const metadata: Metadata = { title: "Users" };
 
 /** The facets the accounts directory keeps in its URL — a link carrying one meant the table, and still lands on it. */
-const DIRECTORY_FACETS = ["state", "role", "sort"] as const;
+const DIRECTORY_FACETS = ["state", "role"] as const;
 
 /**
  * The section's landing tab — package O-C: the overview over

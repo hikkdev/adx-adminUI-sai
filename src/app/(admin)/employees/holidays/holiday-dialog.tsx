@@ -32,6 +32,10 @@ interface HolidayDialogProps {
  * national day; the kind (Lot G, Q123) is Public unless picked otherwise,
  * which is also the server's default. A 409 is another holiday already on
  * that day for that region, and the message says so.
+ *
+ * HC-1: a row the holiday calendar keeps says, before it is edited, that
+ * the edit makes it the editor's — the server turns it MANUAL and the sync
+ * stops updating it.
  */
 export function HolidayDialog({ holiday, defaultYear, open, onOpenChange, onSaved }: HolidayDialogProps) {
     const [form, setForm] = React.useState({
@@ -90,6 +94,11 @@ export function HolidayDialog({ holiday, defaultYear, open, onOpenChange, onSave
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
+                        {holiday?.source === "CALENDAR" && (
+                            <p data-testid="holiday-calendar-edit-note" className="rounded-md bg-info-soft px-3 py-2 text-sm text-info">
+                                This day comes from the holiday calendar. Editing it keeps your version; the calendar stops updating it.
+                            </p>
+                        )}
                         <div className="grid gap-1.5">
                             <Label htmlFor="holiday-name">Holiday</Label>
                             <Input

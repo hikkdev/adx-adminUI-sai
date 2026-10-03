@@ -103,12 +103,25 @@ interface DataTableProps<TData, TValue> {
     data: TData[];
     /** Placeholder for the global search input; omit to hide search. */
     searchPlaceholder?: string;
+    /** What the search box holds on first draw — a link that names one party (`?q=`, the rosters' "Review KYC"). */
+    initialSearch?: string;
     /** Extra toolbar controls rendered next to the search input. */
     toolbar?: React.ReactNode;
     /** Show the column-visibility "Columns" menu. Default true. */
     showColumnToggle?: boolean;
-    /** Rendered inside a bulk-action bar whenever rows are selected. */
-    bulkActions?: (rows: TData[], clearSelection: () => void) => React.ReactNode;
+    /**
+     * Rendered inside a bulk-action bar whenever rows are selected. The third
+     * argument narrows the selection to the rows given — how a bulk run keeps
+     * the rows that failed selected and lets the rest go. Pair it with
+     * `getRowId`, so the selection survives the reload that follows a run.
+     */
+    bulkActions?: (rows: TData[], clearSelection: () => void, keepSelected: (rows: TData[]) => void) => React.ReactNode;
+    /**
+     * A row's stable id. Without it a row is known by its index, which is
+     * fine until the data reloads in a different order; a table whose
+     * selection must outlive a reload (a bulk run) passes the record's key.
+     */
+    getRowId?: (row: TData) => string;
     onRowClick?: (row: TData) => void;
     emptyState?: React.ReactNode;
     initialPageSize?: number;
@@ -129,6 +142,32 @@ interface DataTableProps<TData, TValue> {
      */
     sorting?: SortingState;
     onSortingChange?: (sorting: SortingState) => void;
+    /**
+     * Columns drawn hidden until the "Columns" menu turns them on — column
+     * id to false. For a table whose default layout is shared with other
+     * desks (the party rosters) and whose own extras stay one click away.
+     */
+    initialColumnVisibility?: VisibilityState;
+    /**
+     * A row's detail, drawn full width under it while `isRowExpanded` says
+     * so — the ledger's legs under their transaction. The caller owns which
+     * rows are open (usually toggled from `onRowClick`).
+     */
+    renderExpanded?: (row: TData) => React.ReactNode;
+    isRowExpanded?: (row: TData) => boolean;
+    /** A line between the toolbar and the table — a server's "₹X across N rows" for the filtered set. */
+    aboveTable?: React.ReactNode;
+    /**
+     * 3 Oct 2026 (the owner: "is it possible to see the listings in a grid
+     * view with photos"): the same rows drawn as cards. Everything else is
+     * this table's — the search, the toolbar, the sort, the paging, the
+     * selection and the bulk bar — so the two views can never disagree
+     * about which rows are on screen or ticked. Each card gets the row's
+     * checkbox on its top-left corner; a click elsewhere on it is a row
+     * click. Without `renderCard` the table is drawn whatever `view` says.
+     */
+    view?: "table" | "grid";
+    renderCard?: (row: TData) => React.ReactNode;
     className?: string;
 }
 
@@ -136,9 +175,11 @@ export function DataTable<TData, TValue>({
     columns,
     data,
     searchPlaceholder,
+    initialSearch,
     toolbar,
     showColumnToggle = true,
     bulkActions,
+    getRowId,
     onRowClick,
     emptyState,
     initialPageSize = 10,
@@ -146,13 +187,20 @@ export function DataTable<TData, TValue>({
     showPagination = true,
     sorting: controlledSorting,
     onSortingChange,
+    initialColumnVisibility,
+    renderExpanded,
+    isRowExpanded,
+    aboveTable,
+    view = "table",
+    renderCard,
     className,
 }: DataTableProps<TData, TValue>) {
+    const grid = view === "grid" && renderCard !== undefined;
     const [ownSorting, setOwnSorting] = React.useState<SortingState>([]);
     const manualSorting = controlledSorting !== undefined;
     const sorting = manualSorting ? controlledSorting : ownSorting;
-    const [globalFilter, setGlobalFilter] = React.useState("");
-    const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
+    const [globalFilter, setGlobalFilter] = React.useState(initialSearch ?? "");
+    const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(() => initialColumnVisibility ?? {});
     const [rowSelection, setRowSelection] = React.useState({});
 
     /**
@@ -198,6 +246,7 @@ export function DataTable<TData, TValue>({
                 .toLowerCase();
             return haystack.includes(String(filterValue).toLowerCase());
         },
+        ...(getRowId ? { getRowId: (row: TData) => getRowId(row) } : {}),
         getCoreRowModel: getCoreRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
         getSortedRowModel: getSortedRowModel(),
@@ -218,6 +267,7 @@ export function DataTable<TData, TValue>({
     };
 
     const hasToolbar = searchPlaceholder || toolbar || showColumnToggle;
+    const pageRows = table.getRowModel().rows;
 
     return (
         <div className={cn("space-y-4", className)}>
@@ -235,7 +285,8 @@ export function DataTable<TData, TValue>({
                         </div>
                     )}
                     {toolbar}
-                    {showColumnToggle && (
+                    {/* Columns belong to the table; a grid of cards has none to hide. */}
+                    {showColumnToggle && !grid && (
                         <div className="ml-auto">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -273,12 +324,70 @@ export function DataTable<TData, TValue>({
                     <div className="flex items-center gap-2">
                         {bulkActions(
                             selectedRows.map((row) => row.original),
-                            () => table.resetRowSelection()
+                            () => table.resetRowSelection(),
+                            (keep) => {
+                                const wanted = new Set(keep);
+                                table.setRowSelection(
+                                    Object.fromEntries(
+                                        table
+                                            .getCoreRowModel()
+                                            .rows.filter((row) => wanted.has(row.original))
+                                            .map((row) => [row.id, true])
+                                    )
+                                );
+                            }
                         )}
                     </div>
                 </div>
             )}
 
+            {aboveTable}
+
+            {grid ? (
+                <div className="space-y-3" data-testid="data-grid">
+                    {bulkActions && pageRows.length > 0 ? (
+                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                            <Checkbox
+                                checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
+                                onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+                                aria-label="Select all rows"
+                            />
+                            Select every card on this page
+                        </label>
+                    ) : null}
+                    {pageRows.length ? (
+                        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            {pageRows.map((row) => (
+                                <li
+                                    key={row.id}
+                                    data-state={row.getIsSelected() ? "selected" : undefined}
+                                    className={cn(
+                                        "group relative overflow-hidden rounded-lg border bg-card transition-colors hover:border-foreground/30",
+                                        onRowClick && "cursor-pointer",
+                                        row.getIsSelected() && "border-primary ring-1 ring-primary",
+                                    )}
+                                    onClick={(event) => handleRowClick(event, row)}
+                                >
+                                    {renderCard(row.original)}
+                                    {bulkActions ? (
+                                        <span className="absolute left-2 top-2 z-10 flex size-7 items-center justify-center rounded-md bg-card/95 shadow-sm">
+                                            <Checkbox
+                                                checked={row.getIsSelected()}
+                                                onCheckedChange={(value) => row.toggleSelected(!!value)}
+                                                aria-label="Select row"
+                                            />
+                                        </span>
+                                    ) : null}
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <div className="flex h-48 items-center justify-center rounded-lg border bg-card">
+                            {emptyState ?? <p className="text-sm text-muted-foreground">No results found.</p>}
+                        </div>
+                    )}
+                </div>
+            ) : (
             <div className="overflow-hidden rounded-lg border bg-card">
                 <Table>
                     <TableHeader className="bg-muted/50">
@@ -303,20 +412,32 @@ export function DataTable<TData, TValue>({
                     </TableHeader>
                     <TableBody>
                         {table.getRowModel().rows.length ? (
-                            table.getRowModel().rows.map((row) => (
-                                <TableRow
-                                    key={row.id}
-                                    data-state={row.getIsSelected() && "selected"}
-                                    className={cn(onRowClick && "cursor-pointer")}
-                                    onClick={(event) => handleRowClick(event, row)}
-                                >
-                                    {row.getVisibleCells().map((cell) => (
-                                        <TableCell key={cell.id} className="py-3">
-                                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                        </TableCell>
-                                    ))}
-                                </TableRow>
-                            ))
+                            table.getRowModel().rows.map((row) => {
+                                const expanded = renderExpanded ? (isRowExpanded?.(row.original) ?? false) : undefined;
+                                return (
+                                    <React.Fragment key={row.id}>
+                                        <TableRow
+                                            data-state={row.getIsSelected() && "selected"}
+                                            aria-expanded={expanded}
+                                            className={cn(onRowClick && "cursor-pointer", expanded && "border-b-0 bg-muted/30")}
+                                            onClick={(event) => handleRowClick(event, row)}
+                                        >
+                                            {row.getVisibleCells().map((cell) => (
+                                                <TableCell key={cell.id} className="py-3">
+                                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                                </TableCell>
+                                            ))}
+                                        </TableRow>
+                                        {expanded && renderExpanded && (
+                                            <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                                <TableCell colSpan={row.getVisibleCells().length} className="px-4 pb-4 pt-0">
+                                                    {renderExpanded(row.original)}
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })
                         ) : (
                             <TableRow>
                                 <TableCell colSpan={resolvedColumns.length} className="h-48 p-0">
@@ -331,6 +452,7 @@ export function DataTable<TData, TValue>({
                     </TableBody>
                 </Table>
             </div>
+            )}
 
             {showPagination && (
             <div className="flex flex-wrap items-center justify-between gap-3">

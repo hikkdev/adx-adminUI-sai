@@ -106,7 +106,7 @@ export function InviteDialog({ open, onOpenChange, roles, onInvited }: InviteDia
                                 type="email"
                                 value={email}
                                 onChange={(event) => setEmail(event.target.value)}
-                                placeholder="name@adx.co"
+                                placeholder="name@adx.in"
                                 autoComplete="off"
                                 autoFocus
                             />

@@ -123,6 +123,8 @@ export const ORDER_STAGE_OF: Record<OrderStatus, string> = Object.fromEntries(
 
 export interface Order {
     id: string;
+    /** BK-1: BKG-DDMM-YYNN, the booking's reference; null on a row minted before the series until the backfill runs. */
+    displayId?: string | null;
     status: OrderStatus;
     /** The listing's title, joined by the API. */
     listing: string;
@@ -136,6 +138,12 @@ export interface Order {
     /** Free text the advertiser typed, not a link to a campaign record —
      *  there is no campaign table. */
     campaignName: string | null;
+    /**
+     * OM-1: the campaign's id, when the order came from one, so the list and
+     * the detail can link up to it. Null for an order the advertiser placed
+     * straight onto a listing through the legacy route.
+     */
+    campaignId: string | null;
     /** The assigned agent's name, when one is on it. */
     agent: string | null;
     agentId: string | null;
@@ -152,6 +160,12 @@ export interface Order {
     /** The agreed install time, once both sides have settled on one. */
     slotTime: string | null;
     createdAt: string;
+    /**
+     * PB-1 (the owner, 2 Oct 2026): who placed the order — the login, and the
+     * business (advertiser profile) it holds. Admin reads only; null on the
+     * seeded rows and when the login is gone.
+     */
+    placedBy?: OrderPlacedBy | null;
     /**
      * Lot B (Q102): what the accepted agent will be paid for the install, as
      * a decimal string — copied onto the offer when it was made so a rate
@@ -189,6 +203,75 @@ export interface Order {
     spot?: OrderSpot | null;
     /** The artwork the advertiser attached, when any — a URL on the order row. Detail read only. */
     designUrl?: string | null;
+    /**
+     * SI-N (DR 12 board 10): the publisher's own self-install proof — the
+     * condition photos before, the installed shot after, the collection
+     * shot, and what they wrote beside them. Null while none of it was sent.
+     */
+    selfInstall?: OrderSelfInstall | null;
+    /**
+     * Order screening (the owner, 2 Oct 2026): the automatic score, its
+     * signals, the review and any hold. Admin reads only — never on a party
+     * read. Null when the read does not carry the fields (a backend older
+     * than the screening); an object with a null score when it does and the
+     * order has not been scored yet.
+     */
+    screening?: OrderScreening | null;
+}
+
+/** One signal behind an order's score — what it weighed, what it read, one line why, and whose side it is on. */
+export interface OrderRiskSignal {
+    key: string;
+    weight: number;
+    /** 0..1; null when it could not be computed here. */
+    value: number | null;
+    detail: string;
+    /** "ADVERTISER" | "PUBLISHER" | "ORDER", as the backend words it; null when it did not say. */
+    side: string | null;
+}
+
+/** The screening fields of an order, gathered from the flat admin row (`services/order-screening`). */
+export interface OrderScreening {
+    /** 0..1, three places; null until scored. */
+    score: number | null;
+    /** What the score says. */
+    band: "LOW" | "REVIEW" | "HOLD" | null;
+    signals: OrderRiskSignal[];
+    scoredAt: string | null;
+    /** What the flagging, or a person, made of it. */
+    reviewStatus: "FLAGGED" | "CLEARED" | "CONFIRMED_FRAUD" | null;
+    reviewedById: string | null;
+    reviewedByName: string | null;
+    reviewedAt: string | null;
+    reviewNote: string | null;
+    /** The signals a Clear dismissed, so the same reasons do not flag the order again. */
+    clearedSignalKeys: string[];
+    /** Set while the order is paused for review. */
+    heldAt: string | null;
+    /** Null on an automatic hold. */
+    heldById: string | null;
+    heldByName: string | null;
+    holdReason: string | null;
+    fraudCaseId: string | null;
+}
+
+/** PB-1: the login that placed an order (`Order.advertiserId`) and the advertiser profile it holds. */
+export interface OrderPlacedBy {
+    userId: string;
+    /** The person: first and last name, else the display name. */
+    name: string | null;
+    /** ADX-…, the person's own id. */
+    displayId: string | null;
+    /** The advertiser profile — ADV-… — or null when the login holds none. */
+    business: { id: string; name: string; displayId: string | null } | null;
+}
+
+export interface OrderSelfInstall {
+    conditionPhotoUrls: string[];
+    installPhotoUrl: string | null;
+    collectPhotoUrl: string | null;
+    notes: string | null;
+    checkedInAt: string | null;
 }
 
 /** The listing's own description of the surface, for the print shop. */

@@ -95,7 +95,7 @@ export default function ForgotPasswordPage() {
                             onChange={(event) => setEmail(event.target.value)}
                             required
                             autoFocus
-                            placeholder="name@adx.co"
+                            placeholder="name@adx.in"
                             className="h-11 pl-9"
                             autoComplete="email"
                         />

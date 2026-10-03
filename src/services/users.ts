@@ -1,6 +1,8 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { formatDate } from "@/lib/format";
+import { ACCOUNT_STATE_META } from "@/services/account-state";
+import type { IdOwner } from "@/services/identifiers";
 import type { StatusMeta, Tone, UserRole } from "@/types";
 
 /**
@@ -75,12 +77,16 @@ export interface TwoFactorResetResult {
 /** One row of `GET /users` — `adminListPayload`. */
 export interface WireUserRow {
     id: string;
+    /** The person's own ADX-… id (`ID_LABEL.USER`) — null until issued, absent from a backend older than the list carrying it. */
+    displayId?: string | null;
     mobile: string;
     name: string | null;
     email: string | null;
     language: string | null;
     isActive: boolean;
     closedAt: string | null;
+    /** 2 Oct 2026: when the person's data was erased (the account is closed by then). Absent from a server one release behind. */
+    erasedAt?: string | null;
     lastLoginAt: string | null;
     createdAt: string;
     updatedAt: string;
@@ -89,19 +95,95 @@ export interface WireUserRow {
     roleConfig: { id: string; name: string } | null;
     /** Lot K2: the factor the next sign-in asks for. Optional on the read for a backend older than the field. */
     twoFactor?: TwoFactorSummary;
+    /** 2 Oct 2026: the businesses and profiles this login holds. Absent from a server one release behind. */
+    parties?: UserListParty[];
+}
+
+/* ------------------------------------------------------------------ */
+/* What a login holds (2 Oct 2026)                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The owner: "I don't see a lot of users here reflected in the user list as
+ * if they're not linked at all." They were linked: the users list named the
+ * person while the directories and the KYC queues name the business. Each
+ * list row now carries what the login holds, so the Name cell can say
+ * "Publisher · Skyline Outdoor Media" under "Vikram Rao".
+ */
+export type UserPartyKind = "PUBLISHER" | "ADVERTISER" | "PRINT_PARTNER" | "AGENT" | "EMPLOYEE";
+
+export interface UserListParty {
+    kind: UserPartyKind;
+    id: string;
+    name: string;
+    displayId: string | null;
+}
+
+export const USER_PARTY_LABEL: Record<UserPartyKind, string> = {
+    PUBLISHER: "Publisher",
+    ADVERTISER: "Advertiser",
+    PRINT_PARTNER: "Print partner",
+    AGENT: "Agent",
+    EMPLOYEE: "Employee",
+};
+
+/** The party's page. An employee's record is keyed on the person's own id. */
+export function userPartyHref(party: Pick<UserListParty, "kind" | "id">, userId: string): string {
+    switch (party.kind) {
+        case "PUBLISHER":
+            return `/publishers/${encodeURIComponent(party.id)}`;
+        case "ADVERTISER":
+            return `/advertisers/${encodeURIComponent(party.id)}`;
+        case "PRINT_PARTNER":
+            return `/print-partners/${encodeURIComponent(party.id)}`;
+        case "AGENT":
+            return `/agents/${encodeURIComponent(party.id)}`;
+        case "EMPLOYEE":
+            return `/employees/directory/${encodeURIComponent(userId)}`;
+    }
+}
+
+/** The row's parties as far as the server sent them; anything malformed is dropped. */
+export function userPartiesOf(raw: unknown): UserListParty[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+        (item): item is UserListParty =>
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as UserListParty).id === "string" &&
+            typeof (item as UserListParty).name === "string" &&
+            (item as UserListParty).kind in USER_PARTY_LABEL,
+    );
 }
 
 /** `GET /users/:id` — `profilePayload` plus the console role. */
 export interface WireUserDetail {
     id: string;
+    /**
+     * QR-4: the person's own ADX-… id — `profilePayload` carries it on
+     * `/users/:id` and `/users/me`, and the admin list now does too. The one
+     * id that is this person's: every party they hold has its own, named by kind.
+     * Null until issued (the backfill), absent from a backend older than it.
+     */
+    displayId?: string | null;
     mobile: string;
     name: string | null;
     email: string | null;
     avatarUrl: string | null;
     hasPassword: boolean;
+    /**
+     * ED-1: every account proves its number AND its email. Both stamps ride
+     * on the profile reads (`/users/me`, `/users/:id`); the console gates
+     * the shell on the email one (`needsEmailVerification`). Optional on a
+     * read from a backend older than the stamp, which is not a null.
+     */
+    mobileVerifiedAt?: string | null;
+    emailVerifiedAt?: string | null;
     language: string | null;
     closedAt: string | null;
     closeReason: string | null;
+    /** 2 Oct 2026: when the person's data was erased; absent from a server one release behind. */
+    erasedAt?: string | null;
     /** E6: the account facts beside the profile — the list used to be the only read that said them. */
     isActive: boolean;
     createdAt: string;
@@ -130,12 +212,12 @@ export interface UserParties {
     printPartner: PartyRef;
 }
 
-/** Where each party's page is, for the header's links. */
-export const PARTY_LINKS: { key: keyof UserParties; label: string; href: (id: string) => string }[] = [
-    { key: "publisher", label: "Publisher", href: (id) => `/publishers/${encodeURIComponent(id)}` },
-    { key: "advertiser", label: "Advertiser", href: (id) => `/advertisers/${encodeURIComponent(id)}` },
-    { key: "agent", label: "Agent", href: (id) => `/agents/${encodeURIComponent(id)}` },
-    { key: "printPartner", label: "Print partner", href: (id) => `/print-partners/${encodeURIComponent(id)}` },
+/** Where each party's page is, for the header's links; `idOwner` names the party's own id by its kind (`ID_LABEL`). */
+export const PARTY_LINKS: { key: keyof UserParties; label: string; idOwner: IdOwner; href: (id: string) => string }[] = [
+    { key: "publisher", label: "Publisher", idOwner: "PUBLISHER", href: (id) => `/publishers/${encodeURIComponent(id)}` },
+    { key: "advertiser", label: "Advertiser", idOwner: "ADVERTISER", href: (id) => `/advertisers/${encodeURIComponent(id)}` },
+    { key: "agent", label: "Agent", idOwner: "AGENT", href: (id) => `/agents/${encodeURIComponent(id)}` },
+    { key: "printPartner", label: "Print partner", idOwner: "PARTNER", href: (id) => `/print-partners/${encodeURIComponent(id)}` },
 ];
 
 /**
@@ -172,10 +254,39 @@ export interface WireSession {
     id: string;
     userAgent: string | null;
     ipAddress: string | null;
+    /**
+     * SL-1: where the session signed in from, looked up once from the address
+     * through the provider under Settings › Integrations › Where a session
+     * signed in from. Null until known — the provider is off, the address is
+     * private, or the lookup failed — and absent on an older backend.
+     */
+    city?: string | null;
+    region?: string | null;
+    country?: string | null;
     lastUsedAt: string | null;
     createdAt: string;
     expiresAt: string;
     current: boolean;
+}
+
+/** SL-1: "Bengaluru, Karnataka, India" — whatever of the three is known, in that order; null when none is. */
+export function sessionPlace(session: Pick<WireSession, "city" | "region" | "country">): string | null {
+    const parts = [session.city, session.region, session.country].map((part) => part?.trim()).filter((part): part is string => Boolean(part));
+    return parts.length ? parts.join(", ") : null;
+}
+
+/**
+ * ED-1: what `POST /users/me/email/send-code` answers — the address the
+ * code went to (normalised), how long it lives, and the send budget. The
+ * code itself is eight capital letters (no I or O) and never appears here
+ * outside development, where `devOtp` carries it.
+ */
+export interface EmailCodeSent {
+    email: string;
+    expiresInSeconds: number;
+    resendAfterSeconds: number;
+    sendsRemaining: number;
+    devOtp?: string;
 }
 
 /** One row of `GET /users/me/activity`. */
@@ -226,6 +337,13 @@ export const USER_STATUS_META: Record<UserStatus, StatusMeta> = {
     closed: { label: "Closed", tone: "neutral" },
 };
 
+/**
+ * 2 Oct 2026 (the account lifecycle): an erased account is a closed one
+ * whose personal data has been anonymised — its status stays "closed" (so
+ * nothing offers to reactivate it) and this pill rides beside it.
+ */
+export const ERASED_META: StatusMeta = { label: "Erased", tone: "neutral" };
+
 export function userStatusOf(user: Pick<WireUserRow, "isActive" | "closedAt">): UserStatus {
     if (user.closedAt) return "closed";
     return user.isActive ? "active" : "deactivated";
@@ -249,8 +367,53 @@ export interface UserRow extends WireUserRow {
 }
 
 export function shapeUserRow(wire: WireUserRow): UserRow {
-    return { ...wire, displayName: displayNameOf(wire), status: userStatusOf(wire) };
+    return { ...wire, parties: userPartiesOf(wire.parties), displayName: displayNameOf(wire), status: userStatusOf(wire) };
 }
+
+/* ------------------------------------------------------------------ */
+/* The accounts list's Status (2 Oct 2026)                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The Status select on Users › Accounts: the party rosters' select, over the
+ * users route's `?state=`. Active is the default; Everyone sends no state.
+ * The server counts the four states apart (an erased account is not also
+ * counted as closed), so Everyone is their sum.
+ */
+export type UsersStatusFacet = UserState | "ALL";
+export const DEFAULT_USERS_STATUS: UsersStatusFacet = "ACTIVE";
+
+export const USERS_STATUS_OPTIONS: readonly { value: UsersStatusFacet; label: string; description: string }[] = [
+    { value: "ACTIVE", label: ACCOUNT_STATE_META.ACTIVE.label, description: "Can sign in and use ADX." },
+    { value: "INACTIVE", label: ACCOUNT_STATE_META.DEACTIVATED.label, description: ACCOUNT_STATE_META.DEACTIVATED.description },
+    { value: "CLOSED", label: ACCOUNT_STATE_META.CLOSED.label, description: ACCOUNT_STATE_META.CLOSED.description },
+    { value: "ERASED", label: "Erased", description: "Closed, and the personal data removed." },
+    { value: "ALL", label: "Everyone", description: "Every account, whatever its state." },
+];
+
+export function isUsersStatusFacet(value: string | null | undefined): value is UsersStatusFacet {
+    return value === "ALL" || USER_STATES.includes(value as UserState);
+}
+
+/** The Status select's numbers: each state's count, and Everyone as their sum. */
+export function usersStatusCounts(counts: Record<UserState, number>): Record<UsersStatusFacet, number> {
+    return { ...counts, ALL: counts.ACTIVE + counts.INACTIVE + counts.CLOSED + counts.ERASED };
+}
+
+/** Which of the four states a row is in — erased before closed, closed before deactivated. */
+export function userRowState(row: Pick<WireUserRow, "isActive" | "closedAt" | "erasedAt">): UserState {
+    if (row.erasedAt) return "ERASED";
+    if (row.closedAt) return "CLOSED";
+    return row.isActive ? "ACTIVE" : "INACTIVE";
+}
+
+/** The Status pill for each state, in the account-state words and tones, with its one line. */
+export const USER_STATE_PILL: Record<UserState, StatusMeta & { description: string }> = {
+    ACTIVE: ACCOUNT_STATE_META.ACTIVE,
+    INACTIVE: ACCOUNT_STATE_META.DEACTIVATED,
+    CLOSED: ACCOUNT_STATE_META.CLOSED,
+    ERASED: { ...ERASED_META, description: "Closed, and the personal data removed." },
+};
 
 /* ------------------------------------------------------------------ */
 /* Queries                                                             */
@@ -273,10 +436,14 @@ export interface UsersQuery {
 export type UsersRoleFacet = "ADMIN" | "AGENT_PUBLISHER" | "AGENT_ADVERTISER" | "PUBLISHER" | "ADVERTISER" | "PARTNER";
 export const USERS_ROLE_FACETS: readonly UsersRoleFacet[] = ["PUBLISHER", "ADVERTISER", "AGENT_PUBLISHER", "AGENT_ADVERTISER", "PARTNER", "ADMIN"];
 
-/** K-B1: the three states `?state=` takes, and how the chips name them. */
-export type UserState = "ACTIVE" | "INACTIVE" | "CLOSED";
-export const USER_STATES: readonly UserState[] = ["ACTIVE", "INACTIVE", "CLOSED"];
-export const USER_STATE_LABEL: Record<UserState, string> = { ACTIVE: "Active", INACTIVE: "Inactive", CLOSED: "Closed" };
+/**
+ * K-B1: the states `?state=` takes, and how the chips name them. 2 Oct 2026
+ * (the account lifecycle): ERASED — a closed account whose personal data
+ * has been anonymised.
+ */
+export type UserState = "ACTIVE" | "INACTIVE" | "CLOSED" | "ERASED";
+export const USER_STATES: readonly UserState[] = ["ACTIVE", "INACTIVE", "CLOSED", "ERASED"];
+export const USER_STATE_LABEL: Record<UserState, string> = { ACTIVE: "Active", INACTIVE: "Inactive", CLOSED: "Closed", ERASED: "Erased" };
 
 export type UserSort = "newest" | "oldest" | "name" | "lastLogin";
 export const USER_SORTS: readonly UserSort[] = ["newest", "oldest", "name", "lastLogin"];
@@ -594,7 +761,7 @@ export const usersService = {
         const rows = (page.data ?? []).map(shapeUserRow);
         return {
             rows,
-            counts: { ACTIVE: page.counts?.ACTIVE ?? 0, INACTIVE: page.counts?.INACTIVE ?? 0, CLOSED: page.counts?.CLOSED ?? 0 },
+            counts: { ACTIVE: page.counts?.ACTIVE ?? 0, INACTIVE: page.counts?.INACTIVE ?? 0, CLOSED: page.counts?.CLOSED ?? 0, ERASED: page.counts?.ERASED ?? 0 },
             total: page.total ?? rows.length,
         };
     },
@@ -645,6 +812,21 @@ export const usersService = {
      */
     makeContactPrimary: (id: string, contactId: string, reason: string): Promise<PrimaryChanged> =>
         live().post<PrimaryChanged>(`/users/${id}/contacts/${contactId}/make-primary`, { reason: reason.trim() }),
+
+    /* ---- ED-1: proving the account's own email --------------------- */
+
+    /**
+     * A code to the address the signed-in person wants as their email — the
+     * one on file, or a corrected one; the verify makes whichever answered
+     * the primary. 409 ALREADY_VERIFIED when that address already is; 409
+     * CONTACT_TAKEN when another account holds it.
+     */
+    sendMyEmailCode: (email: string): Promise<EmailCodeSent> =>
+        session().post<EmailCodeSent>("/users/me/email/send-code", { email: email.trim().toLowerCase() }),
+
+    /** The code typed back, in any case; on success the profile as `/users/me` now answers it, `emailVerifiedAt` stamped. */
+    verifyMyEmail: (email: string, code: string): Promise<WireMe> =>
+        session().post<WireMe>("/users/me/email/verify", { email: email.trim().toLowerCase(), code: code.trim().toUpperCase() }),
 
     /** E6: somebody else's open sessions — the `/me/sessions` shape, `current` always false. There is no admin revoke. */
     sessionsOf: async (id: string): Promise<WireSession[]> => (await live().get<WireSession[]>(`/users/${id}/sessions`)) ?? [],
@@ -1092,6 +1274,40 @@ export function dueLabel(request: Pick<ErasureRequest, "status" | "dueAt">, now:
 
 /* ---- the service ------------------------------------------------- */
 
+/** One thing that keeps an account from being deleted — "3 bookings". */
+export interface DeleteBlocker {
+    kind: string;
+    label: string;
+    count: number;
+}
+
+/** `GET /users/:id/deletable`. */
+export interface UserDeletable {
+    deletable: boolean;
+    blockers: DeleteBlocker[];
+}
+
+/**
+ * The blockers a 409 refusal carries — `DELETE /users/:id` once history
+ * appeared, `DELETE /employees/:userId` with KYC or activity on file — as
+ * `details.blockers`, or `details` itself as the list. Empty when the
+ * refusal says none (the sentence is then the whole story).
+ */
+export function deleteBlockersOf(cause: unknown): DeleteBlocker[] {
+    if (!(cause instanceof ApiError) || cause.status !== 409) return [];
+    const details = cause.details as { blockers?: unknown } | unknown[] | undefined;
+    const list = Array.isArray(details) ? details : Array.isArray((details as { blockers?: unknown } | undefined)?.blockers) ? (details as { blockers: unknown[] }).blockers : [];
+    return list.filter(
+        (item): item is DeleteBlocker =>
+            typeof item === "object" && item !== null && typeof (item as DeleteBlocker).label === "string" && typeof (item as DeleteBlocker).count === "number",
+    );
+}
+
+/** "3 bookings, 1 wallet" — the blockers in one line. */
+export function blockersLine(blockers: readonly DeleteBlocker[]): string {
+    return blockers.map((blocker) => (blocker.count > 0 ? `${blocker.count} ${blocker.label}` : blocker.label)).join(", ");
+}
+
 /** The closure columns off the admin read — enough to draw the banner. */
 export type ClosedState = Pick<WireUserDetail, "id" | "name" | "mobile" | "closedAt" | "closeReason">;
 
@@ -1148,6 +1364,22 @@ export const accountLifecycleService = {
             closeReason: user.closeReason,
         };
     },
+
+    /* ---- delete (2 Oct 2026) ------------------------------------ */
+
+    /**
+     * `GET /users/:id/deletable` — whether the account has no history at all
+     * (no listings, bookings, wallet, KYC, invoices, campaigns, grants used…),
+     * and what stands in the way when it has. The console offers "Delete
+     * account" only on `deletable: true`.
+     */
+    deletable: async (userId: string): Promise<UserDeletable> => {
+        const wire = await live().get<Partial<UserDeletable>>(`/users/${userId}/deletable`);
+        return { deletable: wire.deletable === true, blockers: Array.isArray(wire.blockers) ? wire.blockers : [] };
+    },
+
+    /** `DELETE /users/:id` — the account and its empty profiles, for good; 409 with the blockers when history appeared since. */
+    deleteAccount: (userId: string): Promise<{ message?: string }> => live().delete<{ message?: string }>(`/users/${userId}`),
 
     /* ---- erasure ------------------------------------------------ */
 

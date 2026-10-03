@@ -1,7 +1,10 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { formatDateTime } from "@/lib/format";
+import type { KycEntityType } from "./kyc-entity-types";
+import { ONLINE_PROVIDER_LABEL, PROVIDER_FAILED_META, isProviderFailed, onlineProviderOf } from "./verification";
 import { kycStateOf, shapeKycStateCounts, type KycQueueState, type KycStateCounts } from "./kyc-state";
+import { accountStateOf } from "./account-state";
 import type {
     KycCase,
     KycCheck,
@@ -105,6 +108,8 @@ export interface WireKycRow {
     recordedBy?: KycPerson | null;
     /** N3-B: the record's id, null with no record. Absent from a server one release behind. */
     kycId?: string | null;
+    /** 2 Oct 2026: where the account stands — ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED). Absent from a server one release behind. */
+    accountState?: string | null;
     kyc: {
         id: string;
         status: KycRowStatus;
@@ -211,6 +216,12 @@ export interface KycQueueFilter {
     /** Lot N: only the desk's asks with nothing submitted yet (true) — rows outside the submitted queue — or none of them (false). */
     requested?: boolean;
     sort?: "oldest" | "newest";
+    /**
+     * 2 Oct 2026 (the account lifecycle): the queue answers working accounts
+     * only; true sends `include=inactive` and the suspended, deactivated and
+     * closed come back too, each row saying which (`accountState`).
+     */
+    includeInactive?: boolean;
 }
 
 export function buildKycQueueQuery(filter: KycQueueFilter = {}): string {
@@ -225,6 +236,7 @@ export function buildKycQueueQuery(filter: KycQueueFilter = {}): string {
     if (filter.escalated !== undefined) params.set("escalated", String(filter.escalated));
     if (filter.requested !== undefined) params.set("requested", String(filter.requested));
     if (filter.sort) params.set("sort", filter.sort);
+    if (filter.includeInactive) params.set("include", "inactive");
     return params.toString();
 }
 
@@ -374,10 +386,10 @@ export function recordedLine(recorded: KycRecorded | null): string | null {
     return recorded.via === "SELF" ? via : who ? `${via} · ${who}` : via;
 }
 
-/** `POST …/request` — the channel and, trimmed, the note when there is one. */
-export function kycRequestBody(channel: KycRequestChannel, note?: string): { channel: KycRequestChannel; note?: string } {
+/** `POST …/request` — the channel and, trimmed, the note when there is one; Phase D: the entity type the picker chose, when the server asked for one. */
+export function kycRequestBody(channel: KycRequestChannel, note?: string, entityType?: KycEntityType): { channel: KycRequestChannel; note?: string; entityType?: KycEntityType } {
     const trimmed = note?.trim();
-    return trimmed ? { channel, note: trimmed } : { channel };
+    return { channel, ...(trimmed ? { note: trimmed } : {}), ...(entityType ? { entityType } : {}) };
 }
 
 /** What the party receives for each channel — the confirm names it before the desk commits. */
@@ -396,8 +408,11 @@ export const isAlreadyVerified = (cause: unknown): cause is ApiError =>
 
 /** The Digio session off the row, or null when nobody ever started one. */
 function digioOf(kyc: NonNullable<WireKycRow["kyc"]> | null): KycDigio | null {
-    if (!kyc || (kyc.method !== "DIGIO" && !kyc.digioRequestId)) return null;
+    // Cashfree Phase 2: the backup's record (`method` CASHFREE) and a record Digio could not be reached for (PROVIDER_FAILED) are online cases too.
+    if (!kyc || (onlineProviderOf(kyc.method) === null && !kyc.digioRequestId && !isProviderFailed(kyc.digioStatus))) return null;
     return {
+        // Absent means Digio, so a Digio record reads as it always did.
+        ...(kyc.method === "CASHFREE" ? { provider: "CASHFREE" as const } : {}),
         requestId: kyc.digioRequestId ?? null,
         referenceId: kyc.digioReferenceId ?? null,
         status: kyc.digioStatus ?? null,
@@ -483,10 +498,11 @@ export function shapeKycCase(row: WireKycRow, slaHours: number = row.slaHours ??
     const checks: KycCheck[] = [];
     if (kyc?.panNumber) checks.push({ label: "PAN number", detail: kyc.panNumber, result: "manual" });
     if (row.gstin) checks.push({ label: "GSTIN", detail: row.gstin, result: "manual" });
-    if (kyc?.method === "DIGIO") {
+    const online = onlineProviderOf(kyc?.method);
+    if (kyc && online) {
         checks.push({
-            label: "Digio",
-            detail: kyc.digioStatus ?? "pending",
+            label: ONLINE_PROVIDER_LABEL[online],
+            detail: isProviderFailed(kyc.digioStatus) ? PROVIDER_FAILED_META.label : (kyc.digioStatus ?? "pending"),
             result: kyc.digioStatus === "approved" ? "pass" : kyc.digioStatus === "rejected" ? "fail" : "manual",
         });
     }
@@ -513,7 +529,8 @@ export function shapeKycCase(row: WireKycRow, slaHours: number = row.slaHours ??
         slaHoursLeft: slaHoursLeftOf(ageHours, slaHours),
         status: rowStatus,
         kycStatus: rowStatus,
-        method: kyc?.method === "DIGIO" ? "DIGIO" : "MANUAL",
+        // Cashfree Phase 2: CASHFREE is an online check too — `digio.provider` says which provider ran it.
+        method: online ? "DIGIO" : "MANUAL",
         digio: digioOf(kyc),
         documents,
         checks,
@@ -535,6 +552,7 @@ export function shapeKycCase(row: WireKycRow, slaHours: number = row.slaHours ??
         recorded: recordedOf(kyc, row),
         mobile: row.mobile,
         displayId: row.displayId,
+        accountState: accountStateOf(row.accountState),
     };
 }
 
@@ -625,11 +643,14 @@ export const kycService = {
         }
     },
 
-    /** The desk asks Digio again for this publisher; they are told to open the app. 409 once verified; 503 while the provider is off. */
-    restartDigio: (publisherId: string) =>
+    /**
+     * The desk asks Digio again for this publisher; they are told to open the app. 409 once verified; 503 while the provider is off.
+     * Phase D: 409 `ENTITY_TYPE_REQUIRED` while the publisher's entity type is unknown — sent again with the one the picker chose.
+     */
+    restartDigio: (publisherId: string, entityType?: KycEntityType) =>
         live().post<{ kycId: string; validTill: string; digioStatus: "pending"; notified: boolean }>(
             `/publishers/kyc-queue/${publisherId}/digio/restart`,
-            {}
+            entityType ? { entityType } : {}
         ),
 
     /** The decision. The note is kept on the record beside who made it; 409 LIVENESS_REQUIRED on a manual-path VERIFIED with no video. */
@@ -666,16 +687,23 @@ export const kycService = {
      * Lot N: the desk asks the publisher for their KYC — DIGIO opens a
      * session on their behalf, MANUAL only tells them; `KYC_REQUESTED` when
      * they have an app account (`notified`). 409 `KYC_ALREADY_VERIFIED`.
+     * Phase D: a Digio ask answers 409 `ENTITY_TYPE_REQUIRED` while the
+     * entity type is unknown; the dialog asks and sends it here.
      */
-    request: (publisherId: string, channel: KycRequestChannel, note?: string) =>
+    request: (publisherId: string, channel: KycRequestChannel, note?: string, entityType?: KycEntityType) =>
         live().post<{ kyc: unknown; digio: { kycId: string; validTill: string } | null; notified: boolean }>(
             `/publishers/kyc-queue/${publisherId}/request`,
-            kycRequestBody(channel, note)
+            kycRequestBody(channel, note, entityType)
         ),
 
-    /** N3-C: the one click — the same route with no body; the server defaults the channel to DIGIO. Behind `kyc.edit`. */
-    requestDigio: (publisherId: string) =>
-        live().post<{ kyc: unknown; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/publishers/kyc-queue/${publisherId}/request`),
+    /**
+     * N3-C: the one click — the same route with no body; the server defaults the channel to DIGIO. Behind `kyc.edit`.
+     * Phase D: after 409 `ENTITY_TYPE_REQUIRED` the click is sent again with `{ entityType }` alone.
+     */
+    requestDigio: (publisherId: string, entityType?: KycEntityType) =>
+        entityType
+            ? live().post<{ kyc: unknown; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/publishers/kyc-queue/${publisherId}/request`, { entityType })
+            : live().post<{ kyc: unknown; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/publishers/kyc-queue/${publisherId}/request`),
 
     /** Lot N: the desk records the documents on the publisher's behalf — PENDING, `recordedVia DESK`. 409 `KYC_ALREADY_VERIFIED`; 400 `EMPTY_RESUBMISSION` while NEEDS_INFO with no tile sent. */
     recordAtDesk: (publisherId: string, body: KycDeskBody) =>

@@ -30,7 +30,10 @@ export interface WireGrant {
     revokedAt: string | null;
     revokedById: string | null;
     publisher?: { id: string; name: string; userId: string | null } | null;
-    assignedAgent?: { id: string; userId: string } | null;
+    /** 2 Oct 2026: the advertiser beside the publisher, so an advertiser grant is named too. */
+    advertiser?: { id: string; name: string; userId: string | null } | null;
+    /** 2 Oct 2026: the agent's name and AGT- id, so a screen never falls back to the raw database id. */
+    assignedAgent?: { id: string; userId: string; displayId?: string | null; user?: { name: string | null } | null } | null;
 }
 
 export interface WireScan {
@@ -79,7 +82,12 @@ export interface GrantView {
     party: string;
     partyType: "publisher" | "advertiser";
     partyId: string | null;
+    /** The agent's database id — for the link to their record, never shown. */
     agentId: string;
+    /** What the agent is called on screen: their name, else their AGT- id, else "Agent". */
+    agentName: string;
+    /** The AGT- id, shown muted under the name; null before one is issued. */
+    agentDisplayId: string | null;
     purpose: string;
     scope: string;
     reason: string;
@@ -137,14 +145,19 @@ export function grantState(status: WireGrant["status"]): StatusMeta {
 export function shapeGrant(grant: WireGrant): GrantView {
     const partyType = grant.advertiserId && !grant.publisherId ? "advertiser" : "publisher";
     const partyId = partyType === "advertiser" ? grant.advertiserId : grant.publisherId;
+    const named = partyType === "advertiser" ? grant.advertiser?.name : grant.publisher?.name;
     const party =
-        grant.publisher?.name ?? (partyId ? `${partyType === "advertiser" ? "Advertiser" : "Publisher"} ${partyId}` : "Unknown");
+        named?.trim() || (partyId ? `${partyType === "advertiser" ? "Advertiser" : "Publisher"} ${partyId}` : "Unknown");
+    const agentDisplayId = grant.assignedAgent?.displayId?.trim() || null;
+    const agentName = grant.assignedAgent?.user?.name?.trim() || agentDisplayId || "Agent";
     return {
         id: grant.id,
         party,
         partyType,
         partyId,
         agentId: grant.assignedAgentId,
+        agentName,
+        agentDisplayId,
         purpose: PURPOSE[grant.purpose] ?? grant.purpose,
         scope:
             grant.scope === "LISTINGS"

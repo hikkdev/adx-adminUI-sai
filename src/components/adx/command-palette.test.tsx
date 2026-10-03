@@ -24,8 +24,18 @@ import { CommandPalette } from "./command-palette";
 describe("the command palette and the claims desk", () => {
     it("Listings carries Claims as a child, so the flattened list reaches /listings/claims once", () => {
         const listings = navigation.flatMap((section) => section.items).find((item) => item.href === "/listings")!;
-        /* Package U added the Import child beside Claims. */
-        expect(listings.children?.map((child) => child.href)).toEqual(["/listings/claims", "/listings/import"]);
+        /* Package U added the Import child beside Claims. The owner merged the
+           review desks back in on 25 September: they are tabs of this section
+           and were never sections of their own. */
+        /* 2 Oct 2026: the table moved to /listings/directory and Drafts became one of its statuses. */
+        expect(listings.children?.map((child) => child.href)).toEqual([
+            "/listings/directory",
+            "/listings/review",
+            "/listings/verification",
+            "/listings/renewals",
+            "/listings/claims",
+            "/listings/import",
+        ]);
         expect(allNavItems.filter((item) => item.href === "/listings/claims")).toHaveLength(1);
         expect(allNavItems.find((item) => item.href === "/listings/claims")?.title).toBe("Claims");
     });

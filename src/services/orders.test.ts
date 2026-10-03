@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shapeOrder } from "./orders";
+import { orderLabel, shapeOrder } from "./orders";
 import { ORDER_PIPELINE_STAGES, ORDER_STAGE_OF, ORDER_STATUS_META } from "@/types";
 import type { OrderStatus } from "@/types";
 
@@ -69,6 +69,36 @@ describe("flattening an order", () => {
         const row = shapeOrder(wire());
         expect(row.spot).toBeNull();
         expect(row.designUrl).toBeNull();
+    });
+
+    /** BK-1: the booking id once minted; the short id — the cuid's tail — until the backfill runs. */
+    it("names an order by its booking id, and by the short id while it has none", () => {
+        expect(shapeOrder(wire({ displayId: "BKG-2609-2601" })).displayId).toBe("BKG-2609-2601");
+        expect(orderLabel(shapeOrder(wire({ displayId: "BKG-2609-2601" })))).toBe("BKG-2609-2601");
+        const unminted = shapeOrder(wire());
+        expect(unminted.displayId).toBeNull();
+        expect(orderLabel(unminted)).toBe("ORDER001");
+    });
+
+    /** SI-N: the publisher's own proof rides on the detail read; nothing sent is null, not an empty card. */
+    it("folds the self-install photos and note, and leaves them null while the publisher sent nothing", () => {
+        expect(shapeOrder(wire()).selfInstall).toBeNull();
+        expect(shapeOrder(wire({ selfInstallConditionPhotoUrls: [], selfInstallNotes: "  " })).selfInstall).toBeNull();
+        const proof = shapeOrder(
+            wire({
+                selfInstallConditionPhotoUrls: ["/api/v1/files/f1", "/api/v1/files/f2"],
+                selfInstallInstallPhotoUrl: "/api/v1/files/f3",
+                selfInstallNotes: " Left pole was rusted; cleaned before pasting. ",
+                selfInstallCheckedInAt: "2026-09-25T04:00:00.000Z",
+            })
+        ).selfInstall;
+        expect(proof).toEqual({
+            conditionPhotoUrls: ["/api/v1/files/f1", "/api/v1/files/f2"],
+            installPhotoUrl: "/api/v1/files/f3",
+            collectPhotoUrl: null,
+            notes: "Left pole was rusted; cleaned before pasting.",
+            checkedInAt: "2026-09-25T04:00:00.000Z",
+        });
     });
 });
 

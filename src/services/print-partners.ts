@@ -1,7 +1,18 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { compareMoney } from "@/lib/format";
-import type { KycRowStatus, Order, StatusMeta } from "@/types";
+import type { KycQueueState, KycRowStatus, OnboardingFacts, Order, StatusMeta } from "@/types";
+import type { KycEntityType } from "./kyc-entity-types";
+import type { PartyRosterPage, PartyRosterQuery } from "./party-roster";
+import {
+    accountStateOf,
+    accountStatusCountsOf,
+    accountStatusOptions,
+    type AccountState,
+    type AccountStatusCounts,
+    type AccountStatusFacet,
+    type AccountStatusOption,
+} from "./account-state";
 import type { Money, PayoutRailName, Timestamp, WalletSnapshot, WithdrawalStatus } from "./finance";
 
 /**
@@ -118,6 +129,9 @@ export interface PrintPartner {
     email: string | null;
     address: string | null;
     city: string | null;
+    /** The shop's state and six-digit PIN — optional on the type while an older backend answers without them. */
+    state?: string | null;
+    postalCode?: string | null;
     latitude: number | null;
     longitude: number | null;
     capabilities: string[];
@@ -137,6 +151,8 @@ export interface PrintPartner {
     invoiceUploadFileId: string | null;
     /** G13-B: when the partner last signed in to the app — null until they have; on the list rows too. Absent on a server one release behind. */
     lastLoginAt?: Timestamp | null;
+    /** 28 Sep 2026: the person's own ADX-… id — the shop's is `displayId` (PRT-…). Absent on a server one release behind. */
+    userDisplayId?: string | null;
     /**
      * Lot N: the KYC mirror on the row, and the record's four facts — null
      * before any record (nothing asked, nothing submitted). Absent on a
@@ -144,6 +160,32 @@ export interface PrintPartner {
      */
     kycStatus?: KycRowStatus;
     kyc?: PartnerKycSummary | null;
+    /**
+     * Phase D: the entity type the shop verifies as — one of the four a
+     * print partner may be (Individual, Sole proprietor, Company, LLP or
+     * partnership), which picks the Digio workflow; null until it is chosen
+     * (a shop's row says nothing to derive it from, so it is asked at the
+     * Digio start), and whether it is stored. On the detail read and the
+     * roster rows; absent on a server older than the column.
+     */
+    entityType?: KycEntityType | null;
+    entityTypeStored?: boolean;
+    /** 29 Sep 2026: the jobs, counted on the roster read — the roster's Activity. Absent on the by-id read. */
+    jobCount?: number;
+    /**
+     * 2 Oct 2026 (the account lifecycle): the roster row's state — Active,
+     * Deactivated (off the roster) or Closed (the account behind it is
+     * closed); a shop is never suspended by sections. On the roster read
+     * only; null from a server one release behind.
+     */
+    accountState?: AccountState | null;
+    /**
+     * 29 Sep 2026: the door the shop came through, in the block every party
+     * roster carries — applied in the app (self-serve), added at the desk,
+     * or created by an import. Nobody is named: a partner row does not
+     * record who. Absent on the by-id read.
+     */
+    onboarding?: OnboardingFacts | null;
     createdAt: Timestamp;
     updatedAt: Timestamp;
 }
@@ -212,6 +254,12 @@ export interface PrintPartnerInput {
     email?: string | null;
     address?: string | null;
     city?: string | null;
+    state?: string | null;
+    /** Six digits, `^[1-9][0-9]{5}$`. */
+    postalCode?: string | null;
+    /** The shop's pin — where the agent goes to collect (create and PATCH take both, null clears). Never typed: the address bar's pick sets it. */
+    latitude?: number | null;
+    longitude?: number | null;
     capabilities?: string[];
     maxWidthFt?: Money | null;
     turnaroundDays?: number | null;
@@ -219,8 +267,14 @@ export interface PrintPartnerInput {
 }
 
 /** Everything but the mobile — the account's identity — which cannot change. */
-/** `PATCH /print-partners/:id` — anything but the mobile; G13-B: `acceptsQuoteRequests` too, for a shop that never activates. */
-export type PrintPartnerPatch = Partial<Omit<PrintPartnerInput, "mobile"> & { acceptsQuoteRequests: boolean }>;
+/**
+ * `PATCH /print-partners/:id` — anything but the mobile; G13-B: `acceptsQuoteRequests` too, for a shop that never activates.
+ * Phase D: `entityType` (the four a print partner may be, else 400). On a
+ * VERIFIED shop only Individual → a business form is taken, and it fires a
+ * fresh Digio request (503/502 when Digio fails); any other change is 409
+ * `KYC_LOCKED` and nothing in the patch is written.
+ */
+export type PrintPartnerPatch = Partial<Omit<PrintPartnerInput, "mobile"> & { acceptsQuoteRequests: boolean; entityType: KycEntityType }>;
 
 export type PrintJobStatus = "REQUESTED" | "ACCEPTED" | "PRINTING" | "READY" | "COLLECTED" | "CANCELLED";
 
@@ -469,12 +523,22 @@ export interface PrintPartnerPage {
     page: number;
     pageSize: number;
     counts: { ACTIVE?: number; INACTIVE?: number };
+    /** 2 Oct 2026: partners per account state over the cuts, the Status facet removed. Absent on a server one release behind. */
+    statusCounts?: Partial<Record<PrintPartnerStatus, number>>;
 }
 
 export interface PrintPartnerQuery {
     q?: string;
     city?: string;
     active?: boolean;
+    /** 2 Oct 2026: the Status — ACTIVE, DEACTIVATED, CLOSED or ALL; the server lets it win over `active`. */
+    status?: PrintPartnerStatusFacet;
+    /** 29 Sep 2026: the door — SELF, DESK or IMPORT (no agent onboards a shop). */
+    onboardedVia?: string;
+    /** 29 Sep 2026: the KYC state the queue and the partner page print. */
+    kycState?: KycQueueState;
+    /** PP-1: only the applications awaiting the desk (applied in the app, not yet activated) — the server's facet. */
+    applied?: boolean;
     page?: number;
     pageSize?: number;
 }
@@ -496,6 +560,10 @@ export function partnersPath(query: PrintPartnerQuery = {}): string {
     if (query.q?.trim()) params.set("q", query.q.trim());
     if (query.city?.trim()) params.set("city", query.city.trim());
     if (query.active !== undefined) params.set("active", String(query.active));
+    if (query.status) params.set("status", query.status);
+    if (query.onboardedVia) params.set("onboardedVia", query.onboardedVia);
+    if (query.kycState) params.set("kycState", query.kycState);
+    if (query.applied) params.set("applied", "true");
     if (query.page && query.page > 1) params.set("page", String(query.page));
     params.set("pageSize", String(query.pageSize ?? 100));
     return `/print-partners?${params.toString()}`;
@@ -505,8 +573,99 @@ export function partnersPath(query: PrintPartnerQuery = {}): string {
 /* Calls                                                               */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* The directory's Status select                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 2 Oct 2026 — the print partners' Status, the same select every party
+ * directory draws: Active, Deactivated — off the roster — Closed — the
+ * account behind the shop is closed — and Everyone, sent as the route's
+ * `status=`. A print partner is never suspended by sections, so Suspended
+ * is not offered rather than offered and faked.
+ */
+export const PRINT_PARTNER_STATUSES = ["ACTIVE", "DEACTIVATED", "CLOSED"] as const;
+export type PrintPartnerStatus = (typeof PRINT_PARTNER_STATUSES)[number];
+export type PrintPartnerStatusFacet = PrintPartnerStatus | "ALL";
+
+export const PRINT_PARTNER_STATUS_OPTIONS: readonly AccountStatusOption[] = accountStatusOptions(false).filter((option) =>
+    ([...PRINT_PARTNER_STATUSES, "ALL"] as AccountStatusFacet[]).includes(option.value),
+);
+
+/** The Status as the route's `status=`: the facet itself, undefined when none is picked — null for a state the route cannot cut. */
+export function printPartnerStatusFacet(status: AccountStatusFacet | undefined): PrintPartnerStatusFacet | undefined | null {
+    if (status === undefined) return undefined;
+    return status === "ALL" || (PRINT_PARTNER_STATUSES as readonly string[]).includes(status) ? (status as PrintPartnerStatusFacet) : null;
+}
+
+/**
+ * The Status select's numbers off a roster page: the route's `statusCounts`
+ * (Active, Deactivated, Closed) and Everyone as their sum. A server one
+ * release behind sends only its ACTIVE / INACTIVE counts, read as Active
+ * and Deactivated (and Everyone as those two).
+ */
+export function printPartnerStatusCounts(page: Pick<PrintPartnerPage, "counts" | "statusCounts">): AccountStatusCounts {
+    const out: AccountStatusCounts = {};
+    if (page.statusCounts) {
+        const read = accountStatusCountsOf({ statusCounts: page.statusCounts });
+        for (const state of PRINT_PARTNER_STATUSES) if (read[state] !== undefined) out[state] = read[state];
+        if (PRINT_PARTNER_STATUSES.every((state) => out[state] !== undefined)) {
+            out.ALL = PRINT_PARTNER_STATUSES.reduce((sum, state) => sum + (out[state] ?? 0), 0);
+        }
+        return out;
+    }
+    if (typeof page.counts?.ACTIVE === "number") out.ACTIVE = page.counts.ACTIVE;
+    if (typeof page.counts?.INACTIVE === "number") out.DEACTIVATED = page.counts.INACTIVE;
+    if (out.ACTIVE !== undefined && out.DEACTIVATED !== undefined) out.ALL = out.ACTIVE + out.DEACTIVATED;
+    return out;
+}
+
+/** The list contract's ceiling on `pageSize` — one directory read. */
+export const PRINT_PARTNER_ROSTER_PAGE_SIZE = 100;
+
 export const printPartnerService = {
     list: (query: PrintPartnerQuery = {}) => http.get<PrintPartnerPage>(partnersPath(query)),
+
+    /**
+     * 29 Sep 2026 — the directory: the filters every party roster takes
+     * (`services/party-roster`; a shop has no type, so none is sent), one
+     * page of the list contract at a time. `cursor` is the page number to
+     * read. 2 Oct 2026: the shared Status select is sent as the route's
+     * `status=` (`printPartnerStatusFacet`), its `statusCounts` come back as
+     * the select's numbers, and each row's `accountState` is read off the wire.
+     */
+    rosterPage: async (
+        query: PartyRosterQuery,
+        cursor: string | null,
+        /** Only the applications awaiting the desk — counted and filtered by the server, not by the rows in hand. */
+        applied?: boolean,
+    ): Promise<PartyRosterPage<PrintPartner> & { counts: PrintPartnerPage["counts"] }> => {
+        const status = printPartnerStatusFacet(query.status);
+        if (status === null) throw new Error(`The print-partner list has no "${query.status}" facet.`);
+        const page = cursor ? Math.max(1, Number(cursor) || 1) : 1;
+        const wire = await http.get<PrintPartnerPage>(
+            partnersPath({
+                ...(query.q ? { q: query.q } : {}),
+                ...(query.city ? { city: query.city } : {}),
+                ...(status === undefined ? {} : { status }),
+                ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
+                ...(query.kycState ? { kycState: query.kycState } : {}),
+                ...(applied ? { applied: true } : {}),
+                page,
+                pageSize: PRINT_PARTNER_ROSTER_PAGE_SIZE,
+            }),
+        );
+        const rows = (wire.items ?? []).map((row) => ({ ...row, accountState: accountStateOf(row.accountState) }));
+        const read = (page - 1) * (wire.pageSize || PRINT_PARTNER_ROSTER_PAGE_SIZE) + rows.length;
+        const counts = wire.counts ?? {};
+        return {
+            rows,
+            total: wire.total,
+            nextCursor: rows.length > 0 && read < wire.total ? String(page + 1) : null,
+            counts,
+            statusCounts: printPartnerStatusCounts({ counts, ...(wire.statusCounts ? { statusCounts: wire.statusCounts } : {}) }),
+        };
+    },
 
     /** A 404 is "no such partner", which the page renders as its own not-found. */
     get: async (id: string): Promise<PrintPartner | null> => {

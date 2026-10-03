@@ -163,9 +163,6 @@ export function QuotesView({
                                 onChange={(event) => setSector(event.target.value)}
                                 placeholder="E-commerce"
                             />
-                            <p className="text-xs text-muted-foreground">
-                                Matched against the category rules.
-                            </p>
                         </div>
                         <div className="space-y-1.5">
                             <Label>Negotiated discount (%)</Label>
@@ -186,6 +183,8 @@ export function QuotesView({
                                 placeholder="Agreed with Anjali, 4 Sep"
                             />
                         </div>
+                        {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                        <p className="-mt-2 text-xs text-muted-foreground sm:col-span-3">The advertiser sector is matched against the category rules.</p>
                     </div>
                 </Card>
 

@@ -14,6 +14,7 @@ import {
     type LiveChatSettings,
     type PlatformSettings,
     type PlatformSettingsPatch,
+    type ReservationFeeSettings,
     type SubscriptionAudience,
     type SubscriptionChangePolicy,
     type SubscriptionCycle,
@@ -97,6 +98,16 @@ export interface SubscriptionPolicyDraft {
     autoRenewAllowed: boolean;
 }
 
+/** RF-1: the reservation fee as typed — the switch as it stands, every number as text. */
+export interface ReservationFeeDraft {
+    enabled: boolean;
+    minCheckoutValue: string;
+    feePct: string;
+    payWithinMinutes: string;
+    holdHours: string;
+    retainPct: string;
+}
+
 export interface SettingsDraft {
     kycReviewSlaHours: string;
     /** Lot G (Q127/142): may be fractional — "1.5" is a valid multiplier. */
@@ -110,6 +121,8 @@ export interface SettingsDraft {
     autoPublishOnVerification: boolean;
     minBookingDays: string;
     maxMarketsPerCampaign: string;
+    /** RF-1: the reservation fee. Null when the backend did not serve `booking`, and the card says so. */
+    reservationFee: ReservationFeeDraft | null;
     spotInsightsVisible: boolean;
     financialYears: string;
     kycYears: string;
@@ -165,6 +178,16 @@ export function toDraft(settings: PlatformSettings): SettingsDraft {
         autoPublishOnVerification: settings.listings.autoPublishOnVerification,
         minBookingDays: String(settings.marketplace.minBookingDays),
         maxMarketsPerCampaign: String(settings.marketplace.maxMarketsPerCampaign),
+        reservationFee: settings.booking
+            ? {
+                  enabled: settings.booking.reservationFee.enabled,
+                  minCheckoutValue: String(settings.booking.reservationFee.minCheckoutValue),
+                  feePct: String(settings.booking.reservationFee.feePct),
+                  payWithinMinutes: String(settings.booking.reservationFee.payWithinMinutes),
+                  holdHours: String(settings.booking.reservationFee.holdHours),
+                  retainPct: String(settings.booking.reservationFee.retainPct),
+              }
+            : null,
         spotInsightsVisible: settings.publisher.spotInsightsVisible,
         financialYears: String(settings.retention.financialYears),
         kycYears: String(settings.retention.kycYears),
@@ -318,6 +341,27 @@ export function fromDraft(draft: SettingsDraft): { settings: PlatformSettings; e
     const multiplier = parseBoundedDecimal(draft.kycEscalationSlaMultiplier, SETTING_BOUNDS["kyc.escalationSlaMultiplier"]);
     if (multiplier === null) errors.add("kyc.escalationSlaMultiplier");
 
+    /* RF-1: the two percentages and the threshold may be fractional; the minutes and the hours are whole. */
+    let reservationFee: ReservationFeeSettings | undefined;
+    if (draft.reservationFee) {
+        const decimal = (id: string, text: string, bounds: { min: number; max: number }): number => {
+            const value = parseBoundedDecimal(text, bounds);
+            if (value === null) {
+                errors.add(id);
+                return 0;
+            }
+            return value;
+        };
+        reservationFee = {
+            enabled: draft.reservationFee.enabled,
+            minCheckoutValue: decimal("booking.reservationFee.minCheckoutValue", draft.reservationFee.minCheckoutValue, SETTING_BOUNDS["booking.reservationFee.minCheckoutValue"]),
+            feePct: decimal("booking.reservationFee.feePct", draft.reservationFee.feePct, SETTING_BOUNDS["booking.reservationFee.feePct"]),
+            payWithinMinutes: number("booking.reservationFee.payWithinMinutes", draft.reservationFee.payWithinMinutes, SETTING_BOUNDS["booking.reservationFee.payWithinMinutes"]),
+            holdHours: number("booking.reservationFee.holdHours", draft.reservationFee.holdHours, SETTING_BOUNDS["booking.reservationFee.holdHours"]),
+            retainPct: decimal("booking.reservationFee.retainPct", draft.reservationFee.retainPct, SETTING_BOUNDS["booking.reservationFee.retainPct"]),
+        };
+    }
+
     const settings: PlatformSettings = {
         kyc: {
             reviewSlaHours: number("kyc.reviewSlaHours", draft.kycReviewSlaHours, SETTING_BOUNDS["kyc.reviewSlaHours"]),
@@ -333,6 +377,7 @@ export function fromDraft(draft: SettingsDraft): { settings: PlatformSettings; e
                 SETTING_BOUNDS["marketplace.maxMarketsPerCampaign"],
             ),
         },
+        ...(reservationFee ? { booking: { reservationFee } } : {}),
         publisher: { spotInsightsVisible: draft.spotInsightsVisible },
         retention: {
             financialYears: number("retention.financialYears", draft.financialYears, SETTING_BOUNDS["retention.financialYears"]),

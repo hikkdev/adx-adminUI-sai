@@ -25,6 +25,7 @@ export function LeadsNav() {
                 { label: "Integrity", href: "/leads/integrity" },
                 { label: "Territories", href: "/leads/territories" },
                 { label: "Zones", href: "/leads/priority-zones" },
+                { label: "Competitors", href: "/leads/competitors" },
             ]}
         />
     );

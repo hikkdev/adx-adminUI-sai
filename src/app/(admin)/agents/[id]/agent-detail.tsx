@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { AccountClosure, CloseAccountButton } from "@/components/adx/account-closure";
+import { DeleteAccountButton } from "@/components/adx/delete-account";
 import { ActivityTimeline } from "@/components/adx/activity-timeline";
 import { DetailShell } from "@/components/adx/detail-shell";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
@@ -23,15 +24,19 @@ import {
     ratePercent,
     tierLabel,
     workingDaysLabel,
+    type AgentCompensationHistory,
     type AgentOffers,
     type AgentRating,
+    type AgentStanding,
 } from "@/services/agents";
 import type { AgentQuality } from "@/services/leads";
 import { type GrantView, type ScanView } from "@/services/access";
 import { agentKycService, type AgentKycCase } from "@/services/agent-kyc";
+import { ID_LABEL, idLine } from "@/services/identifiers";
 import { requestOf } from "@/services/kyc";
 import { KYC_STATE_META } from "@/services/kyc-state";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
+import { accountStateFrom } from "@/services/account-state";
 import type { LeaderboardView, MilestoneBoard, TierView } from "@/services/growth";
 import { AgentAccessTab } from "./agent-access-tab";
 import { AgentEngagementCard } from "./agent-engagement-card";
@@ -40,6 +45,7 @@ import { AgentMilestoneProgressCard, AgentMilestonesTab } from "./agent-mileston
 import { AgentPayoutsTab } from "./agent-payouts-tab";
 import { AgentPromotionHistory, AgentTierCard } from "./agent-tier-card";
 import { AgentQualityCard } from "./agent-quality-card";
+import { AgentCompensationCard } from "./agent-compensation-card";
 import { EditAgentDialog } from "./edit-agent-dialog";
 import { ScanForSignalsButton } from "@/components/adx/scan-for-signals";
 import { SuspensionActions } from "@/components/adx/suspend-dialog";
@@ -81,6 +87,10 @@ interface AgentDetailProps {
     quality: AgentQuality | null;
     /** Lot A: the case and its history. Null when the API is off or the read failed. */
     suspension: SuspensionView | null;
+    /** CP-1: the pay terms in force and the ones before them. Null when the API is off or the read failed. */
+    compensation: AgentCompensationHistory | null;
+    /** CP-1: today's quota and this month's real cost per onboarding. Null when the API is off or the read failed. */
+    standing: AgentStanding | null;
     /** Re-read after a withdrawal, a profile save, a suspension, or a payout-method change. */
     onChanged?: () => void;
 }
@@ -133,6 +143,8 @@ export function AgentDetail({
     milestones,
     quality,
     suspension,
+    compensation,
+    standing,
     onChanged,
 }: AgentDetailProps) {
     const router = useRouter();
@@ -150,7 +162,9 @@ export function AgentDetail({
     /* The tier view is fresher than the profile row: it is the rung after
        the ladder was consulted, while the row is what was last written back. */
     const rung = tier ? tier.current.label : tierLabel(agent.tier, agent.tierLevel);
-    const subtitle = [agent.displayId, place, `${rung} tier`]
+    /* 29 Sep 2026: the profile's id is named as the agent's, as the tile and
+       the Profile card name it. The person's own ADX ID sits in the Profile card. */
+    const subtitle = [idLine("AGENT", agent.displayId), place, `${rung} tier`]
         .filter(Boolean)
         .join(" · ");
 
@@ -159,7 +173,7 @@ export function AgentDetail({
            by the banner above the header and the button in it. E10-1: the
            columns come off `GET /agents/:id` (`user.closedAt`), so nothing is
            read a second time. */
-        <AccountClosure userId={agent.userId} name={agent.name ?? agent.mobile} closed={agent.user} onChanged={onChanged}>
+        <AccountClosure userId={agent.userId} name={agent.name ?? agent.mobile} closed={agent.user} onChanged={onChanged} directoryHref="/agents/directory">
         {(closure) => (
         <DetailShell
             backHref="/agents/directory"
@@ -177,6 +191,7 @@ export function AgentDetail({
                     <SuspensionActions
                         partyType="AGENT"
                         partyId={agent.id}
+                        closed={Boolean(closure.closed?.closedAt)}
                         partyName={agent.name ?? agent.mobile}
                         current={scopes}
                         runningOrders={countRunningOrders(orders)}
@@ -185,6 +200,8 @@ export function AgentDetail({
                     {/* Lot G (Q138): the fraud signals over this agent, on the fraud desk. */}
                     <ScanForSignalsButton subjectType="AGENT" subjectId={agent.id} />
                     <CloseAccountButton slot={closure} />
+                    {/* 2 Oct 2026: only for an account with no history — the server says which. */}
+                    <DeleteAccountButton slot={closure} />
                     {/* A portal; it lives here so the button and its dialog share one owner. */}
                     <EditAgentDialog
                         agent={agent}
@@ -241,6 +258,7 @@ export function AgentDetail({
                                         ["Phone", agent.mobile],
                                         ["Email", agent.email ?? "—"],
                                         ["Agent ID", agent.displayId ?? "—"],
+                                        [ID_LABEL.USER, agent.personDisplayId ?? "—"],
                                         ["City", agent.city ?? "—"],
                                         ["State", agent.state ?? "—"],
                                         ["Business / org", agent.businessName ?? "Independent agent"],
@@ -282,6 +300,8 @@ export function AgentDetail({
                                         onRequest={(channel, note) => agentKycService.request(agent.id, channel, note)}
                                         onRecord={() => router.push(`/kyc/agents/${agent.id}`)}
                                         onChanged={() => onChanged?.()}
+                                        accountState={accountStateFrom({ closedAt: agent.user?.closedAt, exited: agent.engagement?.stage === "EXITED", scopes })}
+                                        suspensionScopes={scopes}
                                     />
                                 )}
                             </Card>
@@ -378,6 +398,17 @@ export function AgentDetail({
                             <AgentMilestoneProgressCard board={milestones} />
                             {/* LH10: what the sampled field work says, beside the rating. */}
                             <AgentQualityCard quality={quality} />
+                            {/* CP-1: the salary, the quota it covers, and what an
+                                onboarding actually cost this month — the four things
+                                to read before coaching or re-banding someone. */}
+                            <AgentCompensationCard
+                                agentId={agent.id}
+                                agentName={agent.name ?? agent.mobile}
+                                grade={agent.engagement?.grade ?? null}
+                                compensation={compensation}
+                                standing={standing}
+                                onChanged={onChanged}
+                            />
                             {/* Lot D (Q112): the publishers' stars — the rating's fourth driver. */}
                             <ReviewsCard
                                 subjectType="AGENT"

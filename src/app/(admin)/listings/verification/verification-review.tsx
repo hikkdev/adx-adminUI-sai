@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MiniMap } from "@/components/adx/mini-map";
+import { PrivateFile, PrivateFileLink } from "@/components/adx/private-file";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { EmptyState } from "@/components/adx/empty-state";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
@@ -48,24 +49,25 @@ interface Props {
  * Photographs come from the backend's own upload store, whose host is set at
  * runtime by NEXT_PUBLIC_API_BASE_URL. `next/image` needs its hosts listed in
  * next.config at build time, which cannot be done for a value the deployment
- * chooses, so this is a plain img on purpose.
+ * chooses, so this is never a Next image.
+ *
+ * ST-2 (28 Sep 2026): a site-visit shot goes up as VERIFICATION, which is a
+ * private purpose now — its URL is `/files/:id` and answers only with the
+ * token, so the picture and the full-size link both go through the
+ * private-file door. A shot taken before the move keeps its public URL and
+ * is drawn straight from it, as before.
  */
 const Shot = ({ photo, index }: { photo: ListingVerificationPhoto; index: number }) => (
     <figure className="overflow-hidden rounded-md border border-border">
-        <a
-            href={photo.url}
-            target="_blank"
-            rel="noreferrer"
-            className="block bg-muted"
-            title="Open the full-size photograph"
-        >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+        <PrivateFileLink href={photo.url} className="block bg-muted" title="Open the full-size photograph" fallbackError="The photograph could not be opened.">
+            <PrivateFile
                 src={photo.url}
                 alt={photo.label ?? `Verification photograph ${index + 1}`}
+                kind="image"
                 className="aspect-[4/3] w-full object-cover"
+                frameClassName="aspect-[4/3] w-full"
             />
-        </a>
+        </PrivateFileLink>
         <figcaption className="flex items-start justify-between gap-2 px-3 py-2">
             <span className="text-xs font-medium text-foreground">
                 {photo.label ?? "Unnamed shot"}

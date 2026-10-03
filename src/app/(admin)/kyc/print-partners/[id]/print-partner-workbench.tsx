@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Eye, EyeOff, FileText, UserCheck } from "lucide-react";
+import { Eye, EyeOff, FileText, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { PrivateFile } from "@/components/adx/private-file";
+import { DocumentReadingPanel } from "@/components/adx/document-reading";
+import { expectedFor, kindForDocument } from "@/services/document-reading";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { useAuth } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -18,8 +20,10 @@ import { cn } from "@/lib/utils";
 import { escalationChip, flaggedFields, isLivenessRequired, recordedLine, requestLine, type DocumentDecision } from "@/services/kyc";
 import { PARTNER_DESK_FACTS, printPartnerKycFieldLabel, printPartnerKycService, PRINT_PARTNER_KYC_FIELDS, type PrintPartnerKycCase } from "@/services/print-partner-kyc";
 import { KYC_STATUS_META } from "@/types";
+import { KycCaseHeader } from "../../_shared/case-header";
 import { DecisionHistory } from "../../_shared/decision-history";
 import { DigioCard } from "../../_shared/digio-card";
+import { VerificationChecksPanel, backupStateOf, useCaseAttempts } from "../../_shared/verification-checks-panel";
 import { DocumentDecisionControls } from "../../_shared/document-review";
 import { EscalateButton, EscalationCard } from "../../_shared/escalation";
 import { LivenessCard } from "../../_shared/liveness-card";
@@ -56,6 +60,12 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
     const [reuploadKey, setReuploadKey] = React.useState(0);
     const [previewField, setPreviewField] = React.useState<string | null>(null);
     const [manualReview, setManualReview] = React.useState(kycCase.method !== "DIGIO");
+    /* Cashfree Phase 2: every provider call for this case, keyed by the print partner's id. */
+    const checks = useCaseAttempts("PRINT_PARTNER_KYC", kycCase.partnerId);
+    const afterBackup = () => {
+        checks.reload();
+        onChanged();
+    };
     const [livenessRefusal, setLivenessRefusal] = React.useState<string | null>(null);
 
     const reviewOf = (field: string) => kycCase.documentReviews.find((review) => review.field === field);
@@ -133,33 +143,21 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
 
     return (
         <div className="space-y-5">
-            <div>
-                <Link href="/kyc/print-partners" className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
-                    <ChevronLeft className="size-4" />
-                    Print partner KYC
-                </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-primary">KYC review · print partner</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{kycCase.partnerName}</h1>
-                            <StatusBadge status={KYC_STATUS_META[kycCase.status]} />
-                            {kycCase.request?.open && <StatusBadge status={{ label: "Requested · awaiting the partner", tone: "info" }} />}
-                            {escalatedChip && <StatusBadge status={escalatedChip} />}
-                            {ageChip && <StatusBadge status={ageChip} />}
-                        </div>
-                        {kycCase.request && (
-                            <p className="mt-1 text-sm text-muted-foreground" data-testid="request-line">
-                                {requestLine(kycCase.request)}
-                            </p>
-                        )}
-                        {kycCase.status === "NEEDS_INFO" && flagged.length > 0 && (
-                            <p className="mt-1 text-sm text-muted-foreground" data-testid="needs-info-flagged">
-                                Waiting on a re-upload of {flagged.map((item) => printPartnerKycFieldLabel(item.field)).join(", ")}.
-                            </p>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
+            <KycCaseHeader
+                backHref="/kyc/print-partners"
+                backLabel="Print partner KYC"
+                eyebrow="KYC review · print partner"
+                title={kycCase.partnerName}
+                badges={
+                    <>
+                        <StatusBadge status={KYC_STATUS_META[kycCase.status]} />
+                        {kycCase.request?.open && <StatusBadge status={{ label: "Requested · awaiting the partner", tone: "info" }} />}
+                        {escalatedChip && <StatusBadge status={escalatedChip} />}
+                        {ageChip && <StatusBadge status={ageChip} />}
+                    </>
+                }
+                actions={
+                    <>
                         <Link href={`/print-partners/${kycCase.partnerId}`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
                             Open the partner
                         </Link>
@@ -169,8 +167,8 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
                                     party={kycCase.partnerName}
                                     hasAccount
                                     verified={verified}
-                                    onRequest={async (channel, text) => {
-                                        const result = await printPartnerKycService.request(kycCase.id, channel, text);
+                                    onRequest={async (channel, text, entityType) => {
+                                        const result = await printPartnerKycService.request(kycCase.id, channel, text, entityType);
                                         return { digio: result.digio, notified: true };
                                     }}
                                     onRequested={onChanged}
@@ -236,9 +234,20 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
                                 </Button>
                             </>
                         )}
-                    </div>
-                </div>
-            </div>
+                    </>
+                }
+            >
+                {kycCase.request && (
+                    <p className="mt-1 text-sm text-muted-foreground" data-testid="request-line">
+                        {requestLine(kycCase.request)}
+                    </p>
+                )}
+                {kycCase.status === "NEEDS_INFO" && flagged.length > 0 && (
+                    <p className="mt-1 text-sm text-muted-foreground" data-testid="needs-info-flagged">
+                        Waiting on a re-upload of {flagged.map((item) => printPartnerKycFieldLabel(item.field)).join(", ")}.
+                    </p>
+                )}
+            </KycCaseHeader>
 
             <Card className="rounded-lg border-border shadow-none">
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 p-4 sm:grid-cols-3 xl:grid-cols-7">
@@ -298,6 +307,15 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
                                             <PrivateFile src={document.url} alt={document.label} className="max-h-96 max-w-full rounded object-contain" frameClassName="h-40 w-full rounded" />
                                         </div>
                                     )}
+                                    {document.url && (
+                                        <DocumentReadingPanel
+                                            className="mt-3"
+                                            url={document.url}
+                                            kind={kindForDocument(document.field, { label: document.label, govIdType: kycCase.govIdType })}
+                                            expected={expectedFor(kindForDocument(document.field, { label: document.label, govIdType: kycCase.govIdType }), { pan: kycCase.panNumber })}
+                                            disabled={decided}
+                                        />
+                                    )}
                                 </li>
                             );
                         })}
@@ -354,11 +372,15 @@ export function PrintPartnerWorkbench({ kycCase, onChanged }: PrintPartnerWorkbe
                         digio={kycCase.digio}
                         verified={verified}
                         imagesPurgedAt={kycCase.imagesPurgedAt}
-                        onRestart={() => printPartnerKycService.restartDigio(kycCase.id)}
+                        onRestart={(entityType) => printPartnerKycService.restartDigio(kycCase.id, entityType)}
                         onReviewManually={() => setManualReview(true)}
                         manualReview={manualReview || kycCase.method !== "DIGIO"}
                         onChanged={onChanged}
+                        backup={backupStateOf("PRINT_PARTNER_KYC", kycCase.partnerId, checks.data)}
+                        onBackupSent={afterBackup}
                     />
+
+                    <VerificationChecksPanel caseType="PRINT_PARTNER_KYC" caseId={kycCase.partnerId} resource={checks} />
 
                     <DecisionHistory
                         record={{

@@ -383,6 +383,8 @@ function ReinstateForm({
 
 export interface SuspensionActionsProps extends Omit<SuspendDialogProps, "open" | "onOpenChange"> {
     className?: string;
+    /** 2 Oct 2026: the account is closed for good — there is nothing to reinstate, and the page's banner says why. */
+    closed?: boolean;
 }
 
 /**
@@ -390,7 +392,7 @@ export interface SuspensionActionsProps extends Omit<SuspendDialogProps, "open" 
  * Lives in one component so the page's action row and the Suspension card
  * can both mount the same pair without owning two sets of dialog state.
  */
-export function SuspensionActions({ className, ...props }: SuspensionActionsProps) {
+export function SuspensionActions({ className, closed = false, ...props }: SuspensionActionsProps) {
     const [suspending, setSuspending] = React.useState(false);
     const [reinstating, setReinstating] = React.useState(false);
     const live = isLive("suspension");
@@ -399,7 +401,7 @@ export function SuspensionActions({ className, ...props }: SuspensionActionsProp
 
     return (
         <div className={className ?? "flex items-center gap-2"}>
-            {props.current.length > 0 && (
+            {props.current.length > 0 && !closed && (
                 <Button variant="outline" className="bg-card" onClick={() => setReinstating(true)} disabled={!live}>
                     Reinstate
                 </Button>

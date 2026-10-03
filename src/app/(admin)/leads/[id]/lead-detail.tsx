@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FieldList } from "@/components/adx/simple-table";
 import { PageHeader } from "@/components/adx/page-header";
+import { CustomFieldsCard } from "@/components/adx/custom-fields-card";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { agentLabel, type AgentSummary } from "@/services/agents";
@@ -150,6 +151,8 @@ export function LeadDetailView({ lead, agents, onChanged }: LeadDetailViewProps)
                     <LeadInviteCard lead={lead} onChanged={onChanged} />
                     {/* LH1: why it is hot, warm or cold. */}
                     <LeadScoreCard lead={lead} onChanged={onChanged} />
+                    {/* CF-1 (27 Sep 2026): the extra questions Settings › Custom fields asks of a lead; draws nothing when there are none. */}
+                    <CustomFieldsCard entity="LEAD" entityId={lead.id} />
                     <Card className="rounded-lg border-border p-5 shadow-none">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Who is on this</h3>
                         <p className="mt-2 text-sm text-foreground">{agentName(lead.assignedAgentId)}</p>

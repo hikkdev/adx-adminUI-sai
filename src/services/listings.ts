@@ -1,5 +1,6 @@
 import { api as http } from "@/lib/api-client";
 import type { AudienceVendor, BlendedAudienceCatchment } from "@/services/audience";
+import { shapeListingRecord, type ListingPhotoRecord, type ListingRecord, type WireListingRecordExtras } from "@/services/listing-record";
 import type { SuspensionColumns, SuspensionScope } from "@/types";
 
 /**
@@ -44,7 +45,11 @@ export interface WireListing {
     createdAt: string;
     publisher: { id: string; name: string | null; displayId?: string | null } | null;
     agent: { id: string; displayId: string | null } | null;
-    photos: { id: string; url: string }[];
+    /** In the order they were filed; the record read leads with the cover and adds the capture stamp. */
+    photos: ({ id: string; url: string } & Partial<Omit<ListingPhotoRecord, "id" | "url">>)[];
+    /** 3 Oct 2026: the grid card's cover (the front or main photograph, else the first) and its bookings (orders past DRAFT). Absent on an older backend. */
+    coverPhotoUrl?: string | null;
+    bookingCount?: number;
     /* Lot A. Optional on the wire for rows older than the columns. */
     suspensionScopes?: SuspensionScope[];
     suspensionReason?: string | null;
@@ -114,6 +119,29 @@ export const LISTING_STATUS_TONE: Record<ListingLifecycle, "success" | "warning"
 
 export const listingStatusLabel = (status: ListingLifecycle): string => LABEL[status] ?? status;
 
+/** The four categories a spot is filed under, as the console names them everywhere (2 Oct 2026: the table printed `OUTDOOR`). */
+export const LISTING_CATEGORY_KEYS = ["INDOOR", "OUTDOOR", "TRANSIT", "MEDIA"] as const;
+const CATEGORY_LABEL: Record<(typeof LISTING_CATEGORY_KEYS)[number], string> = {
+    INDOOR: "Indoor",
+    OUTDOOR: "Outdoor",
+    TRANSIT: "Transit",
+    MEDIA: "Media",
+};
+
+/**
+ * A category's label from whatever spelling arrived — the API's `OUTDOOR`,
+ * a phone draft's `indoor`, a new key the console has not met
+ * (`STREET_FURNITURE` → "Street furniture"). Null or blank is null.
+ */
+export function listingCategoryLabel(category: string | null | undefined): string {
+    const key = (category ?? "").trim();
+    if (!key) return "";
+    const known = CATEGORY_LABEL[key.toUpperCase() as keyof typeof CATEGORY_LABEL];
+    if (known) return known;
+    const words = key.toLowerCase().replace(/[_-]+/g, " ");
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** "40 × 20 ft", or nothing when nobody measured the spot. */
 export function sizeLabel(listing: Pick<WireListing, "widthFt" | "heightFt">): string | null {
     if (!listing.widthFt || !listing.heightFt) return null;
@@ -141,6 +169,10 @@ export interface AdminListing extends SuspensionColumns {
     publisherId: string | null;
     agentDisplayId: string | null;
     photoCount: number;
+    /** 3 Oct 2026: the grid card's photograph — null when the spot has none. */
+    coverPhotoUrl: string | null;
+    /** 3 Oct 2026: bookings on the spot (orders past DRAFT); null on a backend older than the count. */
+    bookingCount: number | null;
     submittedAt: string | null;
     createdAt: string;
     /** Lot D (Q104): the stars, or null while nobody has reviewed the spot. */
@@ -190,6 +222,8 @@ export function shapeListing(wire: WireOwnListing): AdminListing {
         publisherId: wire.publisher?.id ?? null,
         agentDisplayId: wire.agent?.displayId ?? null,
         photoCount: wire.photos?.length ?? 0,
+        coverPhotoUrl: wire.coverPhotoUrl !== undefined ? wire.coverPhotoUrl : (wire.photos?.[0]?.url ?? null),
+        bookingCount: typeof wire.bookingCount === "number" ? wire.bookingCount : null,
         submittedAt: wire.submittedAt,
         createdAt: wire.createdAt,
         suspensionScopes: wire.suspensionScopes ?? [],
@@ -203,8 +237,8 @@ export function shapeListing(wire: WireOwnListing): AdminListing {
     };
 }
 
-/** The detail page's extra fields, over and above a table row. */
-export interface WireListingDetail extends WireListing {
+/** The detail page's extra fields, over and above a table row; 3 Oct 2026: and the whole record (`WireListingRecordExtras`). */
+export interface WireListingDetail extends WireListing, WireListingRecordExtras {
     description?: string | null;
     illumination?: string | null;
     facing?: string | null;
@@ -219,6 +253,49 @@ export interface WireListingDetail extends WireListing {
      */
     carriesLoop?: boolean;
     mediaType?: { name: string; formatGroup: string } | null;
+    /** VH-1: the registration of a vehicle spot, and when its RC was last checked. Absent on an older backend. */
+    vehicleNumber?: string | null;
+    vehicleRcVerifiedAt?: string | null;
+    vehicleRcPayload?: VehicleRcPayload | null;
+    /** LF-2: the booking terms' cancellation — the policy, and the days' notice a NOTICE policy asks. Absent on an older backend. */
+    cancellationPolicy?: CancellationPolicy | null;
+    cancellationNoticeDays?: number | null;
+}
+
+/**
+ * LF-2 (28 Sep 2026): how a booking may be cancelled — FLEXIBLE is free up
+ * to 48 hours before, NOTICE asks `cancellationNoticeDays` ahead, NONE is
+ * no cancellation once confirmed. A plain string column on the backend.
+ */
+export type CancellationPolicy = "FLEXIBLE" | "NOTICE" | "NONE";
+
+/**
+ * VH-1: what the RC lookup left on the listing.
+ *
+ * Everything here came from the vendor except `nameMatch` and
+ * `publisherName`, which the server worked out by comparing the RC's owner
+ * with the publisher's own name — the question the desk is actually asking
+ * when it presses Verify is "is this their vehicle", not "does this vehicle
+ * exist". A score, never a verdict: names are spelled differently on every
+ * document in India, and a hard yes/no would either reject honest people or
+ * wave through anyone.
+ */
+export interface VehicleRcPayload {
+    registrationNumber?: string;
+    ownerName?: string;
+    maker?: string;
+    model?: string;
+    vehicleClass?: string;
+    status?: string;
+    fuel?: string;
+    registeredAt?: string;
+    insuranceUpto?: string;
+    fitnessUpto?: string;
+    pucUpto?: string;
+    /** 0–100, how closely the RC's owner matches the publisher's name. */
+    nameMatch?: number;
+    publisherName?: string | null;
+    checkedAt?: string;
 }
 
 export interface AdminListingDetail extends AdminListing {
@@ -234,6 +311,21 @@ export interface AdminListingDetail extends AdminListing {
     carriesLoop: boolean;
     /** G11-1: the media type the spot was filed under, or null. */
     mediaType: { name: string; formatGroup: string } | null;
+    /** VH-1: the registration of a vehicle spot. Null on any other spot, and on a backend older than the field. */
+    vehicleNumber: string | null;
+    /** VH-1: when the RC was last checked. Null means never — not "failed". */
+    vehicleRcVerifiedAt: string | null;
+    vehicleRcPayload: VehicleRcPayload | null;
+    /** 3 Oct 2026: everything the desk's read carries — every column as it came, and every row hanging off the listing. */
+    record: ListingRecord;
+}
+
+/** VH-1: what `POST /listings/:id/vehicle-rc/verify` answers. */
+export interface VehicleRcVerification {
+    via: string;
+    /** 0–100. */
+    nameMatch: number;
+    facts: VehicleRcPayload;
 }
 
 export interface AdminListingsPage {
@@ -250,6 +342,10 @@ export type AdminListingsSort = "NEWEST" | "OLDEST" | "RATE_ASC" | "RATE_DESC" |
 export interface AdminListingsQuery {
     q?: string;
     status?: ListingLifecycle[];
+    /** One of the four categories, as the API spells it. */
+    category?: string;
+    /** A city slug or name — matched by the city key, the spelling as the fallback. */
+    city?: string;
     sort?: AdminListingsSort;
     page?: number;
     pageSize?: number;
@@ -289,6 +385,11 @@ export interface ListingDraftRow {
     publisher: { id: string; displayId: string | null; name: string; mobile: string; city: string | null; kycStatus: string };
 }
 
+/** 2 Oct 2026: one draft as the desk opens it — the row, and the wizard's answers as the phone saved them. */
+export interface ListingDraftDetail extends ListingDraftRow {
+    answers: Record<string, unknown>;
+}
+
 export interface ListingDraftsPage {
     items: ListingDraftRow[];
     total: number;
@@ -318,6 +419,12 @@ export const listingsService = {
         return http.get<ListingDraftsPage>(`/listings/drafts/desk?${params.toString()}`);
     },
 
+    /** 2 Oct 2026: one draft with its answers — the Listings table's "Open draft". */
+    draft: (id: string): Promise<ListingDraftDetail> => http.get<ListingDraftDetail>(`/listings/drafts/desk/${encodeURIComponent(id)}`),
+
+    /** 2 Oct 2026: throw a publisher's draft away from the desk — audited server-side; needs `marketplace.delete`. */
+    deleteDraft: (id: string): Promise<{ deleted: true }> => http.delete<{ deleted: true }>(`/listings/drafts/desk/${encodeURIComponent(id)}`),
+
     /**
      * The table's page. No fixture fallback: the previous version drew seeded
      * listings with ids the backend has never heard of, so a row click opened
@@ -327,6 +434,8 @@ export const listingsService = {
         const params = new URLSearchParams();
         if (query.q) params.set("q", query.q);
         if (query.status?.length) params.set("status", query.status.join(","));
+        if (query.category) params.set("category", query.category);
+        if (query.city) params.set("city", query.city);
         if (query.sort) params.set("sort", query.sort);
         params.set("page", String(query.page ?? 1));
         params.set("pageSize", String(query.pageSize ?? 20));
@@ -338,6 +447,21 @@ export const listingsService = {
             counts: Record<string, number>;
         }>(`/listings?${params.toString()}`);
         return { ...page, items: (page.items ?? []).map(shapeListing) };
+    },
+
+    /**
+     * 2 Oct 2026: every row behind a filter, a hundred at a time — the
+     * table's "Export CSV" with nothing ticked. Stops at `cap` rows so an
+     * export never walks the whole inventory by accident.
+     */
+    listAll: async (query: Omit<AdminListingsQuery, "page" | "pageSize">, cap = 5000): Promise<AdminListing[]> => {
+        const rows: AdminListing[] = [];
+        for (let page = 1; rows.length < cap; page += 1) {
+            const next = await listingsService.list({ ...query, page, pageSize: 100 });
+            rows.push(...next.items);
+            if (next.items.length === 0 || rows.length >= next.total) break;
+        }
+        return rows.slice(0, cap);
     },
 
     /** The factor reprices on one listing, newest first — the appliedRatePerDay trail. 404 for a listing that does not exist. */
@@ -365,6 +489,10 @@ export const listingsService = {
                 publisherDisplayId: wire.publisher?.displayId ?? null,
                 carriesLoop: wire.carriesLoop ?? false,
                 mediaType: wire.mediaType ?? null,
+                vehicleNumber: wire.vehicleNumber ?? null,
+                vehicleRcVerifiedAt: wire.vehicleRcVerifiedAt ?? null,
+                vehicleRcPayload: wire.vehicleRcPayload ?? null,
+                record: shapeListingRecord(wire as unknown as Parameters<typeof shapeListingRecord>[0]),
             };
         } catch {
             // The api-client throws on any non-2xx; the page treats every
@@ -390,6 +518,21 @@ export const listingsService = {
      */
     setSlotsTotal: (id: string, slotsTotal: number) =>
         http.patch<WireListing>(`/listings/${encodeURIComponent(id)}`, { slotsTotal }),
+
+    /**
+     * VH-1: check a vehicle spot's registration against the RC register.
+     *
+     * `POST /listings/:id/vehicle-rc/verify`. The number may be sent with the
+     * call — that is the Verify button beside a number just typed — or left
+     * out, and the server re-checks the one already on the listing. A vendor
+     * that cannot answer is a 409 `VERIFICATION_UNAVAILABLE` carrying the
+     * reason; the caller shows it rather than pretending the vehicle failed.
+     */
+    verifyVehicleRc: (id: string, vehicleNumber?: string) =>
+        http.post<{ listing: WireListingDetail; verification: VehicleRcVerification }>(
+            `/listings/${encodeURIComponent(id)}/vehicle-rc/verify`,
+            vehicleNumber ? { vehicleNumber } : {},
+        ),
 
     create: (body: {
         publisherId: string;
@@ -431,7 +574,42 @@ export const listingsService = {
         availableHoursTo?: string;
         peakPeriodNote?: string;
         rateCardUrl?: string;
+        /* FL-3 (27 Sep 2026): the keys the apps' wizard sends for the screens the desk form gained when it was drawn from the flow. */
+        vehicleNumber?: string;
+        rightsBasis?: string;
+        rightsValidUntil?: string;
+        contentRules?: { contentCategoryId: string; stance: string }[];
+        /* LF-2 (28 Sep 2026): FRONT, LEFT, RIGHT, WIDE — the review's four angles. */
+        photos?: { url: string; type: string }[];
+        /* LF-2: what the website's wizard asked and the flow now asks on every surface. */
+        installationByAdx?: boolean;
+        vehicleModel?: string;
+        broadcastLanguage?: string;
+        contentFormat?: string;
+        /** A media outlet's slot duration, in words ("30 seconds", "Half page"). */
+        size?: string;
+        audienceDemographics?: Partial<Record<"ageBand" | "genderSplit" | "urbanRural" | "secProfile" | "incomeBracket" | "occupation", string>>;
+        availableNow?: boolean;
+        /** LF-2: "Available year-round?" — not `availableNow`, the live occupied flag. */
+        availableYearRound?: boolean;
+        maxBookingDays?: number;
+        advanceBookingDays?: number;
+        cancellationPolicy?: CancellationPolicy;
+        cancellationNoticeDays?: number;
+        /** YYYY-MM-DD. */
+        rateCardValidFrom?: string;
+        rateCardValidTo?: string;
+        seasonalVariationNote?: string;
     }) => http.post<WireOwnListing>("/listings", body),
+
+    /**
+     * FL-3: one venue proof onto a listing the desk just created —
+     * `POST /supply/listings/:listingId/documents`, the same door the phone
+     * files each collected document through after the create. A permit or
+     * agreement carries the day the right runs out (QR-24).
+     */
+    addDocument: (listingId: string, body: { kind: string; url: string; expiresAt?: string }) =>
+        http.post<unknown>(`/supply/listings/${listingId}/documents`, body),
 
     /**
      * G7 (Q109) / Y-B: the vendors' audience panel for the spot's catchment,
@@ -462,4 +640,33 @@ export interface ListingAudience {
     cached: boolean;
     /** Vendors in force that could not answer this read — the other's answer stands. */
     unavailable: { vendor: AudienceVendor; reason: string }[];
+}
+
+/* ------------------------------------------------------------------ */
+/* The table's CSV                                                     */
+/* ------------------------------------------------------------------ */
+
+/** 2 Oct 2026: the columns "Export CSV" writes — the table's own, the words as the table prints them, money and dates plain. */
+export const LISTINGS_CSV_HEADER = ["Listing ID", "Title", "Publisher", "Category", "Type", "City", "Address", "Rate per day", "Status", "Suspended sections", "Rating", "Reviews", "Submitted", "Created"] as const;
+
+export function listingsCsvRows(rows: readonly AdminListing[]): (string | number | null)[][] {
+    return [
+        [...LISTINGS_CSV_HEADER],
+        ...rows.map((row) => [
+            row.displayId ?? row.id,
+            row.title,
+            row.publisherName ?? "Unclaimed",
+            listingCategoryLabel(row.category),
+            row.subType,
+            row.city,
+            row.address,
+            row.ratePerDay,
+            listingStatusLabel(row.status),
+            (row.suspensionScopes ?? []).join(" "),
+            row.ratingAvg,
+            row.reviewCount,
+            row.submittedAt ? row.submittedAt.slice(0, 10) : null,
+            row.createdAt.slice(0, 10),
+        ]),
+    ];
 }

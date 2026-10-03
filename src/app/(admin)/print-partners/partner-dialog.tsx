@@ -13,8 +13,25 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { CityCombobox } from "@/components/adx/city-combobox";
+import { ConfirmDialog } from "@/components/adx/confirm-dialog";
+import { ADDRESS_LINE_PLACEHOLDER, AddressFinder, PIN_CODE, PIN_CODE_PLACEHOLDER, placeFill } from "@/components/adx/pin-picker";
+import { useApiResource } from "@/lib/use-api-resource";
+import {
+    ENTITY_UPGRADE_LINE,
+    ENTITY_VERIFIED_RULE,
+    KYC_ENTITY_TYPE_FALLBACK,
+    KYC_LOCKED_EXPLANATION,
+    entityTypeLabel,
+    isEntityUpgrade,
+    isKycLocked,
+    kycEntityTypeService,
+    type KycEntityType,
+    type KycEntityTypeLists,
+} from "@/services/kyc-entity-types";
+import { digioFailure } from "@/services/kyc-provider";
 import { printPartnerService, type PrintPartner, type PrintPartnerInput, type PrintPartnerPatch } from "@/services/print-partners";
 
 /* The backend's own patterns, so the dialog refuses what the API would. */
@@ -33,11 +50,18 @@ interface Draft {
     email: string;
     address: string;
     city: string;
+    state: string;
+    postalCode: string;
+    /** The shop's pin — never shown: set by the address bar's pick, kept as the row had it otherwise. */
+    latitude: number | null;
+    longitude: number | null;
     /** Comma-separated on screen, an array on the wire. */
     capabilities: string;
     maxWidthFt: string;
     turnaroundDays: string;
     notes: string;
+    /** Phase D: what the shop verifies as — edit only; "" while none is chosen. Not part of `partnerBody`: it rides the PATCH only when changed. */
+    entityType: KycEntityType | "";
 }
 
 const EMPTY: Draft = {
@@ -50,10 +74,15 @@ const EMPTY: Draft = {
     email: "",
     address: "",
     city: "",
+    state: "",
+    postalCode: "",
+    latitude: null,
+    longitude: null,
     capabilities: "",
     maxWidthFt: "",
     turnaroundDays: "",
     notes: "",
+    entityType: "",
 };
 
 const fromPartner = (partner: PrintPartner): Draft => ({
@@ -66,14 +95,24 @@ const fromPartner = (partner: PrintPartner): Draft => ({
     email: partner.email ?? "",
     address: partner.address ?? "",
     city: partner.city ?? "",
+    state: partner.state ?? "",
+    postalCode: partner.postalCode ?? "",
+    latitude: partner.latitude ?? null,
+    longitude: partner.longitude ?? null,
     capabilities: partner.capabilities.join(", "),
     maxWidthFt: partner.maxWidthFt ?? "",
     turnaroundDays: partner.turnaroundDays === null ? "" : String(partner.turnaroundDays),
     notes: partner.notes ?? "",
+    entityType: partner.entityType ?? "",
 });
 
 /** The optional text fields as the wire wants them: trimmed, null when blank. */
 const text = (value: string): string | null => value.trim() || null;
+
+/** The pin as the wire wants it: both coordinates, or neither. */
+function pinOf(draft: Pick<Draft, "latitude" | "longitude">): { latitude: number; longitude: number } | null {
+    return draft.latitude !== null && draft.longitude !== null ? { latitude: draft.latitude, longitude: draft.longitude } : null;
+}
 
 /**
  * What the draft sends. Exported for the test that pins it: the capabilities
@@ -89,6 +128,10 @@ export function partnerBody(draft: Draft): Omit<PrintPartnerInput, "mobile"> {
         email: text(draft.email),
         address: text(draft.address),
         city: text(draft.city),
+        state: text(draft.state),
+        postalCode: text(draft.postalCode),
+        latitude: pinOf(draft)?.latitude ?? null,
+        longitude: pinOf(draft)?.longitude ?? null,
         capabilities: draft.capabilities
             .split(",")
             .map((item) => item.trim())
@@ -110,6 +153,8 @@ export function partnerPatch(before: PrintPartner, draft: Draft): PrintPartnerPa
         const same = Array.isArray(a) && Array.isArray(b) ? a.join("\u0000") === b.join("\u0000") : a === b;
         if (!same) (patch as Record<string, unknown>)[key] = a;
     }
+    // Phase D: the entity type, named only when the desk chose one that the row does not already carry.
+    if (draft.entityType && draft.entityType !== (before.entityType ?? "")) patch.entityType = draft.entityType;
     return patch;
 }
 
@@ -129,11 +174,28 @@ interface PartnerDialogProps {
  * cannot be edited. Everything else describes the shop: the legal name,
  * GSTIN and PAN ops vetted instead of KYC, the contact, the address the
  * agent collects from, what it can print and how wide, and the turnaround.
+ *
+ * The address (the owner, 1 Oct 2026): the one "Find the address" bar over
+ * plain boxes — Address, City | State, PIN code — and no map. A pick fills
+ * the boxes and keeps the shop's coordinates silently for the save.
+ *
+ * Phase D (1 Oct 2026): an edit also carries the entity type — one of the
+ * four a print partner may verify as, which picks the Digio workflow. On a
+ * VERIFIED shop the one change the server takes is Individual → a business
+ * form; it fires a fresh Digio request and puts the KYC back to pending, so
+ * the save is confirmed first. Any other change there is 409 `KYC_LOCKED`,
+ * and Digio failing the upgrade is said in the owner's words.
  */
 export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerDialogProps) {
     const [draft, setDraft] = React.useState<Draft>(partner ? fromPartner(partner) : EMPTY);
     const [saving, setSaving] = React.useState(false);
     const [wasOpen, setWasOpen] = React.useState(open);
+    /* Phase D: the four entity types a print partner may be, labelled by the server; read once an edit opens. */
+    const [confirmingUpgrade, setConfirmingUpgrade] = React.useState(false);
+    const editing = Boolean(partner) && open;
+    const entityLists = useApiResource<KycEntityTypeLists>(`kyc:entity-types:${editing ? "read" : "unused"}`, () => (editing ? kycEntityTypeService.lists() : Promise.resolve(KYC_ENTITY_TYPE_FALLBACK)));
+    const entityOptions = (entityLists.data ?? KYC_ENTITY_TYPE_FALLBACK).PRINT_PARTNER;
+    const verified = partner?.kycStatus === "VERIFIED";
 
     /* Reset the draft each time the dialog opens, from whichever row it is
        opened on — done during render rather than in an effect, which is the
@@ -155,10 +217,12 @@ export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerD
         email: draft.email.trim() !== "" && !EMAIL.test(draft.email.trim()),
         maxWidthFt: draft.maxWidthFt.trim() !== "" && !AMOUNT.test(draft.maxWidthFt.trim()),
         turnaroundDays: draft.turnaroundDays.trim() !== "" && !/^\d{1,3}$/.test(draft.turnaroundDays.trim()),
+        postalCode: draft.postalCode.trim() !== "" && !PIN_CODE.test(draft.postalCode.trim()),
     };
     const complete = !Object.values(problems).some(Boolean);
     const patch = partner ? partnerPatch(partner, draft) : null;
     const dirty = patch === null || Object.keys(patch).length > 0;
+    const upgrade = Boolean(patch?.entityType) && isEntityUpgrade(verified, partner?.entityType, draft.entityType);
 
     async function save() {
         setSaving(true);
@@ -168,13 +232,24 @@ export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerD
                 : await printPartnerService.create({ mobile: draft.mobile.trim(), ...partnerBody(draft) });
             toast.success(partner ? `${saved.name} updated` : `${saved.name} is on the roster`, {
                 description: partner
-                    ? undefined
+                    ? upgrade
+                        ? "A fresh Digio request went out for the business. The account is 'verification pending' until it is verified."
+                        : undefined
                     : `${saved.displayId ?? "A PRT id"} allocated. Its wallet is open; record a bank account before the first job is paid.`,
             });
             onOpenChange(false);
             onSaved(saved);
         } catch (cause) {
-            toast.error(cause instanceof Error ? cause.message : "The partner did not reach ADX.");
+            const failure = digioFailure(cause);
+            if (isKycLocked(cause)) {
+                // Phase D: a verified shop's type moves only from Individual to a business form; nothing in the patch was written.
+                toast.error("The entity type was not changed", { description: KYC_LOCKED_EXPLANATION });
+            } else if (failure) {
+                // Phase D: the upgrade asks Digio first; when Digio fails it, the individual stays verified.
+                toast.error(failure);
+            } else {
+                toast.error(cause instanceof Error ? cause.message : "The partner did not reach ADX.");
+            }
         } finally {
             setSaving(false);
         }
@@ -208,16 +283,38 @@ export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerD
                             inputMode="tel"
                             aria-invalid={problems.mobile || undefined}
                         />
-                        {!partner && (
-                            <p className="text-xs text-muted-foreground">
-                                Must not belong to an ADX account already; a partner needs its own number.
-                            </p>
-                        )}
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    {!partner && (
+                        <p className="-mt-1 text-xs text-muted-foreground sm:col-span-2">
+                            The mobile must not belong to an ADX account already; a partner needs its own number.
+                        </p>
+                    )}
                     <div className="space-y-1.5 sm:col-span-2">
                         <Label htmlFor="partner-legal">Legal name</Label>
                         <Input id="partner-legal" value={draft.legalName} onChange={(event) => set("legalName", event.target.value)} placeholder="As on the GST registration" />
                     </div>
+                    {/* Phase D: what the shop verifies as — a row of its own, with its one line of guidance under it. */}
+                    {partner && (
+                        <div className="space-y-1.5 sm:col-span-2" data-testid="partner-entity-type">
+                            <Label htmlFor="partner-entity-type-input">Entity type</Label>
+                            <Select value={draft.entityType || undefined} onValueChange={(value) => set("entityType", value as KycEntityType)}>
+                                <SelectTrigger id="partner-entity-type-input" aria-label="Entity type">
+                                    <SelectValue placeholder="Not chosen yet" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {entityOptions.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                The entity type decides which Digio workflow the shop is verified on. {verified ? ENTITY_VERIFIED_RULE : "While none is chosen, it is asked when verification starts."}
+                            </p>
+                        </div>
+                    )}
                     <div className="space-y-1.5">
                         <Label htmlFor="partner-gstin">GSTIN</Label>
                         <Input
@@ -248,15 +345,47 @@ export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerD
                         <Label htmlFor="partner-email">Email</Label>
                         <Input id="partner-email" type="email" value={draft.email} onChange={(event) => set("email", event.target.value)} aria-invalid={problems.email || undefined} />
                     </div>
+                    {/* The one address bar, no map: a pick fills the boxes under it and keeps the shop's coordinates, never shown. */}
+                    <AddressFinder
+                        id="partner-address-find"
+                        className="sm:col-span-2"
+                        near={pinOf(draft)}
+                        onPlace={(place) => setDraft((current) => ({ ...current, ...placeFill(place, current) }))}
+                    />
                     <div className="space-y-1.5 sm:col-span-2">
                         <Label htmlFor="partner-address">Address</Label>
-                        <Textarea id="partner-address" value={draft.address} onChange={(event) => set("address", event.target.value)} rows={2} placeholder="Where the agent collects from" />
+                        <Input id="partner-address" value={draft.address} onChange={(event) => set("address", event.target.value)} placeholder={ADDRESS_LINE_PLACEHOLDER} autoComplete="street-address" />
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="content-start space-y-1.5">
                         <Label htmlFor="partner-city">City</Label>
-                        <CityCombobox id="partner-city" value={draft.city} onChange={(city) => set("city", city)} placeholder="Where the shop is" />
+                        <CityCombobox
+                            id="partner-city"
+                            value={draft.city}
+                            onChange={(city, picked) => setDraft((current) => ({ ...current, city, state: picked ? (picked.geoState?.name ?? picked.state ?? current.state) : current.state }))}
+                            placeholder="e.g. Bengaluru"
+                        />
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="content-start space-y-1.5">
+                        <Label htmlFor="partner-state">State</Label>
+                        <Input id="partner-state" value={draft.state} onChange={(event) => set("state", event.target.value)} placeholder="e.g. Karnataka" autoCapitalize="words" />
+                    </div>
+                    <div className="content-start space-y-1.5">
+                        <Label htmlFor="partner-postal-code">PIN code</Label>
+                        <Input
+                            id="partner-postal-code"
+                            value={draft.postalCode}
+                            onChange={(event) => set("postalCode", event.target.value)}
+                            placeholder={PIN_CODE_PLACEHOLDER}
+                            inputMode="numeric"
+                            maxLength={6}
+                            autoComplete="postal-code"
+                            className="tabular-nums"
+                            aria-invalid={problems.postalCode || undefined}
+                        />
+                    </div>
+                    {/* The PIN code sits alone on its row, left — the shop's next fields are not part of its address. */}
+                    <div className="hidden sm:block" aria-hidden />
+                    <div className="space-y-1.5 sm:col-span-2">
                         <Label htmlFor="partner-capabilities">Capabilities</Label>
                         <Input id="partner-capabilities" value={draft.capabilities} onChange={(event) => set("capabilities", event.target.value)} placeholder="flex, vinyl, backlit — comma-separated" />
                     </div>
@@ -278,10 +407,21 @@ export function PartnerDialog({ open, onOpenChange, partner, onSaved }: PartnerD
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
                         Cancel
                     </Button>
-                    <Button onClick={() => void save()} disabled={saving || !complete || !dirty}>
+                    {/* Phase D: a verified Individual becoming a business restarts verification — said before it is saved. */}
+                    <Button onClick={() => (upgrade ? setConfirmingUpgrade(true) : void save())} disabled={saving || !complete || !dirty}>
                         {saving ? "Saving…" : partner ? "Save changes" : "Add partner"}
                     </Button>
                 </DialogFooter>
+
+                <ConfirmDialog
+                    open={confirmingUpgrade}
+                    onOpenChange={setConfirmingUpgrade}
+                    title={`Change the entity type to ${entityTypeLabel(draft.entityType, entityOptions)}?`}
+                    description={`${ENTITY_UPGRADE_LINE} A fresh Digio request goes out for the business when this is saved.`}
+                    confirmLabel="Save and restart verification"
+                    busy={saving}
+                    onConfirm={() => void save()}
+                />
             </DialogContent>
         </Dialog>
     );

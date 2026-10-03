@@ -16,7 +16,7 @@ import { KpiCard } from "@/components/adx/kpi-card";
 import { PageHeader } from "@/components/adx/page-header";
 import { PrivateFile, privateFileUrl } from "@/components/adx/private-file";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import { formatCompactINR, formatDateTime, formatMoney } from "@/lib/format";
 import {
     FRAUD_CASE_STATUSES,
     FRAUD_CASE_STATUS_META,
@@ -26,8 +26,6 @@ import {
     formatScore,
     fraudService,
     isDecided,
-    CLEAN_BAND_HEIGHT,
-    linkedGraphLayout,
     linkedPartiesOf,
     shapeSignals,
     subjectHref,
@@ -44,6 +42,7 @@ import { uploadService } from "@/services/uploads";
 import type { UserRow } from "@/services/users";
 import { DecideCaseDialog, EscalateCaseDialog, OpenCaseDialog } from "./fraud-dialogs";
 import type { FraudFacets } from "./fraud-loader";
+import { LinkedAccountsTable, LinkedGraph, type AccountsFilter } from "./link-graph";
 
 interface FraudViewProps {
     page: FraudCasesPage;
@@ -83,12 +82,15 @@ const NOBODY = "__nobody__";
  * - SHARED SIGNALS lists every signal present on the stored `signals`, with
  *   its weight, value, detail and the accounts it names;
  * - the graph is `GET /fraud/cases/:id/linked`, drawn as SVG with no
- *   library: the subject in the centre, the linked accounts on a ring,
- *   each edge captioned with the signals that tie it. G13-B: the frame's
- *   "Clean" legend entry is drawn too — the read's `evaluated` (the
- *   parties the last scoring compared the subject against without a
- *   link) sit in a band under the ring with no edge, and a case never
- *   scored has none;
+ *   library (`link-graph.tsx`, 28 Sep 2026): bipartite as the frame draws
+ *   it — the accounts joined by plain lines to the shared-attribute nodes
+ *   between them (the read's masked `attributes`: "PAN ••••234F · shared
+ *   by 4"), no edge captions, the read's `evaluated` (compared by the last
+ *   scoring, no link) in a grey column at the right edge. It is laid out
+ *   for the card's measured width, never scaled, with a collision pass so
+ *   no two captions overlap; below 520 px it lists the attribute groups.
+ *   The Linked accounts table beneath carries every account's wallet, open
+ *   bookings and KYC; the hover card carries them per node;
  * - the timeline's header names the decision (Q118) that nothing
  *   auto-suspends: a case's first row is its opening, and a suspension
  *   is only ever an operator's confirmation;
@@ -122,6 +124,9 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
     const [opening, setOpening] = React.useState<{ preset?: { subjectType: FraudCase["subjectType"]; subjectId: string; subjectName: string | null; kind: string; summary: string } } | null>(null);
     const [escalating, setEscalating] = React.useState(false);
     const [deciding, setDeciding] = React.useState<"CONFIRMED" | "DISMISSED" | null>(null);
+    /* What the graph narrowed the Linked accounts table to — keyed on the case, so it never follows the selection. */
+    const [tableFilter, setTableFilter] = React.useState<{ id: string; filter: AccountsFilter } | null>(null);
+    const tableRef = React.useRef<HTMLDivElement>(null);
 
     /* The selection, or the first row. A `?case=` that is not on this page
        (a filter hides it, say) still reads by id and draws from the file. */
@@ -173,6 +178,15 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
     const fileState = !rowId ? "idle" : file?.id !== rowId ? "loading" : file.value ? "idle" : "error";
     const links: LinkedAccountsRead | null = linked !== null && linked.id === rowId ? linked.value : null;
     const linksState = !rowId ? "idle" : linked?.id !== rowId ? "loading" : linked.value ? "idle" : "error";
+    const accountsFilter: AccountsFilter = tableFilter !== null && tableFilter.id === rowId ? tableFilter.filter : null;
+    const showAccounts = (filter: AccountsFilter) => {
+        if (rowId) setTableFilter({ id: rowId, filter });
+        const table = tableRef.current;
+        if (table) {
+            table.scrollIntoView?.({ behavior: "smooth", block: "start" });
+            table.focus({ preventScroll: true });
+        }
+    };
 
     const refresh = () => {
         setReload((n) => n + 1);
@@ -241,9 +255,10 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
                     stat={{
                         id: "value-at-risk",
                         label: "Value at risk",
-                        value: links ? formatMoney(links.valueAtRisk) : "—",
+                        /* The frame's compact "₹10.3L" — the whole amount in paise would not fit a third of a 900 px window; it stays in the hint. */
+                        value: links ? (Number.isFinite(Number(links.valueAtRisk)) ? formatCompactINR(Number(links.valueAtRisk)) : formatMoney(links.valueAtRisk)) : "—",
                         hint: links
-                            ? `Linked wallets plus open bookings across the ${implicated} account${implicated === 1 ? "" : "s"} implicated`
+                            ? `${formatMoney(links.valueAtRisk)} · linked wallets plus open bookings across the ${implicated} account${implicated === 1 ? "" : "s"} implicated`
                             : header
                               ? linksState === "loading"
                                   ? "Computing the exposure on the selected case…"
@@ -455,44 +470,51 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
                             </p>
                         )}
 
-                        <div className="grid gap-4 xl:grid-cols-3">
-                            <div className="space-y-4 xl:col-span-2">
-                                {/* The link graph: the subject and the accounts the shared signals tie it to. */}
-                                <Card className="rounded-lg border-border p-5 shadow-none" data-testid="fraud-linked-graph">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <ul className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                                            <li className="flex items-center gap-1.5">
-                                                <span className="size-2.5 rounded-full border-2 border-danger" aria-hidden /> Flagged
-                                            </li>
-                                            <li className="flex items-center gap-1.5">
-                                                <span className="size-2.5 rounded-full border-2 border-warning" aria-hidden /> Shared attribute
-                                            </li>
-                                            <li className="flex items-center gap-1.5">
-                                                <span className="size-2.5 rounded-full border-2 border-dashed border-muted-foreground/60" aria-hidden /> Clean
-                                            </li>
-                                        </ul>
-                                        {links && (
-                                            <span className="text-xs text-muted-foreground">Computed {formatDateTime(links.computedAt)}</span>
-                                        )}
-                                    </div>
-                                    {linksState === "loading" && <p className="mt-6 text-center text-sm text-muted-foreground">Evaluating the linking signals…</p>}
-                                    {linksState === "error" && (
-                                        <p className="mt-6 text-center text-sm text-muted-foreground">
-                                            {linked?.error ?? "Could not compute the linked accounts."}{" "}
-                                            <button type="button" className="underline" onClick={() => setReload((n) => n + 1)}>
-                                                Try again
-                                            </button>
-                                        </p>
+                        {/* The frame's detail grid: at 2xl the rail stands beside the graph, as drawn at 1920; below that the graph takes the full width above the two columns so it keeps its room. */}
+                        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] xl:[grid-template-areas:'graph_graph'_'main_rail'] 2xl:grid-rows-[auto_1fr] 2xl:[grid-template-areas:'graph_rail'_'main_rail']">
+                            {/* The link graph: the accounts, and the shared attributes that tie them. */}
+                            <Card className="min-w-0 rounded-lg border-border p-4 shadow-none xl:[grid-area:graph]" data-testid="fraud-linked-graph">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <ul className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground" aria-label="Legend">
+                                        <li className="flex items-center gap-1.5">
+                                            <span className="size-2.5 rounded-full border border-danger bg-danger-soft" aria-hidden /> Flagged
+                                        </li>
+                                        <li className="flex items-center gap-1.5">
+                                            <span className="size-2.5 rounded-full border border-warning bg-warning-soft" aria-hidden /> Shared attribute
+                                        </li>
+                                        <li className="flex items-center gap-1.5">
+                                            <span className="size-2.5 rounded-full border border-border bg-card" aria-hidden /> Clean
+                                        </li>
+                                    </ul>
+                                    {links && (
+                                        <span className="text-xs text-muted-foreground">Computed {formatDateTime(links.computedAt)}</span>
                                     )}
-                                    {links && links.linked.length === 0 && (
-                                        <p className="mt-6 text-center text-sm text-muted-foreground">
-                                            No other account shares a PAN, payout account, device, sign-in subnet, mobile or listing photo with{" "}
-                                            {links.subject.name ?? links.subject.id} right now.
-                                            {(links.evaluated?.length ?? 0) > 0 && ` ${links.evaluated!.length} compared and found clean.`}
-                                        </p>
-                                    )}
-                                    {links && (links.linked.length > 0 || (links.evaluated?.length ?? 0) > 0) && <LinkedGraph read={links} />}
-                                </Card>
+                                </div>
+                                {linksState === "loading" && <p className="mt-6 text-center text-sm text-muted-foreground">Evaluating the linking signals…</p>}
+                                {linksState === "error" && (
+                                    <p className="mt-6 text-center text-sm text-muted-foreground">
+                                        {linked?.error ?? "Could not compute the linked accounts."}{" "}
+                                        <button type="button" className="underline" onClick={() => setReload((n) => n + 1)}>
+                                            Try again
+                                        </button>
+                                    </p>
+                                )}
+                                {links && links.linked.length === 0 && (
+                                    <p className="mt-6 text-center text-sm text-muted-foreground">
+                                        No other account shares a PAN, payout account, device, sign-in subnet, mobile or listing photo with{" "}
+                                        {links.subject.name ?? links.subject.id} right now.
+                                        {(links.evaluated?.length ?? 0) > 0 && ` ${links.evaluated!.length} compared and found clean.`}
+                                    </p>
+                                )}
+                                {links && (links.linked.length > 0 || (links.evaluated?.length ?? 0) > 0) && (
+                                    <LinkedGraph key={rowId} read={links} onShowAccounts={showAccounts} />
+                                )}
+                            </Card>
+
+                            <div className="min-w-0 space-y-4 xl:[grid-area:main]">
+                                {links && links.linked.length > 0 && (
+                                    <LinkedAccountsTable key={rowId} ref={tableRef} read={links} filter={accountsFilter} onClearFilter={() => setTableFilter(null)} />
+                                )}
 
                                 {/* The subject, and where it stands today. */}
                                 <Card className="rounded-lg border-border p-5 shadow-none">
@@ -580,7 +602,7 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
                                 </Card>
                             </div>
 
-                            <div className="space-y-4">
+                            <div className="min-w-0 space-y-4 xl:[grid-area:rail]">
                                 {/* Shared signals: what the score is made of. */}
                                 <Card className="rounded-lg border-border p-5 shadow-none" data-testid="fraud-shared-signals">
                                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shared signals</h3>
@@ -591,38 +613,6 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
                                             Not scored yet. Score the case to evaluate the thirteen signals over {selected?.suspension?.name ?? "the party"}.
                                         </p>
                                     )}
-                                </Card>
-
-                                {/* Who is on it */}
-                                <Card className="rounded-lg border-border p-5 shadow-none">
-                                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Investigator</h3>
-                                    <p className="mt-2 text-sm text-foreground">{casePersonLabel(header.assignedTo, header.assignedToUserId)}</p>
-                                    {!isDecided(header.status) && (
-                                        <Select
-                                            value={header.assignedToUserId ?? NOBODY}
-                                            onValueChange={(value) =>
-                                                void act(
-                                                    () => fraudService.patch(header.id, { assignedToUserId: value === NOBODY ? null : value }),
-                                                    value === NOBODY ? "Investigator taken off" : "Investigator set",
-                                                    value === NOBODY ? undefined : "They have been told."
-                                                )
-                                            }
-                                            disabled={busy}
-                                        >
-                                            <SelectTrigger className="mt-3 h-9" aria-label="Investigator">
-                                                <SelectValue placeholder="Put somebody on it" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value={NOBODY}>Nobody</SelectItem>
-                                                {admins.map((user) => (
-                                                    <SelectItem key={user.id} value={user.id}>
-                                                        {user.displayName}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    )}
-                                    <p className="mt-2 text-xs text-muted-foreground">Opened by {casePersonLabel(header.openedBy, header.openedByUserId)}</p>
                                 </Card>
 
                                 {/* Timeline: the notes, oldest first, between opened and decided. */}
@@ -696,6 +686,38 @@ export function FraudView({ page, facets, onFacetsChange, admins, preselectId, s
                                         </div>
                                     </Card>
                                 )}
+
+                                {/* Who is on it */}
+                                <Card className="rounded-lg border-border p-5 shadow-none">
+                                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Investigator</h3>
+                                    <p className="mt-2 text-sm text-foreground">{casePersonLabel(header.assignedTo, header.assignedToUserId)}</p>
+                                    {!isDecided(header.status) && (
+                                        <Select
+                                            value={header.assignedToUserId ?? NOBODY}
+                                            onValueChange={(value) =>
+                                                void act(
+                                                    () => fraudService.patch(header.id, { assignedToUserId: value === NOBODY ? null : value }),
+                                                    value === NOBODY ? "Investigator taken off" : "Investigator set",
+                                                    value === NOBODY ? undefined : "They have been told."
+                                                )
+                                            }
+                                            disabled={busy}
+                                        >
+                                            <SelectTrigger className="mt-3 h-9" aria-label="Investigator">
+                                                <SelectValue placeholder="Put somebody on it" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value={NOBODY}>Nobody</SelectItem>
+                                                {admins.map((user) => (
+                                                    <SelectItem key={user.id} value={user.id}>
+                                                        {user.displayName}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
+                                    <p className="mt-2 text-xs text-muted-foreground">Opened by {casePersonLabel(header.openedBy, header.openedByUserId)}</p>
+                                </Card>
                             </div>
                         </div>
                     </div>
@@ -797,113 +819,6 @@ export function SignalsList({ signals }: { signals: FraudSignal[] }) {
             ))}
         </ul>
     );
-}
-
-const NODE_RADIUS = 20;
-
-/**
- * The link graph as SVG, no library: `linkedGraphLayout` places the
- * subject at the centre and the linked accounts on a ring; each circle is
- * a link to the party's page, each edge is captioned with the signals that
- * tie the two. G11-1: every linked node carries a card beneath the graph
- * with its wallet balance and open bookings, the figures the value at risk
- * is summed from.
- */
-function LinkedGraph({ read }: { read: LinkedAccountsRead }) {
-    const layout = linkedGraphLayout(read);
-    const linkedNodes = layout.nodes.filter((node) => !node.subject && !node.clean);
-    const cleanNodes = layout.nodes.filter((node) => node.clean);
-    return (
-        <>
-        <svg
-            viewBox={`0 0 ${layout.width} ${layout.height}`}
-            className="mt-3 h-auto w-full"
-            role="img"
-            aria-label={`${read.subject.name ?? read.subject.id} and ${read.linked.length} linked account${read.linked.length === 1 ? "" : "s"}${cleanNodes.length ? `, ${cleanNodes.length} evaluated and clean` : ""}`}
-        >
-            {cleanNodes.length > 0 && (
-                <g data-testid="fraud-clean-band">
-                    <line x1={12} y1={layout.height - CLEAN_BAND_HEIGHT} x2={layout.width - 12} y2={layout.height - CLEAN_BAND_HEIGHT} className="stroke-border" strokeDasharray="3 3" />
-                    <text x={12} y={layout.height - CLEAN_BAND_HEIGHT + 12} className="fill-muted-foreground" fontSize={9}>
-                        Evaluated, not linked
-                    </text>
-                </g>
-            )}
-            {layout.edges.map((edge) => {
-                const from = layout.nodes.find((node) => node.key === edge.from)!;
-                const to = layout.nodes.find((node) => node.key === edge.to)!;
-                return (
-                    <g key={`${edge.from}->${edge.to}`}>
-                        <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} className="stroke-border" strokeWidth={1.5} />
-                        <text x={edge.x} y={edge.y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
-                            {edge.label}
-                        </text>
-                    </g>
-                );
-            })}
-            {layout.nodes.map((node) => (
-                <Link key={node.key} href={subjectHref(node.type, node.id)}>
-                    <g className="cursor-pointer">
-                        <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r={NODE_RADIUS}
-                            className={cn("fill-card", node.subject ? "stroke-danger" : node.clean ? "stroke-muted-foreground/60" : "stroke-warning")}
-                            strokeWidth={2}
-                            strokeDasharray={node.clean ? "4 3" : undefined}
-                        />
-                        <text
-                            x={node.x}
-                            y={node.y + 4}
-                            textAnchor="middle"
-                            className={cn("font-semibold", node.subject ? "fill-danger" : node.clean ? "fill-muted-foreground" : "fill-warning")}
-                            fontSize={11}
-                        >
-                            {node.initials}
-                        </text>
-                        <text x={node.x} y={node.y + NODE_RADIUS + 14} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
-                            {node.name ?? node.id}
-                        </text>
-                        {!node.subject && !node.clean && (
-                            <text x={node.x} y={node.y + NODE_RADIUS + 26} textAnchor="middle" className="fill-muted-foreground" fontSize={9}>
-                                {nodeExposure(node)}
-                            </text>
-                        )}
-                    </g>
-                </Link>
-            ))}
-        </svg>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2" data-testid="fraud-linked-cards">
-            {linkedNodes.map((node) => (
-                <li key={node.key} className="rounded-md border border-border px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                        <Link href={subjectHref(node.type, node.id)} className="truncate text-sm font-medium text-foreground underline-offset-4 hover:underline">
-                            {node.name ?? node.id}
-                        </Link>
-                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{PARTY_LABEL[node.type] ?? node.type}</span>
-                    </div>
-                    <dl className="mt-1.5 grid grid-cols-2 gap-x-3 text-xs">
-                        <div>
-                            <dt className="text-muted-foreground">Wallet balance</dt>
-                            <dd className="font-medium tabular-nums text-foreground">{node.walletBalance === null ? "No wallet" : formatMoney(node.walletBalance)}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-muted-foreground">Open bookings</dt>
-                            <dd className="font-medium tabular-nums text-foreground">{node.openBookings ?? 0}</dd>
-                        </div>
-                    </dl>
-                </li>
-            ))}
-        </ul>
-        </>
-    );
-}
-
-/** The second caption line under a linked node: "₹12,500.00 · 3 open". */
-function nodeExposure(node: { walletBalance: string | null; openBookings: number | null }): string {
-    const wallet = node.walletBalance === null ? "no wallet" : formatMoney(node.walletBalance);
-    const open = node.openBookings ?? 0;
-    return `${wallet} · ${open} open`;
 }
 
 /**

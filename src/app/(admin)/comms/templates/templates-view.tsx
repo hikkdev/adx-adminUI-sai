@@ -408,8 +408,8 @@ function Editor({
                     <ChevronLeft className="size-4" />
                     All templates
                 </button>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2.5">
                             <h1 className="text-2xl font-semibold tracking-tight text-foreground">{template?.key ?? "New template"}</h1>
                             <StatusBadge status={TEMPLATE_STATUS_META[draft.status]} />
@@ -484,7 +484,6 @@ function Editor({
                                     {draft.event.trim() && !catalogued && (
                                         <p className="text-xs text-warning">No code raises {draft.event.trim()} — the template would never fire.</p>
                                     )}
-                                    {catalogued?.note && <p className="text-xs text-muted-foreground">{catalogued.note}</p>}
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="tpl-status">Status</Label>
@@ -500,8 +499,11 @@ function Editor({
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-muted-foreground">Only the ACTIVE template for an event is rendered.</p>
                                 </div>
+                                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                                <p className="-mt-1 text-xs text-muted-foreground sm:col-span-2">
+                                    {catalogued?.note ? `${catalogued.note} ` : ""}Only the ACTIVE template for an event is rendered.
+                                </p>
                             </div>
 
                             <div className="space-y-2 border-t pt-4">

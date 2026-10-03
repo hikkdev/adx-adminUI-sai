@@ -11,9 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { openPrivateFile } from "@/components/adx/private-file";
+import { DocumentReadingPanel } from "@/components/adx/document-reading";
 import { ApiError } from "@/lib/api-client";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { uploadService } from "@/services/uploads";
+import { EXPIRY_FIELD, PRIMARY_NUMBER_FIELD, kindForDocument, type DocumentReading } from "@/services/document-reading";
 import {
     DOCUMENT_STATUS_META,
     EXPIRING_KINDS,
@@ -201,6 +203,8 @@ function PaperRow({ doc, agentId, ownerUserId, closed, onView }: { doc: Applicat
                         {rc?.fitnessValidUntil ? ` · fitness to ${rc.fitnessValidUntil}` : ""}
                     </p>
                 )}
+                {/* DR-1: what the model read off the paper, under the paper. */}
+                {doc.url && <DocumentReadingPanel className="mt-2" url={doc.url} kind={kindForDocument(doc.kind)} compact disabled={closed} />}
             </div>
             <input
                 ref={inputRef}
@@ -246,6 +250,7 @@ function PaperRow({ doc, agentId, ownerUserId, closed, onView }: { doc: Applicat
 
             <FileDetailsDialog
                 label={doc.label}
+                kind={doc.kind}
                 url={pending}
                 asksNumber={asksNumber}
                 asksExpiry={asksExpiry}
@@ -258,28 +263,39 @@ function PaperRow({ doc, agentId, ownerUserId, closed, onView }: { doc: Applicat
 }
 
 /** The number and the expiry a paper carries, asked for once the file is up. */
-function FileDetailsDialog({ label, url, asksNumber, asksExpiry, onCancel, onFile }: { label: string; url: string | null; asksNumber: boolean; asksExpiry: boolean; onCancel: () => void; onFile: (number?: string, expiresAt?: string) => Promise<void> }) {
+function FileDetailsDialog({ label, kind, url, asksNumber, asksExpiry, onCancel, onFile }: { label: string; kind: AgentDocumentKind; url: string | null; asksNumber: boolean; asksExpiry: boolean; onCancel: () => void; onFile: (number?: string, expiresAt?: string) => Promise<void> }) {
     return (
         <Dialog open={url !== null} onOpenChange={(open) => (!open ? onCancel() : undefined)}>
             <DialogContent className="sm:max-w-md">
                 {/* The form mounts with the content, so every opening starts blank. */}
-                {url !== null && <FileDetailsForm label={label} asksNumber={asksNumber} asksExpiry={asksExpiry} onCancel={onCancel} onFile={onFile} />}
+                {url !== null && <FileDetailsForm label={label} kind={kind} url={url} asksNumber={asksNumber} asksExpiry={asksExpiry} onCancel={onCancel} onFile={onFile} />}
             </DialogContent>
         </Dialog>
     );
 }
 
-function FileDetailsForm({ label, asksNumber, asksExpiry, onCancel, onFile }: { label: string; asksNumber: boolean; asksExpiry: boolean; onCancel: () => void; onFile: (number?: string, expiresAt?: string) => Promise<void> }) {
+function FileDetailsForm({ label, kind, url, asksNumber, asksExpiry, onCancel, onFile }: { label: string; kind: AgentDocumentKind; url: string; asksNumber: boolean; asksExpiry: boolean; onCancel: () => void; onFile: (number?: string, expiresAt?: string) => Promise<void> }) {
     const [number, setNumber] = React.useState("");
     const [expiresAt, setExpiresAt] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const ready = (!asksNumber || number.trim().length >= 4) && (!asksExpiry || /^\d{4}-\d{2}-\d{2}$/.test(expiresAt));
+    const readingKind = kindForDocument(kind);
+    /** DR-1: the model's reading prefills the number and the expiry; the desk still checks them against the paper. */
+    const prefill = (reading: DocumentReading) => {
+        const numberField = PRIMARY_NUMBER_FIELD[reading.kind];
+        const expiryField = EXPIRY_FIELD[reading.kind];
+        const readNumber = numberField ? reading.fields[numberField]?.value : null;
+        const readExpiry = expiryField ? reading.fields[expiryField]?.value : null;
+        if (asksNumber && readNumber) setNumber(readNumber.toUpperCase().replace(/\s+/g, ""));
+        if (asksExpiry && readExpiry && /^\d{4}-\d{2}-\d{2}$/.test(readExpiry)) setExpiresAt(readExpiry);
+    };
     return (
         <>
                 <DialogHeader>
                     <DialogTitle>{label}</DialogTitle>
                     <DialogDescription>The file is up. Type what is printed on it so the record can be checked against the paper.</DialogDescription>
                 </DialogHeader>
+                {readingKind && <DocumentReadingPanel url={url} kind={readingKind} compact onRead={prefill} />}
                 <div className="grid gap-3">
                     {asksNumber && (
                         <div className="grid gap-1.5">

@@ -8,22 +8,34 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { isLive } from "@/lib/api-config";
 import { useApiResource } from "@/lib/use-api-resource";
+import { entityTypeRequired, type KycEntityType, type KycEntityTypeOption } from "@/services/kyc-entity-types";
 import {
+    DIGIO_NOT_ANSWERING,
     KYC_PROVIDER_EXPLANATION,
     KYC_PROVIDER_META,
+    digioFailure,
     kycProviderService,
     providerUnavailable,
     type KycProviderState,
 } from "@/services/kyc-provider";
+import { ONLINE_PROVIDER_LABEL, PROVIDER_FAILED_META, backupOffer, isProviderFailed, type OnlineProvider } from "@/services/verification";
 import type { KycDigio, StatusMeta } from "@/types";
+import { EntityTypePicker } from "./entity-type-picker";
+import { ResendOnBackupButton, toastStartFailure, type BackupState } from "./resend-on-backup";
 
-/** How Digio's own words read on the desk. */
-export function digioStatusMeta(status: string | null): StatusMeta {
+/**
+ * How the online provider's own words read on the desk — Digio's, or
+ * Cashfree's on the backup. PROVIDER_FAILED (Digio could not be asked) is
+ * never printed raw: it reads "Digio couldn't be reached".
+ */
+export function digioStatusMeta(status: string | null, provider: OnlineProvider = "DIGIO"): StatusMeta {
+    if (isProviderFailed(status)) return PROVIDER_FAILED_META;
+    const name = ONLINE_PROVIDER_LABEL[provider];
     switch ((status ?? "").toLowerCase()) {
         case "approved":
-            return { label: "Approved by Digio", tone: "success" };
+            return { label: `Approved by ${name}`, tone: "success" };
         case "rejected":
-            return { label: "Rejected by Digio", tone: "danger" };
+            return { label: `Rejected by ${name}`, tone: "danger" };
         case "cancelled":
             return { label: "Cancelled", tone: "neutral" };
         case "pending":
@@ -39,13 +51,17 @@ interface DigioCardProps {
     verified: boolean;
     /** Lot D (Q127): set once the Digio-path images were purged; the reference stays as proof. */
     imagesPurgedAt: string | null;
-    /** `POST …/digio/restart` for this party. */
-    onRestart: () => Promise<{ notified: boolean }>;
+    /** `POST …/digio/restart` for this party — Phase D: called again with the entity type the picker chose after 409 `ENTITY_TYPE_REQUIRED`. */
+    onRestart: (entityType?: KycEntityType) => Promise<{ notified: boolean }>;
     /** The desk decides by hand instead — reveals the manual decision on a case Digio is still holding. */
     onReviewManually: () => void;
     /** Whether the manual decision is already in front of the reviewer. */
     manualReview: boolean;
     onChanged: () => void;
+    /** Cashfree Phase 2: the backup's state for this case, off the case page's `GET /verification/attempts`. */
+    backup?: BackupState | null;
+    /** Cashfree Phase 2: after the backup was sent — the case page reads the case and its checks again. */
+    onBackupSent?: () => void;
 }
 
 /**
@@ -58,8 +74,15 @@ interface DigioCardProps {
  * would answer 503, so the button says so and "Review manually" is the path.
  * Verified means nothing to restart; a case verified by documents may still
  * be sent to Digio instead.
+ *
+ * Phase D (1 Oct 2026): a restart for an account whose entity type is
+ * unknown answers 409 `ENTITY_TYPE_REQUIRED` — the picker opens with the
+ * server's options and the restart goes again with `{ entityType }`.
+ * Digio failing the restart while the switch is on (503 `PROVIDER_ERROR`,
+ * 502 `KYC_PROVIDER_REFUSED`, no template) is said in the owner's words
+ * and leaves the switch as it reads.
  */
-export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, onReviewManually, manualReview, onChanged }: DigioCardProps) {
+export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, onReviewManually, manualReview, onChanged, backup, onBackupSent }: DigioCardProps) {
     const live = isLive("kyc");
     const [busy, setBusy] = React.useState(false);
     const provider = useApiResource<KycProviderState>(`kyc-provider:${live}`, async () =>
@@ -67,23 +90,41 @@ export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, o
     );
     const state = provider.data ?? "DIGIO";
     const providerOff = state !== "DIGIO";
+    /** Phase D: the options of a 409 `ENTITY_TYPE_REQUIRED`, while the picker is up. */
+    const [picker, setPicker] = React.useState<KycEntityTypeOption[] | null>(null);
 
-    const restart = async () => {
+    const restart = async (entityType?: KycEntityType) => {
         setBusy(true);
         try {
-            const result = await onRestart();
+            const result = await onRestart(entityType);
             toast.success(`A fresh Digio check is on its way to ${party}`, {
                 description: result.notified
                     ? "They have been asked to open the app and finish it."
                     : "They have no app account yet, so nobody was told — reach them another way.",
             });
+            setPicker(null);
             onChanged();
         } catch (cause) {
+            const required = entityTypeRequired(cause);
+            const failure = digioFailure(cause);
             const unavailable = providerUnavailable(cause);
-            if (unavailable) {
+            if (required) {
+                // Phase D: nothing was stored or sent — ask who the account is for, then restart with the answer.
+                setPicker(required.options);
+            } else if (backupOffer(cause)) {
+                // Cashfree Phase 2: Digio could not be asked (whatever the reason) and the backup can be sent for this case — the toast offers it.
+                // The record now says Digio couldn't be reached, so the case is read again.
+                toastStartFailure(failure ?? DIGIO_NOT_ANSWERING, cause, onBackupSent ?? onChanged);
+                setPicker(null);
+                (onBackupSent ?? onChanged)();
+            } else if (failure) {
+                toast.error(failure);
+                setPicker(null);
+            } else if (unavailable) {
                 toast.error(`Digio is ${unavailable.provider === "MANUAL" ? "switched off" : "not answering"}`, {
                     description: "Review the documents by hand instead.",
                 });
+                setPicker(null);
                 provider.reload();
             } else {
                 toast.error(cause instanceof Error ? cause.message : "Digio could not be asked again.");
@@ -97,8 +138,19 @@ export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, o
         <Card className="rounded-lg border-border p-5 shadow-none" data-testid="digio-card">
             <div className="flex items-start justify-between gap-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Digio</h3>
-                <StatusBadge status={digio ? digioStatusMeta(digio.status) : { label: "Documents instead", tone: "neutral" }} />
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {/* Cashfree Phase 2: a record the backup ran shows Cashfree where Digio's badge is. */}
+                    {digio?.provider === "CASHFREE" && <StatusBadge status={{ label: "Cashfree", tone: "info" }} />}
+                    <StatusBadge status={digio ? digioStatusMeta(digio.status, digio.provider ?? "DIGIO") : { label: "Documents instead", tone: "neutral" }} />
+                </div>
             </div>
+
+            {digio && isProviderFailed(digio.status) && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2" data-testid="digio-provider-failed">
+                    <p className="text-xs text-foreground">Digio couldn&apos;t be reached for this case. ADX&apos;s own identity check can be sent instead.</p>
+                    <ResendOnBackupButton backup={backup} onSent={onBackupSent ?? onChanged} />
+                </div>
+            )}
 
             <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
                 <div className="min-w-0">
@@ -122,7 +174,7 @@ export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, o
                     </div>
                     {digio.message && (
                         <div>
-                            <dt className="text-muted-foreground">Digio said</dt>
+                            <dt className="text-muted-foreground">{digio.provider === "CASHFREE" ? "Cashfree said" : "Digio said"}</dt>
                             <dd className="mt-0.5 text-foreground">{digio.message}</dd>
                         </div>
                     )}
@@ -146,7 +198,7 @@ export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, o
                     variant="outline"
                     size="sm"
                     className="h-8"
-                    onClick={restart}
+                    onClick={() => void restart()}
                     disabled={!live || busy || verified || providerOff}
                     title={
                         !live
@@ -175,6 +227,19 @@ export function DigioCard({ party, digio, verified, imagesPurgedAt, onRestart, o
                 )}
             </div>
             {verified && <p className="mt-2 text-xs text-muted-foreground">Already verified; there is nothing to restart.</p>}
+
+            {picker && (
+                <EntityTypePicker
+                    open
+                    onOpenChange={(next) => {
+                        if (!next) setPicker(null);
+                    }}
+                    party={party}
+                    options={picker}
+                    busy={busy}
+                    onPick={(entityType) => void restart(entityType)}
+                />
+            )}
         </Card>
     );
 }

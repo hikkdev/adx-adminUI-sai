@@ -46,6 +46,43 @@ describe("toDraft / fromDraft", () => {
     });
 });
 
+/* RF-1: the reservation fee rides under `booking`, diff-only like every other section. */
+describe("the reservation fee (RF-1)", () => {
+    const withFee: PlatformSettings = {
+        ...loaded,
+        booking: { reservationFee: { enabled: true, minCheckoutValue: 100000, feePct: 5, payWithinMinutes: 60, holdHours: 24, retainPct: 10 } },
+    };
+
+    it("round-trips, and is left off the document when the backend did not serve it", () => {
+        expect(fromDraft(toDraft(withFee)).settings).toEqual(withFee);
+        expect(toDraft(loaded).reservationFee).toBeNull();
+        expect(fromDraft(toDraft(loaded)).settings).not.toHaveProperty("booking");
+    });
+
+    it("sends only the leaf that moved, a fractional percentage included", () => {
+        const draft = toDraft(withFee);
+        draft.reservationFee!.feePct = "7.5";
+        expect(draftPatch(withFee, draft)).toEqual({ booking: { reservationFee: { feePct: 7.5 } } });
+        const off = toDraft(withFee);
+        off.reservationFee!.enabled = false;
+        expect(draftPatch(withFee, off)).toEqual({ booking: { reservationFee: { enabled: false } } });
+    });
+
+    it("refuses what the schema would — a fractional hour, minutes under five, a percentage over a hundred", () => {
+        const draft = toDraft(withFee);
+        draft.reservationFee!.holdHours = "1.5";
+        draft.reservationFee!.payWithinMinutes = "4";
+        draft.reservationFee!.retainPct = "101";
+        const parsed = fromDraft(draft);
+        expect(parsed.settings).toBeNull();
+        expect([...parsed.errors].sort()).toEqual([
+            "booking.reservationFee.holdHours",
+            "booking.reservationFee.payWithinMinutes",
+            "booking.reservationFee.retainPct",
+        ]);
+    });
+});
+
 describe("draftPatch", () => {
     it("is empty when the draft still matches what was loaded", () => {
         expect(draftPatch(loaded, toDraft(loaded))).toEqual({});

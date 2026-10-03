@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { ApiError } from "@/lib/api-client";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { RoleConfig } from "@/services/roles";
+import type { Invite } from "@/services/users";
 import {
     USER_SORTS,
     USER_SORT_LABEL,
@@ -41,6 +42,7 @@ import {
 import { CreateUserDialog } from "../create-user-dialog";
 import { EditUserDialog } from "../edit-user-dialog";
 import { InviteDialog } from "../invite-dialog";
+import { InvitesPanel } from "../invites-panel";
 import { UsersNav } from "../users-nav";
 import type { AdminsFacets } from "./admins-loader";
 import { ChangeRoleDialog } from "./change-role-dialog";
@@ -71,6 +73,8 @@ interface AdminsViewProps {
     query: string;
     onQueryChange: (value: string) => void;
     roles: RoleConfig[];
+    /** 2 Oct 2026: the console invitations, drawn under the table as Pending invitations. Omitted, the section is not drawn. */
+    invites?: Invite[];
     /** The session's user id, so the operator's own row offers no self-moves. */
     operatorId: string | null;
     operatorIsSuperAdmin: boolean;
@@ -94,6 +98,7 @@ export function AdminsView({
     query,
     onQueryChange,
     roles,
+    invites,
     operatorId,
     operatorIsSuperAdmin,
     onChanged,
@@ -243,7 +248,14 @@ export function AdminsView({
                                                 </td>
                                                 <td className="px-4 py-3 text-muted-foreground">{user.email ?? "—"}</td>
                                                 <td className="px-4 py-3 tabular-nums text-muted-foreground">{user.mobile}</td>
-                                                <td className="px-4 py-3 text-muted-foreground">{user.roleConfig?.name ?? "Super admin"}</td>
+                                                <td className="px-4 py-3 text-muted-foreground">
+                                                    {/* RP-1: no role means no console, not Super admin. */}
+                                                    {user.roleConfig ? (
+                                                        user.roleConfig.name
+                                                    ) : (
+                                                        <StatusBadge status={{ label: "No role", tone: "warning" }} />
+                                                    )}
+                                                </td>
                                                 <td className="px-4 py-3">
                                                     <StatusBadge status={{ label: factor, tone: twoFactorTone(user) }} />
                                                     {factor === "Authenticator" && user.twoFactor && (
@@ -321,6 +333,8 @@ export function AdminsView({
                     )}
                 </Card>
             </div>
+
+            {invites && <InvitesPanel invites={invites} roles={roles} onChanged={onChanged} />}
 
             <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} roles={roles} onInvited={onChanged} />
             <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} roles={roles} presetRoles={["ADMIN"]} onCreated={onChanged} />

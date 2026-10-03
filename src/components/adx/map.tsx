@@ -10,6 +10,7 @@ import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { MapPinned } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { MapTone } from "@/lib/use-map-tone";
 import { markerClusters, MAX_ZOOM, MIN_ZOOM, type Camera, type MarkerCluster, type Placed } from "@/lib/map-geometry";
 import { browserKeyOf, vendorSentence, type MapsClientConfig } from "@/services/maps";
 
@@ -136,6 +137,8 @@ export interface MapSurfaceProps<T extends MapPoint> {
     onMapClick?: (at: { latitude: number; longitude: number }) => void;
     /** LH5: the viewport after every move, for a screen that asks the server for what is in view. */
     onBoundsChange?: (bounds: MapBounds) => void;
+    /** The map's look — the page's Light / Dark switch (`useMapTone`). Light when not given. */
+    tone?: MapTone;
 }
 
 /** The stroke and fill a ring or a square takes, by tone — the same hues the dots use. */
@@ -201,6 +204,7 @@ export function MapSurface<T extends MapPoint>({
     cells,
     onMapClick,
     onBoundsChange,
+    tone = "light",
 }: MapSurfaceProps<T>) {
     const key = browserKeyOf(config);
     const provider = config?.provider ?? null;
@@ -223,9 +227,13 @@ export function MapSurface<T extends MapPoint>({
         return <MapPlaceholder points={points} polygons={polygons} provider={provider} configured={Boolean(config)} refusal={refusal} caption={caption} className={className} />;
     }
 
+    // `isolate` gives the map its own stacking context. Leaflet stacks its panes
+    // and controls at z-index 200–1000; without a boundary they compete with
+    // the page, so a page's own buttons laid over the map (z-10) vanish under
+    // the tiles once they load, and the map can paint over sticky bars and menus.
     if (config.provider === "OSM") {
         return (
-            <div className={cn("relative size-full", className)} data-testid="map-surface" data-provider="OSM">
+            <div className={cn("relative isolate size-full", className)} data-testid="map-surface" data-provider="OSM" data-map-tone={tone}>
                 <OsmSurface
                     tileUrlTemplate={config.tileUrlTemplate}
                     tileAttribution={config.tileAttribution}
@@ -247,9 +255,12 @@ export function MapSurface<T extends MapPoint>({
     }
 
     return (
-        <div className={cn("relative size-full", className)} data-testid="map-surface" data-provider="GOOGLE">
+        <div className={cn("relative isolate size-full", className)} data-testid="map-surface" data-provider="GOOGLE" data-map-tone={tone}>
             <APIProvider apiKey={key} libraries={["marker"]} onError={() => setRefused({ key, reason: SCRIPT_FAILED_SENTENCE })}>
+                {/* Google takes the colour scheme only when a map is created, so a change of tone builds a new one. */}
                 <GoogleMap
+                    key={tone}
+                    colorScheme={tone === "dark" ? "DARK" : "LIGHT"}
                     mapId={MAP_ID}
                     center={{ lat: camera.latitude, lng: camera.longitude }}
                     zoom={camera.zoom}

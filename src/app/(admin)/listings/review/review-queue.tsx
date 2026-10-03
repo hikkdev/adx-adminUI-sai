@@ -14,6 +14,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { cn } from "@/lib/utils";
 import { compareMoney, formatDate, formatMoney } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
+import { idLine } from "@/services/identifiers";
 import {
     ageLabel,
     approvalBlockers,
@@ -109,7 +110,7 @@ const columns = (now: number): ColumnDef<ReviewQueueRow>[] => [
                     )}
                     <p className="text-xs text-muted-foreground">
                         {agent
-                            ? `via ${agent.name ?? "agent"}${agent.displayId ? ` · ${agent.displayId}` : ""}`
+                            ? `via ${[agent.name ?? "agent", idLine("AGENT", agent.displayId)].filter(Boolean).join(" · ")}`
                             : "Self-serve"}
                     </p>
                 </div>
@@ -253,7 +254,7 @@ export function ReviewQueue({ rows }: Props) {
                 actions={
                     <>
                         <Button size="sm" variant="outline" asChild>
-                            <Link href="/listings/verification">Verification queue</Link>
+                            <Link href="/listings/verification">Spot re-checks</Link>
                         </Button>
                         <Button size="sm" asChild>
                             <Link href="/listings/new">

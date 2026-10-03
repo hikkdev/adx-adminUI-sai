@@ -57,13 +57,17 @@ const publisher = (over: Partial<RosterPublisher> = {}): RosterPublisher => ({
     userId: null,
     name: "Sharma Hoardings",
     mobile: "9845022187",
+    email: null,
     city: "Bengaluru",
     type: "BUSINESS",
     kycStatus: "VERIFIED",
+    kyc: { state: "VERIFIED", kycId: null, submittedAt: null, requestedAt: null, requestedChannel: null, method: null },
     onboardingStatus: null,
     listingCount: 2,
     onboardedByAgent: true,
     onboarding: null,
+    entityType: null,
+    entityTypeStored: false,
     createdAt: "2026-01-01T00:00:00.000Z",
     suspensionScopes: [],
     suspensionReason: null,
@@ -92,6 +96,7 @@ describe("shaping", () => {
             listingId: "lst_1",
             city: "Bengaluru",
             campaignName: null,
+            campaignId: null,
             agent: null,
             agentId: null,
             budget: null,
@@ -158,9 +163,9 @@ describe("searchService.records", () => {
     it("fans out to the six routes with the query, five rows each", async () => {
         answers.set("/publishers", { items: [publisher()], total: 1, page: 1, pageSize: 5, counts: {} });
         await searchService.records("sharma");
-        expect(calls).toContain("/publishers?q=sharma&page=1&pageSize=5");
-        expect(calls).toContain("/advertisers?q=sharma&limit=5");
-        expect(calls).toContain("/agents?search=sharma&limit=5");
+        expect(calls).toContain("/publishers?q=sharma&page=1&pageSize=5&status=ALL");
+        expect(calls).toContain("/advertisers?q=sharma&limit=5&status=ALL");
+        expect(calls).toContain("/agents?search=sharma&limit=5&status=ALL");
         expect(calls.find((path) => path.startsWith("/orders?"))).toContain("q=sharma");
         expect(calls.find((path) => path.startsWith("/orders?"))).toContain("pageSize=5");
         expect(calls.find((path) => path.startsWith("/listings?"))).toContain("q=sharma");
@@ -180,15 +185,15 @@ describe("searchService.records", () => {
         expect(first.find((group) => group.domain === "publishers")?.hits.map((hit) => hit.id)).toEqual(["pub_2", "pub_cuid"]);
         await searchService.records("sharma");
         expect(calls.filter((path) => path.startsWith("/publishers?"))).toEqual([
-            "/publishers?q=metro&page=1&pageSize=5",
-            "/publishers?q=sharma&page=1&pageSize=5",
+            "/publishers?q=metro&page=1&pageSize=5&status=ALL",
+            "/publishers?q=sharma&page=1&pageSize=5&status=ALL",
         ]);
     });
 
     it("encodes the query and trims it before it goes on the wire", async () => {
         answers.set("/publishers", { items: [], total: 0, page: 1, pageSize: 5, counts: {} });
         await searchService.records("  metro walls ");
-        expect(calls).toContain("/publishers?q=metro+walls&page=1&pageSize=5");
+        expect(calls).toContain("/publishers?q=metro+walls&page=1&pageSize=5&status=ALL");
     });
 
     it("drops a source that fails without emptying the palette", async () => {

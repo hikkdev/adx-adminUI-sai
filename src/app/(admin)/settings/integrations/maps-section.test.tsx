@@ -143,7 +143,7 @@ describe("the OpenStreetMap form", () => {
         expect(screen.getByTestId("maps-problem")).toHaveTextContent("needs a contact email");
         expect(screen.getByRole("button", { name: "Save maps" })).toBeDisabled();
 
-        type(/Contact email/, "ops@adx.example");
+        type(/Contact email/, "ops@adx.in");
         expect(screen.queryByTestId("maps-problem")).toBeNull();
         expect(screen.getByRole("button", { name: "Save maps" })).toBeEnabled();
 
@@ -163,7 +163,7 @@ describe("the OpenStreetMap form", () => {
         render(<MapsSection stored={stored({ osm: osm({ userAgent: "ADX ops bot" }) })} onChanged={onChanged} />);
         await pick(screen.getByRole("combobox"), "OpenStreetMap");
 
-        type(/Contact email/, "  ops@adx.example ");
+        type(/Contact email/, "  ops@adx.in ");
         type("Tile template", "https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={key}");
         type("Tile key", "mt-browser-key");
         type("Max zoom", "20");
@@ -182,7 +182,7 @@ describe("the OpenStreetMap form", () => {
                 patch: {
                     provider: "OSM",
                     osm: {
-                        contactEmail: "ops@adx.example",
+                        contactEmail: "ops@adx.in",
                         userAgent: null,
                         tileUrlTemplate: "https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={key}",
                         tileMaxZoom: 20,
@@ -197,7 +197,7 @@ describe("the OpenStreetMap form", () => {
 
     it("sends no osm sub-object when nothing in it moved, and never a masked tile key", async () => {
         backend.answer = { maps: stored() };
-        render(<MapsSection stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.example", tileApiKey: "••••9f3a" }) })} onChanged={() => {}} />);
+        render(<MapsSection stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.in", tileApiKey: "••••9f3a" }) })} onChanged={() => {}} />);
         expect(screen.getByText("Connected")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Save maps" })).toBeDisabled();
         type("Tile key", "••••9f3a");
@@ -216,7 +216,7 @@ describe("the OpenStreetMap form", () => {
         const onChanged = vi.fn();
         render(<MapsSection stored={stored()} onChanged={onChanged} />);
         await pick(screen.getByRole("combobox"), "OpenStreetMap");
-        type(/Contact email/, "ops@adx.example");
+        type(/Contact email/, "ops@adx.in");
         fireEvent.click(screen.getByRole("button", { name: "Save maps" }));
 
         await waitFor(() => expect(screen.getByTestId("osm-error-contactEmail")).toHaveTextContent("Required to select OpenStreetMap"));
@@ -224,7 +224,7 @@ describe("the OpenStreetMap form", () => {
         expect(toast.error).toHaveBeenCalledWith("OpenStreetMap needs a contact email: the public Nominatim usage policy requires one on every request.");
         expect(onChanged).not.toHaveBeenCalled();
         /* The typed values survive the refusal so the operator can fix the one field. */
-        expect(screen.getByLabelText(/Contact email/)).toHaveValue("ops@adx.example");
+        expect(screen.getByLabelText(/Contact email/)).toHaveValue("ops@adx.in");
     });
 });
 
@@ -233,7 +233,7 @@ describe("the phones' engine under OpenStreetMap (AC-B1)", () => {
         backend.answer = { maps: stored() };
         render(
             <MapsSection
-                stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.example" }), phoneEngine: { engine: "MAPBOX", tokenPresent: false } })}
+                stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.in" }), phoneEngine: { engine: "MAPBOX", tokenPresent: false } })}
                 onChanged={() => {}}
             />,
         );
@@ -260,7 +260,7 @@ describe("the phones' engine under OpenStreetMap (AC-B1)", () => {
     it("says Present from the backend's verdict, and from the masked token while OSM is only picked", async () => {
         const { unmount } = render(
             <MapsSection
-                stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.example" }), mapboxPublicToken: "••••tok1", phoneEngine: { engine: "MAPBOX", tokenPresent: true } })}
+                stored={stored({ provider: "OSM", osm: osm({ contactEmail: "ops@adx.in" }), mapboxPublicToken: "••••tok1", phoneEngine: { engine: "MAPBOX", tokenPresent: true } })}
                 onChanged={() => {}}
             />,
         );

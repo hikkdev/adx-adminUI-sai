@@ -1,6 +1,9 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
+import { formatMoney } from "@/lib/format";
 import { shapeKycSummary } from "./kyc-state";
+import { accountStateOf, accountStatusCountsOf } from "./account-state";
+import { rosterParams, type PartyRosterPage, type PartyRosterQuery } from "./party-roster";
 import type { WireKycSummary } from "@/types";
 import type { Agent, AgentOrderType, AgentStatus, SuspensionScope, Weekday } from "@/types";
 import { shapeBoard, type MilestoneBoard, type PinTierInput, type TierView, type WireMilestoneBoard } from "@/services/growth";
@@ -53,6 +56,8 @@ export interface WireAgent {
     suspensionScopes?: SuspensionScope[];
     suspensionReason?: string | null;
     suspendedAt?: string | null;
+    /** 2 Oct 2026: ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED) — on a roster row. Absent from a server one release behind. */
+    accountState?: string | null;
     /* AG-1. Optional on the wire for a server older than the application ladder. */
     stage?: string;
     grade?: string | null;
@@ -66,8 +71,16 @@ export interface WireAgent {
     exitedAt?: string | null;
     exitReason?: string | null;
     rehireEligible?: boolean;
+    /** AG-1: where the profile came from — the roster's Onboarded. */
+    sourceKind?: string;
+    /** 29 Sep 2026: the side the agent works, on the roster read. */
+    side?: "PUBLISHER" | "ADVERTISER";
+    /** 29 Sep 2026: the publishers and advertisers the agent brought in, counted on the roster read. */
+    onboardedCount?: number;
     user?: {
         id?: string;
+        /** 28 Sep 2026: the person's own ADX-… id, on the by-id read. */
+        displayId?: string | null;
         name: string | null;
         mobile: string;
         email?: string | null;
@@ -240,6 +253,9 @@ export interface UpdateAgentInput {
     status?: "ACTIVE" | "ON_LEAVE" | "SUSPENDED";
 }
 
+/** The route's ceiling on `limit` — one directory read. */
+export const AGENT_ROSTER_PAGE_SIZE = 200;
+
 /** Lifts the person off the join and renames `createdAt` to what the page calls it. */
 export function shapeAgent(wire: WireAgent): Agent {
     const name = wire.user?.name?.trim();
@@ -249,6 +265,7 @@ export function shapeAgent(wire: WireAgent): Agent {
         // N3-B: agents keep no mirror column; with no `kyc` on the read the agent is awaiting documents.
         kyc: shapeKycSummary(wire.kyc),
         displayId: wire.displayId ?? null,
+        personDisplayId: wire.user?.displayId ?? null,
         name: name ? name : null,
         mobile: wire.user?.mobile ?? "",
         email: wire.user?.email ?? null,
@@ -272,6 +289,11 @@ export function shapeAgent(wire: WireAgent): Agent {
         suspensionScopes: wire.suspensionScopes ?? [],
         suspensionReason: wire.suspensionReason ?? null,
         suspendedAt: wire.suspendedAt ?? null,
+        accountState: accountStateOf(wire.accountState),
+        // 29 Sep 2026: the roster's Type, Onboarded and Activity — absent on a read that does not carry them.
+        side: wire.side ?? null,
+        sourceKind: wire.sourceKind ?? null,
+        onboardedCount: wire.onboardedCount ?? null,
         engagement: wire.stage
             ? {
                   stage: wire.stage,
@@ -371,8 +393,8 @@ export interface CreateAgentInput {
 }
 
 export const agentService = {
-    /** The thin listing, for pickers. */
-    list: () => http.get<AgentSummary[]>("/agents"),
+    /** The thin listing, for pickers and name lookups — everyone (2 Oct 2026: the roster answers working agents by default). */
+    list: () => http.get<AgentSummary[]>("/agents?status=ALL"),
 
     /**
      * The listing narrowed by name or mobile — `GET /agents?search=`, which is
@@ -381,12 +403,34 @@ export const agentService = {
      * from the dashboard.
      */
     search: (query: string, limit = 20) =>
-        http.get<AgentSummary[]>(`/agents?search=${encodeURIComponent(query.trim())}&limit=${limit}`),
+        http.get<AgentSummary[]>(`/agents?search=${encodeURIComponent(query.trim())}&limit=${limit}&status=ALL`),
+
+    /**
+     * 29 Sep 2026 — the directory, cut on the server by the five filters
+     * every party roster takes (`services/party-roster`; the route names the
+     * text `search`). `cursor` is the offset to read from; the next is
+     * offered while the rows read fall short of the meta's total.
+     */
+    rosterPage: async (query: PartyRosterQuery, cursor: string | null): Promise<PartyRosterPage<Agent>> => {
+        if (!isLive("agents")) throw new Error("Agents read the API; connect the console to the ADX backend first.");
+        const offset = cursor ? Math.max(0, Number(cursor) || 0) : 0;
+        const params = rosterParams(query, "search");
+        params.set("limit", String(AGENT_ROSTER_PAGE_SIZE));
+        if (offset > 0) params.set("offset", String(offset));
+        const reply = await http.getEnvelope<WireAgent[], { meta?: { total?: number; limit?: number; offset?: number; counts?: unknown; statusCounts?: unknown } }>(
+            `/agents?${params.toString()}`,
+        );
+        const rows = (reply.data ?? []).map(shapeAgent);
+        const total = reply.meta?.total ?? null;
+        const read = offset + rows.length;
+        return { rows, total, nextCursor: total !== null && rows.length > 0 && read < total ? String(read) : null, statusCounts: accountStatusCountsOf(reply.meta) };
+    },
 
     /** The roster, shaped for the table. */
     directory: async (): Promise<Agent[]> => {
         if (!isLive("agents")) throw new Error("Agents read the API; connect the console to the ADX backend first.");
-        const rows = await http.get<WireAgent[]>("/agents");
+        /* 2 Oct 2026: the roster answers working accounts by default; a picker or a name lookup needs everyone. */
+        const rows = await http.get<WireAgent[]>("/agents?status=ALL");
         return rows.map(shapeAgent);
     },
 
@@ -433,4 +477,136 @@ export const agentService = {
         if (!isLive("agents")) throw new Error("Agents read the API; connect the console to the ADX backend first.");
         return shapeAgent(await http.patch<WireAgent>(`/agents/${id}`, patch));
     },
+};
+
+
+/* ------------------------------------------------------------------ */
+/* CP-1 â what an agent is paid, and what it covers                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * An agent's pay terms. The salary covers `dailyQuota` onboardings a working
+ * day; past the quota an onboarding pays `commissionPerExtra`, which is the
+ * planned unit cost plus the uplift.
+ *
+ * `workingDaysPerMonth` is a planning figure that prices the commission â it
+ * is NOT a claim about days worked, and no screen should print it as one. It
+ * differs by grade because the work does: a field agent walking a market has
+ * six days a week, anyone selling into offices has five.
+ */
+export interface AgentCompensation {
+    id: string;
+    agentId: string;
+    /** Decimal strings, all of them. */
+    monthlySalary: string;
+    dailyQuota: number;
+    workingDaysPerMonth: number;
+    commissionUpliftPct: string;
+    /** `salary / (quota Ã days)` â what one onboarding costs in salary. Null when it cannot be priced. */
+    plannedUnitCost: string | null;
+    /** What an onboarding past the day's quota pays. */
+    commissionPerExtra: string | null;
+    plannedPerMonth: number;
+    effectiveFrom: string;
+    /** Set when a later record superseded this one. */
+    effectiveTo: string | null;
+    note: string | null;
+    createdByUserId: string;
+    createdAt: string;
+}
+
+export interface AgentCompensationHistory {
+    current: AgentCompensation | null;
+    history: AgentCompensation[];
+}
+
+/** Where the agent stands today and this month, in the quota's own terms. */
+export interface AgentStanding {
+    agentId: string;
+    day: string;
+    month: string;
+    onTheQuotaModel: boolean;
+    dailyQuota: number | null;
+    doneToday: number;
+    quotaLeftToday: number | null;
+    doneThisMonth: number;
+    monthlySalary: string | null;
+    plannedUnitCost: string | null;
+    commissionPerExtra: string | null;
+    /** The salary spread over what was actually done â the real cost per onboarding. Null until something is. */
+    salaryPerOnboarding: string | null;
+}
+
+export interface CompensationDefaults extends Omit<AgentCompensation, "id" | "agentId" | "effectiveFrom" | "effectiveTo" | "note" | "createdByUserId" | "createdAt"> {
+    grade: string;
+}
+
+export interface SetCompensationInput {
+    monthlySalary: string;
+    dailyQuota: number;
+    workingDaysPerMonth?: number;
+    commissionUpliftPct?: string;
+    effectiveFrom?: string;
+    note?: string;
+}
+
+/**
+ * "10 a day Â· â¹96.15 each Â· â¹105.77 past it" â the terms in one line.
+ * Says what it cannot price rather than printing a zero.
+ */
+export function compensationLine(terms: Pick<AgentCompensation, "dailyQuota" | "plannedUnitCost" | "commissionPerExtra">): string {
+    const parts = [`${terms.dailyQuota} a day`];
+    if (terms.plannedUnitCost) parts.push(`${formatMoney(terms.plannedUnitCost)} each`);
+    else parts.push("not priceable");
+    if (terms.commissionPerExtra) parts.push(`${formatMoney(terms.commissionPerExtra)} past it`);
+    return parts.join(" · ");
+}
+
+/**
+ * "7 of 10 today" â and, once the quota is used up, what the next one earns,
+ * because that is the number the agent and the desk both care about.
+ */
+export function standingLine(standing: AgentStanding): string {
+    if (!standing.onTheQuotaModel) return "Not on the salary-and-quota model — onboardings pay the flat rate";
+    const used = `${standing.doneToday} of ${standing.dailyQuota ?? 0} today`;
+    if ((standing.quotaLeftToday ?? 0) > 0) return `${used} · ${standing.quotaLeftToday} still covered by salary`;
+    return standing.commissionPerExtra ? `${used} · the next earns ${formatMoney(standing.commissionPerExtra)}` : used;
+}
+
+/**
+ * The same arithmetic the backend prices with, for the form's preview line
+ * only — `salary / (quota × days)`, and that plus the uplift. What is saved
+ * comes back from the API and is what any figure on a page is read from;
+ * this exists so the desk sees what it is about to commit to before it does.
+ */
+export function priceTerms(input: { monthlySalary: string; dailyQuota: number; workingDaysPerMonth: number; commissionUpliftPct: string }): {
+    plannedUnitCost: string | null;
+    commissionPerExtra: string | null;
+    plannedPerMonth: number;
+} {
+    const salary = Number(input.monthlySalary);
+    const plannedPerMonth = input.dailyQuota * input.workingDaysPerMonth;
+    if (!Number.isFinite(salary) || salary <= 0 || plannedPerMonth <= 0) {
+        return { plannedUnitCost: null, commissionPerExtra: null, plannedPerMonth: Math.max(0, plannedPerMonth) };
+    }
+    const unit = salary / plannedPerMonth;
+    const uplift = Number(input.commissionUpliftPct);
+    const extra = Number.isFinite(uplift) ? unit * (1 + uplift / 100) : null;
+    return {
+        plannedUnitCost: unit.toFixed(2),
+        commissionPerExtra: extra === null ? null : extra.toFixed(2),
+        plannedPerMonth,
+    };
+}
+
+export const compensationService = {
+    /** `GET /agents/:id/compensation` â the terms in force and the history behind them. */
+    get: (agentId: string): Promise<AgentCompensationHistory> => http.get<AgentCompensationHistory>(`/agents/${agentId}/compensation`),
+    /** `POST /agents/:id/compensation` â records new terms from a date; closes the ones before. Audited. */
+    set: (agentId: string, input: SetCompensationInput): Promise<AgentCompensation> => http.post<AgentCompensation>(`/agents/${agentId}/compensation`, input),
+    /** `GET /agents/:id/standing` â the quota today and the month's real unit cost. */
+    standing: (agentId: string): Promise<AgentStanding> => http.get<AgentStanding>(`/agents/${agentId}/standing`),
+    /** `GET /agents/compensation/defaults?grade=` â what the form starts from. */
+    defaults: (grade?: string): Promise<CompensationDefaults> =>
+        http.get<CompensationDefaults>(`/agents/compensation/defaults${grade ? `?grade=${encodeURIComponent(grade)}` : ""}`),
 };

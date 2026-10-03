@@ -2,163 +2,110 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { Megaphone, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { DataTable, SortableHeader, selectionColumn } from "@/components/adx/data-table";
-import { InitialsAvatar } from "@/components/adx/initials-avatar";
-import { VerifiedTick } from "@/components/adx/verified-tick";
+import { EmptyState } from "@/components/adx/empty-state";
 import { PageHeader } from "@/components/adx/page-header";
-import { StatusBadge } from "@/components/adx/status-badge";
-import { SuspendedChip } from "@/components/adx/suspended-chip";
-import { formatDate } from "@/lib/format";
-import { ADVERTISER_TYPE_LABELS, ONBOARDING_SOURCE_LABEL, onboardingLine, type OnboardingSource } from "@/types";
-import { ADVERTISER_STATUS_META, type Advertiser } from "@/types";
+import { partyRosterColumns, type PartyRosterSpec, type RosterRowAction } from "@/components/adx/party-roster-columns";
+import { PartyRosterFilterBar, type PartyRosterFilterSpec, type PartyRosterFilterState } from "@/components/adx/party-roster-filter-bar";
+import { kycReviewHref, useRosterSuspension, type SuspensionRowFacts } from "@/components/adx/party-roster-row-actions";
+import { PartyRosterTable, type PartyRosterView } from "@/components/adx/party-roster-table";
+import { deriveKycState } from "@/services/kyc-state";
+import { accountStatusOptions } from "@/services/account-state";
+import { ONBOARDING_DOOR_OPTIONS, rosterFiltersActive } from "@/services/party-roster";
+import { ADVERTISER_TYPE_LABELS, onboardingLine, type Advertiser, type AdvertiserType } from "@/types";
 import { CreateAdvertiserDialog } from "./create-advertiser-dialog";
 
 interface AdvertisersTableProps {
-    advertisers: Advertiser[];
+    view: PartyRosterView<Advertiser>;
     /** Re-read after an account is opened from the desk. */
     onChanged: () => void;
+    filters: PartyRosterFilterState;
 }
 
-export function AdvertisersTable({ advertisers, onChanged }: AdvertisersTableProps) {
+/** The row's KYC state — the summary the roster read carries, else derived from the party's own `kycStatus` (a read one release behind). */
+const kycStateOfRow = (row: Advertiser) => row.kyc?.state ?? deriveKycState(null, row.kycStatus);
+
+/** The bar's advertiser half: the QR-14 doors and the four advertiser types. */
+export const ADVERTISER_FILTER_SPEC: PartyRosterFilterSpec = {
+    searchPlaceholder: "Search name, ID, phone, email, city",
+    doors: ONBOARDING_DOOR_OPTIONS,
+    types: (Object.keys(ADVERTISER_TYPE_LABELS) as AdvertiserType[]).map((type) => ({ value: type, label: ADVERTISER_TYPE_LABELS[type] })),
+    idPrefix: "advertisers",
+    statuses: accountStatusOptions(false),
+};
+
+/**
+ * The advertiser roster — 29 Sep 2026, on the shared party layout
+ * (`party-roster-columns`): Name · Contact · Type · City · KYC status ·
+ * Activity (the campaigns, counted on the roster read since the campaign
+ * table exists) · Joined · Onboarded, and the shared filter bar. The row
+ * menu is the shared one: View details, Review KYC, then Suspend… or
+ * Reinstate.
+ */
+export function advertiserRosterSpec(
+    open: (row: Advertiser) => void,
+    reviewKyc: (row: Advertiser) => void,
+    statusActions?: (row: Advertiser) => RosterRowAction[],
+): PartyRosterSpec<Advertiser> {
+    return {
+        idOwner: "ADVERTISER",
+        name: (row) => row.name,
+        displayId: (row) => row.displayId,
+        mobile: (row) => row.contact || null,
+        email: (row) => row.email,
+        type: (row) => ADVERTISER_TYPE_LABELS[row.type] ?? row.type,
+        city: (row) => row.city,
+        kycState: kycStateOfRow,
+        suspensionScopes: (row) => row.suspensionScopes,
+        accountState: (row) => row.accountState,
+        activity: { count: (row) => row.campaignCount ?? null, noun: ["campaign", "campaigns"], title: "Campaigns, every status" },
+        joinedAt: (row) => row.joinedAt,
+        // QR-14/15: the door the account came through, and who opened it.
+        onboarded: (row) => onboardingLine(row.onboarding),
+        open,
+        reviewKyc,
+        statusActions,
+    };
+}
+
+/** The advertiser row as the suspension items read it. */
+export const advertiserSuspensionFacts = (row: Advertiser): SuspensionRowFacts => ({
+    id: row.id,
+    name: row.name,
+    scopes: row.suspensionScopes,
+    accountState: row.accountState,
+});
+
+/** "Review KYC" for an advertiser row: the case (`/kyc/advertisers/<profileId>`) when there is one, else the queue searched for it. */
+export const advertiserKycHref = (row: Advertiser): string =>
+    kycReviewHref("ADVERTISER", { id: row.id, kycId: row.kyc?.kycId, search: row.displayId ?? row.name });
+
+export function AdvertisersTable({ view, onChanged, filters }: AdvertisersTableProps) {
     const router = useRouter();
     const [creating, setCreating] = React.useState(false);
-    /** QR-15: the roster cut by the door the account came through; "all" is every door. */
-    const [doorFilter, setDoorFilter] = React.useState<string>("all");
-    const rows = React.useMemo(
-        () => advertisers.filter((advertiser) => doorFilter === "all" || (advertiser.onboarding?.via ?? null) === doorFilter),
-        [advertisers, doorFilter],
+    const suspension = useRosterSuspension("ADVERTISER", "ADVERTISER", onChanged);
+    const { statusActions } = suspension;
+
+    const columns = React.useMemo(
+        () =>
+            partyRosterColumns(
+                advertiserRosterSpec(
+                    (row) => router.push(`/advertisers/${row.id}`),
+                    (row) => router.push(advertiserKycHref(row)),
+                    (row) => statusActions(advertiserSuspensionFacts(row)),
+                ),
+            ),
+        [router, statusActions],
     );
 
-    const columns = React.useMemo<ColumnDef<Advertiser>[]>(
-        () => [
-            selectionColumn<Advertiser>(),
-            {
-                id: "brand",
-                accessorKey: "name",
-                header: ({ column }) => <SortableHeader column={column}>Brand</SortableHeader>,
-                cell: ({ row }) => (
-                    <div className="flex items-center gap-2.5">
-                        <InitialsAvatar name={row.original.name} size="sm" />
-                        <div>
-                            <p className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                                {row.original.name}
-                                <VerifiedTick kycStatus={row.original.kycStatus} />
-                            </p>
-                            {row.original.displayId ? (
-                                <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                                    {row.original.displayId}
-                                </p>
-                            ) : (
-                                <p className="text-xs text-muted-foreground">
-                                    {row.original.companyName ?? ADVERTISER_TYPE_LABELS[row.original.type]}
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                ),
-            },
-            {
-                id: "contact",
-                accessorKey: "contact",
-                header: "Contact",
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.contact}</span>
-                ),
-            },
-            {
-                id: "status",
-                accessorKey: "status",
-                header: "Status",
-                cell: ({ row }) => (
-                    <span className="inline-flex flex-wrap items-center gap-1.5">
-                        <StatusBadge status={ADVERTISER_STATUS_META[row.original.status]} />
-                        <SuspendedChip scopes={row.original.suspensionScopes} />
-                    </span>
-                ),
-            },
-            /*
-             * "Active campaigns", "Total spend" and "Last campaign activity"
-             * used to sit here. There is no campaign table to count, no
-             * aggregate that computes spend, and nothing tracks last activity —
-             * so each was a number about somebody's business that nothing
-             * checked. These three the API can actually answer.
-             */
-            {
-                id: "type",
-                accessorKey: "type",
-                header: "Type",
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">
-                        {ADVERTISER_TYPE_LABELS[row.original.type]}
-                    </span>
-                ),
-            },
-            {
-                id: "city",
-                accessorKey: "city",
-                header: "City",
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.city ?? "—"}</span>
-                ),
-            },
-            {
-                id: "joined",
-                accessorKey: "joinedAt",
-                header: ({ column }) => <SortableHeader column={column}>Joined</SortableHeader>,
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">
-                        {formatDate(row.original.joinedAt)}
-                    </span>
-                ),
-            },
-            {
-                /* QR-14/15: the door the account came through, and who opened it. */
-                id: "onboarded",
-                header: "Onboarded",
-                cell: ({ row }) => <span className="text-muted-foreground">{onboardingLine(row.original.onboarding)}</span>,
-            },
-            {
-                id: "actions",
-                enableHiding: false,
-                size: 48,
-                cell: ({ row }) => (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-8">
-                                <MoreHorizontal className="size-4" />
-                                <span className="sr-only">Row actions</span>
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem
-                                onSelect={() => router.push(`/advertisers/${row.original.id}`)}
-                            >
-                                View details
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                ),
-            },
-        ],
-        [router]
-    );
+    const filtered = rosterFiltersActive(filters.filters);
 
     return (
         <div className="space-y-5">
             <PageHeader
                 title="Advertisers"
+                subtitle={view.total === null ? undefined : filtered ? `${view.total} match these filters` : `${view.total} on the marketplace`}
                 actions={
                     /* Wired to `POST /advertisers { onBehalf: true }` — the
                        same route the field app uses to open an account at
@@ -171,27 +118,31 @@ export function AdvertisersTable({ advertisers, onChanged }: AdvertisersTablePro
                 }
             />
             <CreateAdvertiserDialog open={creating} onOpenChange={setCreating} onCreated={onChanged} />
-            <div className="flex items-center gap-2">
-                <Select value={doorFilter} onValueChange={setDoorFilter}>
-                    <SelectTrigger className="h-9 w-[190px]" aria-label="Onboarded via">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Every door</SelectItem>
-                        {(Object.keys(ONBOARDING_SOURCE_LABEL) as OnboardingSource[]).map((door) => (
-                            <SelectItem key={door} value={door}>
-                                {ONBOARDING_SOURCE_LABEL[door]}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            </div>
-            <DataTable
+            {suspension.dialogs}
+            <PartyRosterTable
                 columns={columns}
-                data={rows}
-                searchPlaceholder="Search advertisers, brand, contact"
-                initialPageSize={10}
+                view={view}
+                noun="advertiser"
+                filterBar={<PartyRosterFilterBar spec={ADVERTISER_FILTER_SPEC} state={filters} refreshing={view.refreshing} statusCounts={view.statusCounts} />}
                 onRowClick={(advertiser) => router.push(`/advertisers/${advertiser.id}`)}
+                getRowId={(advertiser) => advertiser.id}
+                emptyState={
+                    filtered ? (
+                        <EmptyState icon={Megaphone} title="No advertiser matches" description="Nobody on the roster matches these filters." action={<Button variant="outline" className="bg-card" onClick={filters.clear}>Clear filters</Button>} />
+                    ) : (
+                        <EmptyState
+                            icon={Megaphone}
+                            title="No advertisers yet"
+                            description="Advertisers appear here once they sign up, an agent onboards them, or the desk opens an account."
+                            action={
+                                <Button onClick={() => setCreating(true)}>
+                                    <Plus className="mr-1.5 size-4" />
+                                    Onboard an advertiser
+                                </Button>
+                            }
+                        />
+                    )
+                }
             />
         </div>
     );

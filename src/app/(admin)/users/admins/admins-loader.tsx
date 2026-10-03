@@ -12,6 +12,7 @@ import {
     USER_SORTS,
     USER_STATES,
     usersService,
+    type Invite,
     type UserSort,
     type UserState,
     type UsersDirectory,
@@ -22,6 +23,8 @@ import { AdminsView } from "./admins-view";
 
 interface Loaded {
     directory: UsersDirectory;
+    /** 2 Oct 2026: the console invitations, drawn as the tab's Pending invitations section. */
+    invites: Invite[];
     roles: RoleConfig[];
     /** Whether the signed-in operator may hand out the system role — `GET /users/me`'s `isSuperAdmin`. */
     superAdmin: boolean;
@@ -103,12 +106,13 @@ export function AdminsLoader() {
     const resource = useApiResource<Loaded>(
         `users:admins:${facets.state ?? "all"}:${facets.sort}:${q}:${operatorId ?? "-"}:${live}`,
         async () => {
-            const [directory, roles, me] = await Promise.all([
+            const [directory, invites, roles, me] = await Promise.all([
                 usersService.directory(adminsQueryOf(facets, q)),
+                usersService.invites().catch(() => [] as Invite[]),
                 isLive("roles") ? rolesService.list().catch(() => [] as RoleConfig[]) : Promise.resolve([] as RoleConfig[]),
                 operatorId ? usersService.me().catch(() => null) : Promise.resolve(null),
             ]);
-            return { directory, roles, superAdmin: me?.isSuperAdmin === true };
+            return { directory, invites, roles, superAdmin: me?.isSuperAdmin === true };
         },
     );
 
@@ -124,6 +128,7 @@ export function AdminsLoader() {
                     query={query}
                     onQueryChange={setQuery}
                     roles={data.roles}
+                    invites={data.invites}
                     operatorId={operatorId}
                     operatorIsSuperAdmin={data.superAdmin}
                     onChanged={resource.reload}

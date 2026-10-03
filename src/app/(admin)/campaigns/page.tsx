@@ -1,14 +1,20 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { CampaignsLoader } from "./campaigns-loader";
+import { CampaignsOverviewView } from "./campaigns-overview";
 
 export const metadata: Metadata = { title: "Campaigns" };
 
-/** Suspense because the loader reads `?advertiserId=` off the URL — the advertiser page's "View campaign queue". */
+/**
+ * The section's landing tab — 2 Oct 2026: the overview over
+ * `GET /section-overviews/campaigns`, as Listings has one. The list moved
+ * to `/campaigns/directory` (old `/campaigns?advertiserId=…` links are
+ * redirected there by next.config). Suspense because the loader keeps the
+ * window in the URL (`useSearchParams`).
+ */
 export default function CampaignsPage() {
     return (
         <Suspense fallback={null}>
-            <CampaignsLoader />
+            <CampaignsOverviewView />
         </Suspense>
     );
 }

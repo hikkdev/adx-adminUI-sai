@@ -380,11 +380,6 @@ export function RaiseRefundDialog({ open, onOpenChange, advertiserId, advertiser
                                 placeholder="0.00"
                                 className="tabular-nums"
                             />
-                            <p className="text-xs text-muted-foreground">
-                                {refundable.data !== null
-                                    ? `Refundable today: ${formatMoney(refundable.data)} — settled balance less holds, never goodwill.`
-                                    : "Working out what is refundable…"}
-                            </p>
                         </div>
                         <div className="space-y-1.5">
                             <Label htmlFor="refund-reason">Reason</Label>
@@ -401,6 +396,12 @@ export function RaiseRefundDialog({ open, onOpenChange, advertiserId, advertiser
                                 </SelectContent>
                             </Select>
                         </div>
+                        {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                        <p className="-mt-1 text-xs text-muted-foreground sm:col-span-2">
+                            {refundable.data !== null
+                                ? `Refundable today: ${formatMoney(refundable.data)} — settled balance less holds, never goodwill.`
+                                : "Working out what is refundable…"}
+                        </p>
                     </div>
 
                     <div className="space-y-1.5">

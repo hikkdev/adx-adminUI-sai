@@ -23,6 +23,8 @@ export function EmployeeKycRecordLoader({ employeeId }: { employeeId: string }) 
     const resource = useApiResource<Loaded>(`employee-kyc:${employeeId}:${live}`, async () => {
         const kyc = await employeeKycService.get(employeeId);
         if (kyc) {
+            // Phase D: the record's employee slice carries no employment type; the HR roster does. A roster that cannot be read leaves the workflow unsaid.
+            const employmentType = kyc.employmentType !== undefined ? kyc.employmentType : (await employeeKycService.employmentTypes()).get(kyc.employeeId);
             return {
                 kyc,
                 employee: {
@@ -35,6 +37,7 @@ export function EmployeeKycRecordLoader({ employeeId }: { employeeId: string }) 
                     mobile: kyc.mobile,
                     email: null,
                     isActive: true,
+                    employmentType,
                 },
             };
         }

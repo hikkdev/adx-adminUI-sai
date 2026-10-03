@@ -147,12 +147,14 @@ function ModuleForm({
             </DialogHeader>
 
             <div className="grid gap-4 sm:grid-cols-2">
-                <Field id="md-order" label="Order" hint="Where it sits on the index; lower first." error={errorFor("ordinal")}>
+                <Field id="md-order" label="Order" error={errorFor("ordinal")}>
                     <Input id="md-order" type="number" min={1} inputMode="numeric" value={values.ordinal} onChange={set("ordinal")} />
                 </Field>
                 <Field id="md-duration" label="Duration (minutes)" optional error={errorFor("durationMins")}>
                     <Input id="md-duration" type="number" min={1} inputMode="numeric" value={values.durationMins} onChange={set("durationMins")} placeholder="15" />
                 </Field>
+                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">The order is where it sits on the index; lower first.</p>
             </div>
 
             <Field id="md-title" label="Title" error={errorFor("title")}>

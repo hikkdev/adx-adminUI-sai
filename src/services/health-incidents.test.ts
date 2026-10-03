@@ -29,7 +29,7 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
 });
 
 vi.mock("@/lib/api-config", () => ({
-    apiConfig: { baseUrl: "https://api.adx.test/api/v1", live: true },
+    apiConfig: { baseUrl: "https://api.adx.in/api/v1", live: true },
 }));
 
 import { ApiError } from "@/lib/api-client";
@@ -115,7 +115,7 @@ describe("the sampled days", () => {
 
 describe("the public status page", () => {
     it("lives at the backend's root, not under /api/v1", () => {
-        expect(publicStatusUrl()).toBe("https://api.adx.test/status");
+        expect(publicStatusUrl()).toBe("https://api.adx.in/status");
     });
 
     it("subscribes anonymously through the page's own form and repeats the server's words", async () => {
@@ -124,7 +124,7 @@ describe("the public status page", () => {
         const outcome = await healthService.subscribe("oncall@example.com");
         expect(outcome.message).toBe("If this address is new, a confirmation email is on its way.");
         const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-        expect(url).toBe("https://api.adx.test/status/subscribe");
+        expect(url).toBe("https://api.adx.in/status/subscribe");
         expect(init.method).toBe("POST");
         expect(init.body).toBe(JSON.stringify({ email: "oncall@example.com" }));
         expect(new Headers(init.headers).get("Authorization")).toBeNull();

@@ -25,7 +25,10 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
 });
 
 import {
+    allStatusesCount,
+    analysisSummary,
     checklistOf,
+    checksFromAnalysis,
     fileSizeLabel,
     flagLabel,
     isVideo,
@@ -120,6 +123,80 @@ describe("the checklist", () => {
     });
 });
 
+describe("the AI review on the checklist (VA-1)", () => {
+    const analysis = (over: Partial<import("./moderation").CreativeAnalysis> = {}): import("./moderation").CreativeAnalysis => ({
+        id: "can_1",
+        creativeId: "crt_1",
+        provider: "google",
+        model: "gemini-2.5-pro",
+        appropriate: { verdict: "PASS", reason: null },
+        relevant: { verdict: "PASS", reason: null },
+        legal: { verdict: "PASS", reason: null },
+        rating: "PG",
+        ratingReason: null,
+        flags: [],
+        summary: "A coffee cup on a red ground.",
+        confidence: 0.9,
+        unique: true,
+        nearest: null,
+        createdAt: "2026-09-23T10:00:00.000Z",
+        ...over,
+    });
+
+    it("passes brand-safe only when the artwork is both appropriate and legal, and leaves the other rows alone", () => {
+        const list = checksFromAnalysis(checklistOf(null), analysis());
+        expect(list.find((check) => check.code === "BRAND_SAFE")).toMatchObject({ result: "PASS" });
+        expect(list.find((check) => check.code === "TEXT_LEGIBLE")?.result).toBe("UNKNOWN");
+        expect(list.find((check) => check.code === "QR_PRESENT")?.result).toBe("UNKNOWN");
+    });
+
+    it("fails brand-safe on either count, carrying the model's reason as the note", () => {
+        const list = checksFromAnalysis(checklistOf(null), analysis({ legal: { verdict: "FAIL", reason: "A health claim with no disclaimer" } }));
+        expect(list.find((check) => check.code === "BRAND_SAFE")).toEqual({ code: "BRAND_SAFE", result: "FAIL", note: "A health claim with no disclaimer" });
+    });
+
+    it("leaves the reviewer's own verdict standing when the model is unsure", () => {
+        const mine = checklistOf([{ code: "BRAND_SAFE", result: "PASS" }]);
+        const list = checksFromAnalysis(mine, analysis({ appropriate: { verdict: "UNSURE", reason: "Partly obscured" } }));
+        expect(list.find((check) => check.code === "BRAND_SAFE")?.result).toBe("PASS");
+    });
+
+    it("fails legibility on the model's own flag", () => {
+        const list = checksFromAnalysis(checklistOf(null), analysis({ flags: ["LOW_LEGIBILITY", "OTHER"] }));
+        expect(list.find((check) => check.code === "TEXT_LEGIBLE")?.result).toBe("FAIL");
+    });
+
+    it("asks for an analysis through the creative's own route", async () => {
+        calls.length = 0;
+        await moderationService.analyse("crt_9");
+        expect(calls[0]).toEqual({ method: "POST", path: "/campaigns/creatives/crt_9/analyse", body: {} });
+    });
+
+    it("VA-4: runs the batch on the selection or on everything pending, and the queue takes the analysed facet", async () => {
+        calls.length = 0;
+        await moderationService.analysePending(["a", "b"]);
+        await moderationService.analysePending();
+        expect(calls).toEqual([
+            { method: "POST", path: "/campaigns/creatives/analyse", body: { creativeIds: ["a", "b"] } },
+            { method: "POST", path: "/campaigns/creatives/analyse", body: {} },
+        ]);
+        expect(reviewQueueQuery({ analysed: false })).toBe("?analysed=false");
+    });
+
+    it("VA-4: sums a reading up for a queue card — the worst verdict wins, and a near-duplicate is named", () => {
+        const clean = analysisSummary(analysis());
+        expect(clean.verdict).toEqual({ label: "AI: pass", tone: "success" });
+        expect(clean.rating.label).toBe("PG");
+        expect(clean.line).toBe("Passes all three · PG");
+        const shaky = analysisSummary(analysis({ relevant: { verdict: "UNSURE", reason: null }, rating: "REGULAR", unique: false, nearest: { creativeId: "crt_7", distance: 3 } }));
+        expect(shaky.verdict.tone).toBe("warning");
+        expect(shaky.line).toBe("Unsure: relevant · Regular · near-duplicate");
+        const bad = analysisSummary(analysis({ appropriate: { verdict: "FAIL", reason: "Nudity" }, legal: { verdict: "UNSURE", reason: null }, rating: "ADULT" }));
+        expect(bad.verdict).toEqual({ label: "AI: fail", tone: "danger" });
+        expect(bad.line).toBe("Fails: appropriate · Adult");
+    });
+});
+
 describe("the rail", () => {
     const items = ["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((id) => row({ id }));
 
@@ -210,5 +287,14 @@ describe("the routes", () => {
         calls.length = 0;
         await moderationService.get("crt_9");
         expect(calls[0]).toMatchObject({ method: "GET", path: "/campaigns/creatives/crt_9" });
+    });
+});
+
+describe("allStatusesCount", () => {
+    it("sums the statuses only — two creatives read as two, not as eight", () => {
+        // 28 Sep 2026: two creatives awaiting review, both flagged, static and not analysed.
+        const counts = { IN_REVIEW: 2, AWAITING_ADVERTISER: 0, CHANGES_REQUESTED: 0, REJECTED: 0, APPROVED: 0, everyKind: 2, flagged: 2, static: 2, video: 0, resubmitted: 0, analysed: 0, unanalysed: 2 };
+        expect(allStatusesCount(counts)).toBe(2);
+        expect(allStatusesCount({})).toBe(0);
     });
 });

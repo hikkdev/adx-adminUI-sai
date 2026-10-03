@@ -3,8 +3,9 @@
 import { useApiResource } from "@/lib/use-api-resource";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { isLive } from "@/lib/api-config";
-import { employeeKycService, type EmployeeKycQueue as EmployeeKycQueueData } from "@/services/employee-kyc";
+import { employeeKycService, withEmploymentTypes, type EmployeeKycQueue as EmployeeKycQueueData } from "@/services/employee-kyc";
 import { kycStateFilter } from "@/services/kyc-state";
+import { useShowInactive } from "../_shared/show-inactive";
 import { useStateChip } from "../_shared/use-state-chip";
 import { EmployeeKycQueue } from "./employee-kyc-queue";
 
@@ -22,23 +23,29 @@ export interface LoadedEmployeeQueue {
  * chip is not a facet this desk answers (employees are not escalated), so
  * it reads the whole queue and the view narrows to none. There is no
  * fixture for employee KYC — the domain was born live — so when the KYC
- * domain is off the queue is simply empty and says so.
+ * domain is off the queue is simply empty and says so. Phase D: the rows
+ * are joined with the HR roster's employment types, which decide the Digio
+ * workflow each employee is verified on.
  */
 export function EmployeeKycLoader() {
     const live = isLive("kyc");
     const [chip, setChip] = useStateChip();
-    const resource = useApiResource<LoadedEmployeeQueue>(`employee-kyc:${live}:${chip}`, async () => {
+    /* 2 Oct 2026: employees on the roster only, unless the switch asks for the inactive too. */
+    const [inactive, setInactive] = useShowInactive();
+    const resource = useApiResource<LoadedEmployeeQueue>(`employee-kyc:${live}:${chip}:${inactive}`, async () => {
         const filter = kycStateFilter(chip);
-        const [everything, visible] = await Promise.all([
-            employeeKycService.queue(),
-            filter.state ? employeeKycService.queue({ state: filter.state }) : Promise.resolve(null),
+        const [everything, visible, employmentTypes] = await Promise.all([
+            employeeKycService.queue({ includeInactive: inactive }),
+            filter.state ? employeeKycService.queue({ state: filter.state, includeInactive: inactive }) : Promise.resolve(null),
+            live ? employeeKycService.employmentTypes() : Promise.resolve(new Map()),
         ]);
-        return { everything, visible: visible ?? (chip === "ESCALATED" ? { ...everything, rows: [], total: 0 } : everything) };
+        const joined = (queue: EmployeeKycQueueData): EmployeeKycQueueData => ({ ...queue, rows: withEmploymentTypes(queue.rows, employmentTypes) });
+        return { everything: joined(everything), visible: joined(visible ?? (chip === "ESCALATED" ? { ...everything, rows: [], total: 0 } : everything)) };
     });
 
     return (
         <ResourceBoundary resource={resource}>
-            {(data) => <EmployeeKycQueue loaded={data} chip={chip} onChip={setChip} live={live} onChanged={resource.reload} />}
+            {(data) => <EmployeeKycQueue loaded={data} chip={chip} onChip={setChip} showInactive={inactive} onShowInactive={setInactive} live={live} onChanged={resource.reload} />}
         </ResourceBoundary>
     );
 }

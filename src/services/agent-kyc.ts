@@ -1,6 +1,8 @@
+import { onlineProviderOf } from "./verification";
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { formatDateTime } from "@/lib/format";
+import { accountStateOf, type AccountState } from "./account-state";
 import { recordedOf, requestOf } from "./kyc";
 import { kycStateOf, shapeKycStateCounts, type KycQueueState, type KycStateCounts } from "./kyc-state";
 import type { KycRecorded, KycRequest, StatusMeta } from "@/types";
@@ -73,6 +75,8 @@ export type WireAgentKycQueueRow = { [K in keyof Omit<WireAgentKyc, "id" | "agen
     agentId: string;
     kycId: string | null;
     state?: string | null;
+    /** 2 Oct 2026: where the account stands — ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED). Absent from a server one release behind. */
+    accountState?: string | null;
     agent: WireAgentKyc["agent"];
 };
 
@@ -130,6 +134,10 @@ export interface AgentKycCase {
     slaHours: number | null;
     /** How many of the seven slots hold a document. */
     documents: number;
+    /** Cashfree Phase 2: the online provider on the record (Digio, or Cashfree on the backup), null for documents; absent on an older read. */
+    provider?: "DIGIO" | "CASHFREE" | null;
+    /** Cashfree Phase 2: the raw provider status — PROVIDER_FAILED when Digio could not be asked. */
+    digioStatus?: string | null;
     /** Everything recorded, for the form to start from. */
     recorded: AgentKycDocuments;
 }
@@ -138,6 +146,9 @@ export interface AgentKycCase {
 export interface AgentKycQueueRow {
     /** The record's id, else the agent's. */
     id: string;
+    /** 2 Oct 2026: where the account stands; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     agentId: string;
     kycId: string | null;
     state: KycQueueState;
@@ -154,7 +165,10 @@ export interface AgentKycQueueRow {
     status: AgentKycStatus | null;
     /** Formatted, "—" with nothing submitted. */
     submittedAt: string;
-    method: "MANUAL" | "DIGIO" | null;
+    /** Cashfree Phase 2: CASHFREE when the backup ran the online check. */
+    method: "MANUAL" | "DIGIO" | "CASHFREE" | null;
+    /** The raw provider status — PROVIDER_FAILED when Digio could not be asked (printed as words, never raw). */
+    digioStatus: string | null;
     /** How many of the seven slots hold a document. */
     documents: number;
     request: KycRequest | null;
@@ -173,6 +187,8 @@ export interface AgentKycFilter {
     status?: AgentKycStatus;
     /** The agent's name, display id or mobile. */
     q?: string;
+    /** 2 Oct 2026 (the account lifecycle): true sends `include=inactive` — the suspended, deactivated and closed come back too. */
+    includeInactive?: boolean;
 }
 
 export function buildAgentKycQuery(filter: AgentKycFilter = {}): string {
@@ -180,6 +196,7 @@ export function buildAgentKycQuery(filter: AgentKycFilter = {}): string {
     if (filter.state) params.set("state", filter.state);
     if (filter.status) params.set("status", filter.status);
     if (filter.q?.trim()) params.set("q", filter.q.trim());
+    if (filter.includeInactive) params.set("include", "inactive");
     return params.toString();
 }
 
@@ -221,6 +238,8 @@ export function shapeAgentKyc(row: WireAgentKyc): AgentKycCase {
         slaHours: row.slaHours ?? null,
         documents: AGENT_KYC_SLOTS.filter((slot) => Boolean(row[slot.key])).length,
         recorded,
+        provider: onlineProviderOf(row.method),
+        digioStatus: row.digioStatus ?? null,
     };
 }
 
@@ -241,10 +260,12 @@ export function shapeAgentKycQueueRow(row: WireAgentKycQueueRow): AgentKycQueueR
         createdAt: row.agent.createdAt ?? null,
         status: row.status,
         submittedAt: row.submittedAt ? formatDateTime(row.submittedAt) : "—",
-        method: row.method === "DIGIO" ? "DIGIO" : row.method === "MANUAL" ? "MANUAL" : null,
+        method: onlineProviderOf(row.method) ?? (row.method === "MANUAL" ? "MANUAL" : null),
+        digioStatus: row.digioStatus ?? null,
         documents: AGENT_KYC_SLOTS.filter((slot) => Boolean(row[slot.key])).length,
         request: requestOf(row, row),
         recorded: recordedOf(row, row),
+        accountState: accountStateOf(row.accountState),
     };
 }
 

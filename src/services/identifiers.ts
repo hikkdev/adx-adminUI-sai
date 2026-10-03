@@ -35,12 +35,16 @@ export type IdentifierParty =
     | "SAFETY"
     | "LEAD"
     | "USER"
+    | "ORDER"
     | "VISIT"
     | "CERTIFICATE"
     | "FRAUD_CASE"
     | "TASK"
     | "ISSUE"
-    | "PROJECT";
+    | "PROJECT"
+    /* LM-1: ADB-… on a display ad, BST-… on a sponsored listing. */
+    | "AD_BOOKING"
+    | "LISTING_BOOST";
 
 /** What the settings screen calls each series. */
 export const PARTY_LABEL: Record<IdentifierParty, string> = {
@@ -58,6 +62,8 @@ export const PARTY_LABEL: Record<IdentifierParty, string> = {
     LEAD: "Leads",
     /* QR-4: ADX-…, the person's own id. */
     USER: "People",
+    /* BK-1: BKG-DDMM-YYNN, the booking's reference — an order, named so an advertiser and a publisher can quote one. */
+    ORDER: "Bookings",
     VISIT: "Field visits",
     CERTIFICATE: "Certificates",
     FRAUD_CASE: "Fraud cases",
@@ -65,6 +71,8 @@ export const PARTY_LABEL: Record<IdentifierParty, string> = {
     TASK: "Tasks",
     ISSUE: "Issues",
     PROJECT: "Projects",
+    AD_BOOKING: "Display ads",
+    LISTING_BOOST: "Sponsored listings",
 };
 
 /** The order the chips read in: the five parties, then the series in the order the platform grew them. */
@@ -76,6 +84,7 @@ export const PARTY_ORDER: readonly IdentifierParty[] = [
     "EMPLOYEE",
     "LISTING",
     "USER",
+    "ORDER",
     "TICKET",
     "FEEDBACK",
     "DISPUTE",
@@ -92,6 +101,34 @@ export const PARTY_ORDER: readonly IdentifierParty[] = [
 /** A label for a party the server names and this file does not know yet — the enum's word, made readable. */
 export const partyLabel = (party: string): string =>
     PARTY_LABEL[party as IdentifierParty] ?? party.charAt(0) + party.slice(1).toLowerCase().replace(/_/g, " ");
+
+/**
+ * Whose id a desk line is printing (29 Sep 2026, the owner: "multiple
+ * profile ID assignments to a single profile"). A person has one id of
+ * their own, ADX-…, and it reads "ADX ID" — the desk looks at somebody
+ * else, so never "Your". Every party row has its own id too, and that one
+ * is always named by its kind, never printed bare beside a person and never
+ * as the person's.
+ *
+ * Keyed on the series rather than read off the prefix: the prefix and the
+ * pattern are the identifier formats screen's to change, and every caller
+ * already knows which kind of row it holds.
+ */
+export type IdOwner = Extract<IdentifierParty, "USER" | "PUBLISHER" | "ADVERTISER" | "PARTNER" | "AGENT">;
+
+export const ID_LABEL: Record<IdOwner, string> = {
+    USER: "ADX ID",
+    PUBLISHER: "Publisher account ID",
+    ADVERTISER: "Advertiser account ID",
+    PARTNER: "Print partner ID",
+    AGENT: "Agent ID",
+};
+
+/** "Advertiser account ID ADV-2909-2601" — null when none is issued, so a joined line drops it rather than printing a bare label. */
+export function idLine(owner: IdOwner, displayId: string | null | undefined): string | null {
+    const id = displayId?.trim();
+    return id ? `${ID_LABEL[owner]} ${id}` : null;
+}
 
 /**
  * The API's rows in the console's order, with any party the server knows
@@ -142,10 +179,39 @@ export const identifierService = {
         live().patch<IdentifierFormat>(`/identifiers/formats/${encodeURIComponent(party)}`, patch),
 
     /**
-     * Issues identifiers to publishers created before the feature existed,
-     * against their own signup date rather than today. Idempotent, so running
-     * it twice costs a round trip and nothing else.
+     * Issues identifiers to rows created before their series existed —
+     * publishers against their own signup date rather than today, then (QR-4)
+     * people and (BK-1) bookings the same way. Idempotent, so running it twice
+     * costs a round trip and nothing else. `users` and `orders` are absent on
+     * a backend older than those series.
      */
-    backfillPublishers: (): Promise<{ assigned: number; remaining: number }> =>
-        live().post<{ assigned: number; remaining: number }>("/identifiers/backfill/publishers"),
+    backfillPublishers: (): Promise<BackfillResult> => live().post<BackfillResult>("/identifiers/backfill/publishers"),
 };
+
+/** What one run of the backfill did per series: issued now, and still to go. */
+export interface BackfillCount {
+    assigned: number;
+    remaining: number;
+}
+
+export interface BackfillResult extends BackfillCount {
+    users?: BackfillCount;
+    orders?: BackfillCount;
+}
+
+/**
+ * "Issued 12 publisher, 3 people and 40 booking identifiers, 5 bookings
+ * still to go" — or the plain truth that nothing was owed. One sentence
+ * across the series the answer named.
+ */
+export function backfillSummary(result: BackfillResult): string {
+    const series: { noun: [string, string]; count: BackfillCount }[] = [
+        { noun: ["publisher", "publisher"], count: result },
+        ...(result.users ? [{ noun: ["person", "people"] as [string, string], count: result.users }] : []),
+        ...(result.orders ? [{ noun: ["booking", "booking"] as [string, string], count: result.orders }] : []),
+    ];
+    const issued = series.filter((row) => row.count.assigned > 0).map((row) => `${row.count.assigned} ${row.count.assigned === 1 ? row.noun[0] : row.noun[1]}`);
+    const remaining = series.filter((row) => row.count.remaining > 0).map((row) => `${row.count.remaining} ${row.count.remaining === 1 ? row.noun[0] : row.noun[1]}`);
+    if (issued.length === 0) return remaining.length ? `Nothing issued this run; ${remaining.join(", ")} still to go` : "Every publisher, person and booking already has an identifier";
+    return `Issued ${issued.join(", ")} identifier${issued.length === 1 && series.find((row) => row.count.assigned === 1) ? "" : "s"}${remaining.length ? `, ${remaining.join(", ")} still to go` : ""}`;
+}

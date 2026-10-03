@@ -24,15 +24,22 @@ import { formatDateTime, formatMoney } from "@/lib/format";
 import {
     GATEWAY_LABEL,
     PAYMENT_GATEWAYS,
+    PAYMENT_PURPOSES,
+    PAYMENT_PURPOSE_META,
     PAYMENT_STATUSES,
     PAYMENT_STATUS_META,
     REFUND_STATUS_META,
+    awaitsBankConfirmation,
+    bankConfirmProblem,
     canRefund,
+    filterByPurpose,
+    paymentPurposeOf,
     paymentTarget,
     paymentsService,
     refundProblem,
     type Payment,
     type PaymentGateway,
+    type PaymentPurpose,
     type PaymentStatus,
     type PaymentsPage,
 } from "@/services/payments";
@@ -60,7 +67,12 @@ export function PaymentsView({
 }: PaymentsViewProps) {
     const [open, setOpen] = React.useState<Payment | null>(null);
     const [refunding, setRefunding] = React.useState<Payment | null>(null);
+    /* BT-1: a bank transfer waiting for ops — confirm against the statement, or reject. */
+    const [bank, setBank] = React.useState<{ payment: Payment; mode: "confirm" | "reject" } | null>(null);
+    /* RF-1: the list takes no purpose facet, so the chip cuts the page in hand — a reservation fee is not a booking payment. */
+    const [purpose, setPurpose] = React.useState<PaymentPurpose | "ALL">("ALL");
     const total = Object.values(page.counts).reduce((sum, count) => sum + count, 0);
+    const rows = filterByPurpose(page.items, purpose);
 
     const columns: SimpleColumn<Payment>[] = [
         {
@@ -79,8 +91,10 @@ export function PaymentsView({
             render: (row) => (
                 <div className="min-w-0">
                     <span className="block">{GATEWAY_LABEL[row.gateway]}</span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground" title={row.gatewayPaymentId ?? row.gatewayOrderId ?? undefined}>
-                        {row.gatewayPaymentId ?? row.gatewayOrderId ?? "No gateway id yet"}
+                    <span className="block truncate font-mono text-xs text-muted-foreground" title={row.gatewayPaymentId ?? row.gatewayOrderId ?? row.bankTransfer?.utr ?? undefined}>
+                        {row.gatewayPaymentId ??
+                            row.gatewayOrderId ??
+                            (row.gateway === "BANK_TRANSFER" ? (row.bankTransfer?.utr ? `UTR ${row.bankTransfer.utr}` : "No claim yet") : "No gateway id yet")}
                     </span>
                 </div>
             ),
@@ -124,7 +138,13 @@ export function PaymentsView({
         {
             key: "status",
             label: "Status",
-            render: (row) => <StatusBadge status={PAYMENT_STATUS_META[row.status]} />,
+            render: (row) => (
+                <span className="inline-flex flex-wrap items-center gap-1">
+                    <StatusBadge status={PAYMENT_STATUS_META[row.status]} />
+                    {/* RF-1: only the odd one out is chipped — every settlement wearing "Settlement" is noise. */}
+                    {paymentPurposeOf(row) !== "SETTLEMENT" && <StatusBadge status={PAYMENT_PURPOSE_META[paymentPurposeOf(row)]} />}
+                </span>
+            ),
         },
         {
             key: "actions",
@@ -135,6 +155,15 @@ export function PaymentsView({
                     <Button size="sm" variant="outline" className="h-7 bg-card" onClick={() => setRefunding(row)}>
                         Refund
                     </Button>
+                ) : awaitsBankConfirmation(row) ? (
+                    <div className="flex justify-end gap-1">
+                        <Button size="sm" className="h-7" onClick={() => setBank({ payment: row, mode: "confirm" })}>
+                            Confirm
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 bg-card" onClick={() => setBank({ payment: row, mode: "reject" })}>
+                            Reject
+                        </Button>
+                    </div>
                 ) : null,
         },
     ];
@@ -155,6 +184,19 @@ export function PaymentsView({
                     ]}
                 />
                 <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Select value={purpose} onValueChange={(value) => setPurpose(value as PaymentPurpose | "ALL")}>
+                        <SelectTrigger className="h-8 w-44" aria-label="Purpose">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="ALL">Every purpose</SelectItem>
+                            {PAYMENT_PURPOSES.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                    {PAYMENT_PURPOSE_META[value].label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                     <Select value={gateway} onValueChange={(value) => onGatewayChange(value as PaymentGateway | "ALL")}>
                         <SelectTrigger className="h-8 w-40" aria-label="Gateway">
                             <SelectValue />
@@ -183,17 +225,31 @@ export function PaymentsView({
 
             <SimpleTable
                 columns={columns}
-                rows={page.items}
+                rows={rows}
                 rowKey={(row) => row.id}
-                emptyMessage="No payments match. A row appears the moment an advertiser opens a gateway checkout."
+                emptyMessage={
+                    purpose === "ALL"
+                        ? "No payments match. A row appears the moment an advertiser opens a gateway checkout."
+                        : `No ${PAYMENT_PURPOSE_META[purpose].label.toLowerCase()} on this page. The purpose is cut here, over the page in hand — narrow with a status or a search first.`
+                }
             />
             {page.total > page.items.length && (
                 <p className="text-xs text-muted-foreground">
                     Showing the newest {page.items.length} of {page.total}. Narrow with a status or a search.
+                    {purpose !== "ALL" ? " The purpose is cut over this page only." : ""}
                 </p>
             )}
 
-            <PaymentDialog payment={open} onOpenChange={(next) => !next && setOpen(null)} onRefund={setRefunding} />
+            <PaymentDialog payment={open} onOpenChange={(next) => !next && setOpen(null)} onRefund={setRefunding} onBank={(payment, mode) => setBank({ payment, mode })} />
+            <BankTransferDialog
+                request={bank}
+                onOpenChange={(next) => !next && setBank(null)}
+                onDone={() => {
+                    setBank(null);
+                    setOpen(null);
+                    onChanged();
+                }}
+            />
             <RefundDialog
                 payment={refunding}
                 onOpenChange={(next) => !next && setRefunding(null)}
@@ -215,10 +271,12 @@ function PaymentDialog({
     payment,
     onOpenChange,
     onRefund,
+    onBank,
 }: {
     payment: Payment | null;
     onOpenChange: (open: boolean) => void;
     onRefund: (payment: Payment) => void;
+    onBank: (payment: Payment, mode: "confirm" | "reject") => void;
 }) {
     return (
         <Dialog open={payment !== null} onOpenChange={onOpenChange}>
@@ -229,6 +287,8 @@ function PaymentDialog({
                             <DialogTitle className="flex items-center gap-2">
                                 {payment.reference}
                                 <StatusBadge status={PAYMENT_STATUS_META[payment.status]} />
+                                {/* RF-1: a reservation fee is not a booking payment; the chip says so up front. */}
+                                {paymentPurposeOf(payment) !== "SETTLEMENT" && <StatusBadge status={PAYMENT_PURPOSE_META[paymentPurposeOf(payment)]} />}
                             </DialogTitle>
                             <DialogDescription>
                                 {GATEWAY_LABEL[payment.gateway]} · {formatMoney(payment.amount)} · raised {formatDateTime(payment.createdAt)}
@@ -236,9 +296,12 @@ function PaymentDialog({
                         </DialogHeader>
                         <FieldList
                             items={[
+                                ["Purpose", PAYMENT_PURPOSE_META[paymentPurposeOf(payment)].label],
                                 ["Gateway order", <span key="o" className="font-mono text-xs">{payment.gatewayOrderId ?? "—"}</span>],
                                 ["Gateway payment", <span key="p" className="font-mono text-xs">{payment.gatewayPaymentId ?? "—"}</span>],
                                 ["Method", payment.method ?? "—"],
+                                /* UP-1: the UPI id the payer typed, when they did. */
+                                ...(payment.payerUpiId ? ([["Payer's UPI id", <span key="upi" className="font-mono text-xs">{payment.payerUpiId}</span>]] as [string, React.ReactNode][]) : []),
                                 ["Captured", payment.capturedAt ? formatDateTime(payment.capturedAt) : "Not captured"],
                                 ["Left to refund", formatMoney(payment.refundable)],
                                 [
@@ -255,6 +318,25 @@ function PaymentDialog({
                                 ["Invoice", payment.invoiceId ? <Link key="i" href="/finance/invoices" className="underline underline-offset-4">Stamped</Link> : "—"],
                             ]}
                         />
+                        {payment.gateway === "BANK_TRANSFER" && (
+                            <div className="rounded-md border px-3 py-2 text-xs">
+                                <p className="font-semibold uppercase tracking-wide text-muted-foreground">Bank transfer</p>
+                                {payment.bankTransfer?.claimedAt ? (
+                                    <FieldList
+                                        className="mt-1"
+                                        items={[
+                                            ["UTR", <span key="u" className="font-mono">{payment.bankTransfer.utr ?? "—"}</span>],
+                                            ["Paid on", payment.bankTransfer.paidOn ?? "—"],
+                                            ["Amount claimed", payment.bankTransfer.claimedAmount ? formatMoney(payment.bankTransfer.claimedAmount) : "—"],
+                                            ["Claimed", formatDateTime(payment.bankTransfer.claimedAt)],
+                                            ["Proof", payment.bankTransfer.proofFileId ? <span key="p" className="font-mono">{payment.bankTransfer.proofFileId}</span> : "None"],
+                                        ]}
+                                    />
+                                ) : (
+                                    <p className="mt-1 text-muted-foreground">The payer has not said they paid yet. Confirm anyway once the money shows on the statement.</p>
+                                )}
+                            </div>
+                        )}
                         {payment.failureReason && (
                             <p className="rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{payment.failureReason}</p>
                         )}
@@ -290,6 +372,14 @@ function PaymentDialog({
                             )}
                         </div>
                         <DialogFooter>
+                            {awaitsBankConfirmation(payment) && (
+                                <>
+                                    <Button variant="outline" onClick={() => onBank(payment, "reject")}>
+                                        Reject
+                                    </Button>
+                                    <Button onClick={() => onBank(payment, "confirm")}>Confirm receipt</Button>
+                                </>
+                            )}
                             {canRefund(payment) && <Button onClick={() => onRefund(payment)}>Refund</Button>}
                         </DialogFooter>
                     </>
@@ -387,6 +477,117 @@ function RefundDialog({
                             </Button>
                             <Button variant="destructive" onClick={submit} disabled={busy || problem !== null}>
                                 Refund {amount && !problem ? formatMoney(amount.trim()) : ""}
+                            </Button>
+                        </DialogFooter>
+                    </>
+                )}
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* BT-1: a bank transfer, confirmed or rejected against the statement  */
+/* ------------------------------------------------------------------ */
+
+function BankTransferDialog({
+    request,
+    onOpenChange,
+    onDone,
+}: {
+    request: { payment: Payment; mode: "confirm" | "reject" } | null;
+    onOpenChange: (open: boolean) => void;
+    onDone: () => void;
+}) {
+    const [amount, setAmount] = React.useState("");
+    const [utr, setUtr] = React.useState("");
+    const [note, setNote] = React.useState("");
+    const [reason, setReason] = React.useState("");
+    const [busy, setBusy] = React.useState(false);
+    const payment = request?.payment ?? null;
+    const mode = request?.mode ?? "confirm";
+    const problem = payment ? (mode === "confirm" ? bankConfirmProblem({ amount, utr }, payment.bankTransfer) : reason.trim().length < 3 ? "Say why nothing is being applied." : null) : null;
+
+    const reset = () => {
+        setAmount("");
+        setUtr("");
+        setNote("");
+        setReason("");
+    };
+
+    const submit = async () => {
+        if (!payment || problem) return;
+        setBusy(true);
+        try {
+            if (mode === "confirm") {
+                const done = await paymentsService.confirmBankTransfer(payment.id, {
+                    ...(amount.trim() ? { amount: amount.trim() } : {}),
+                    ...(utr.trim() ? { utr: utr.trim() } : {}),
+                    ...(note.trim() ? { note: note.trim() } : {}),
+                });
+                toast.success(`${payment.reference} confirmed`, {
+                    description: done.failureReason ? done.failureReason : "The wallet is topped up and the booking is applied.",
+                });
+            } else {
+                await paymentsService.rejectBankTransfer(payment.id, { reason: reason.trim() });
+                toast.success(`${payment.reference} rejected`, { description: "The payer is told to start a new payment." });
+            }
+            reset();
+            onDone();
+        } catch (cause) {
+            toast.error(cause instanceof Error ? cause.message : "The answer did not reach ADX.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <Dialog
+            open={payment !== null}
+            onOpenChange={(next) => {
+                if (!next) reset();
+                onOpenChange(next);
+            }}
+        >
+            <DialogContent className="max-w-md">
+                {payment && (
+                    <>
+                        <DialogHeader>
+                            <DialogTitle>{mode === "confirm" ? "Confirm the transfer" : "Reject the transfer"}</DialogTitle>
+                            <DialogDescription>
+                                {payment.reference} · {formatMoney(payment.amount)} expected
+                                {payment.bankTransfer?.utr ? ` · UTR ${payment.bankTransfer.utr}` : " · no UTR claimed"}
+                            </DialogDescription>
+                        </DialogHeader>
+                        {mode === "confirm" ? (
+                            <div className="space-y-3">
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="bank-amount">Amount that arrived (₹)</Label>
+                                    <Input id="bank-amount" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={payment.amount} inputMode="decimal" />
+                                    <p className="text-xs text-muted-foreground">Empty means the intent&rsquo;s own. A different figure is credited as it came and flagged, not applied.</p>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="bank-utr">UTR on the statement</Label>
+                                    <Input id="bank-utr" value={utr} onChange={(e) => setUtr(e.target.value)} placeholder={payment.bankTransfer?.utr ?? "HDFCN5…"} className="font-mono" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="bank-note">Note (optional)</Label>
+                                    <Textarea id="bank-note" value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Statement line, date seen…" />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-1.5">
+                                <Label htmlFor="bank-reason">Why</Label>
+                                <Textarea id="bank-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Nothing on the statement in seven days" />
+                            </div>
+                        )}
+                        {problem && <p className="text-xs text-danger">{problem}</p>}
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+                                Cancel
+                            </Button>
+                            <Button onClick={submit} disabled={busy || Boolean(problem)} variant={mode === "reject" ? "destructive" : "default"}>
+                                {busy ? "Sending…" : mode === "confirm" ? "Confirm receipt" : "Reject"}
                             </Button>
                         </DialogFooter>
                     </>

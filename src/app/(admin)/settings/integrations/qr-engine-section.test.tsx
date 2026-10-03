@@ -74,7 +74,7 @@ const genqr = (over: Partial<QrEngineSettings> = {}): QrEngineSettings => ({
     provider: "GENQR",
     baseUrl: "https://genqr.example",
     apiKey: "••••9876",
-    shortBaseUrl: "https://go.adx.example",
+    shortBaseUrl: "https://go.adx.in",
     style: { foregroundColor: "#213333", dotStyle: "rounded", frameCaption: "Scan me" },
     hostsDynamic: true,
     ...over,
@@ -86,8 +86,8 @@ const verdict = (over: Partial<QrEngineTest> = {}): QrEngineTest => ({
     reachable: true,
     authorized: true,
     status: 200,
-    message: "GenQR answered as ops@adx.example on the Enterprise plan.",
-    account: { email: "ops@adx.example", plan: "Enterprise", apiAccess: true, scope: "*", redirectBase: "https://go.adx.example" },
+    message: "GenQR answered as ops@adx.in on the Enterprise plan.",
+    account: { email: "ops@adx.in", plan: "Enterprise", apiAccess: true, scope: "*", redirectBase: "https://go.adx.in" },
     scopesMissing: [],
     shortBaseMatches: true,
     ...over,
@@ -137,7 +137,7 @@ describe("under GenQR", () => {
         expect(screen.getByLabelText("GenQR base URL")).toHaveValue("https://genqr.example");
         expect(screen.getByLabelText("API key")).toHaveValue("");
         expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "••••9876");
-        expect(screen.getByLabelText("Short origin printed on hoardings")).toHaveValue("https://go.adx.example");
+        expect(screen.getByLabelText("Short origin printed on hoardings")).toHaveValue("https://go.adx.in");
     });
 
     it("warns when GenQR is chosen but has no credentials, and the test is disabled with the reason", () => {
@@ -153,13 +153,13 @@ describe("under GenQR", () => {
         const save = screen.getByRole("button", { name: "Save connection" });
         expect(save).toBeDisabled();
 
-        fireEvent.change(screen.getByLabelText("Short origin printed on hoardings"), { target: { value: "https://go2.adx.example" } });
+        fireEvent.change(screen.getByLabelText("Short origin printed on hoardings"), { target: { value: "https://go2.adx.in" } });
         expect(save).toBeEnabled();
         fireEvent.click(save);
 
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
         expect(backend.calls).toEqual([
-            { method: "PUT", path: "/integrations", body: { section: "qrEngine", patch: { shortBaseUrl: "https://go2.adx.example" } } },
+            { method: "PUT", path: "/integrations", body: { section: "qrEngine", patch: { shortBaseUrl: "https://go2.adx.in" } } },
         ]);
     });
 
@@ -209,15 +209,15 @@ describe("the test", () => {
         const card = await screen.findByTestId("qr-engine-verdict");
         expect(backend.calls).toEqual([{ method: "POST", path: "/integrations/qr-engine/test", body: {} }]);
         expect(within(card).getByText("Connected")).toBeInTheDocument();
-        expect(within(card).getByText("ops@adx.example")).toBeInTheDocument();
+        expect(within(card).getByText("ops@adx.in")).toBeInTheDocument();
         expect(within(card).getByText("Enterprise")).toBeInTheDocument();
         expect(within(card).getByText("HTTP 200")).toBeInTheDocument();
     });
 
     it("prints the gaps: missing scopes and a printed origin that does not match", async () => {
         backend.answer = verdict({
-            message: "GenQR answered, but the key lacks analytics:read, render; GenQR prints https://genqr.example but ADX expects https://go.adx.example.",
-            account: { email: "ops@adx.example", plan: "Enterprise", apiAccess: true, scope: "qrcodes:read,qrcodes:write", redirectBase: "https://genqr.example" },
+            message: "GenQR answered, but the key lacks analytics:read, render; GenQR prints https://genqr.example but ADX expects https://go.adx.in.",
+            account: { email: "ops@adx.in", plan: "Enterprise", apiAccess: true, scope: "qrcodes:read,qrcodes:write", redirectBase: "https://genqr.example" },
             scopesMissing: ["analytics:read", "render"],
             shortBaseMatches: false,
         });

@@ -13,6 +13,7 @@ import {
     effectiveEmailDoor,
     emailModeOf,
     emailTestBlocker,
+    geoIpConfigured,
     isMasked,
     isPublicOsmTileTemplate,
     mapsSectionPatch,
@@ -115,6 +116,28 @@ describe("the secrets", () => {
         expect(sectionPatch("twilio", { accountSid: "AC1", authToken: "••••ab12" }, { accountSid: null, authToken: "••••ab12", phoneNumber: null })).toEqual({ accountSid: "AC1" });
         expect(sectionPatch("resend", { apiKey: "re_new", fromEmail: "" }, { apiKey: "••••zz99", fromEmail: null })).toEqual({ apiKey: "re_new" });
     });
+
+    /* FB-1: the app id is public and travels when it moved; the secret only when typed anew. */
+    it("FB-1: sends the Facebook app id as text and the app secret only when typed, never its mask", () => {
+        expect(sectionPatch("facebook", { appId: "1234567890", appSecret: "••••ab12" }, { appId: null, appSecret: "••••ab12" })).toEqual({ appId: "1234567890" });
+        expect(sectionPatch("facebook", { appId: "1234567890", appSecret: "fb_new" }, { appId: "1234567890", appSecret: "••••ab12" })).toEqual({ appSecret: "fb_new" });
+        expect(sectionPatch("facebook", { appId: "1234567890", appSecret: "" }, { appId: "1234567890", appSecret: "••••ab12" })).toEqual({});
+    });
+
+    /* SL-1: the provider is a plain value; the token is ipinfo's secret. */
+    it("SL-1: sends the geo-IP provider when it moved and the token only when typed", () => {
+        expect(sectionPatch("geoIp", { provider: "IPAPI", token: "" }, { provider: "NONE", token: null })).toEqual({ provider: "IPAPI" });
+        expect(sectionPatch("geoIp", { provider: "IPINFO", token: "tok_new" }, { provider: "NONE", token: null })).toEqual({ provider: "IPINFO", token: "tok_new" });
+        expect(sectionPatch("geoIp", { provider: "IPINFO", token: "••••zz99" }, { provider: "IPINFO", token: "••••zz99" })).toEqual({});
+    });
+
+    it("SL-1: knows when the lookup can run — a provider chosen, and ipinfo's token on file", () => {
+        expect(geoIpConfigured({ provider: "NONE", token: null })).toBe(false);
+        expect(geoIpConfigured({ provider: "IPAPI", token: null })).toBe(true);
+        expect(geoIpConfigured({ provider: "IPINFO", token: null })).toBe(false);
+        expect(geoIpConfigured({ provider: "IPINFO", token: "••••zz99" })).toBe(true);
+        expect(geoIpConfigured(undefined)).toBe(false);
+    });
 });
 
 /* Z-C: the OpenStreetMap sub-object of the maps patch. */
@@ -152,13 +175,13 @@ describe("the osm patch", () => {
     });
 
     it("carries a typed field as text, an emptied one as null, the zoom as a number, the key only when typed and not masked — never publicTiles", () => {
-        const draft = { ...osmDraftOf(osmStored), contactEmail: " ops@adx.example ", userAgent: "", tileMaxZoom: "20", tileApiKey: "mt-key", nominatimBaseUrl: "https://nominatim.openstreetmap.org" };
-        expect(osmSectionPatch(osmStored, draft)).toEqual({ contactEmail: "ops@adx.example", userAgent: null, tileMaxZoom: 20, tileApiKey: "mt-key" });
+        const draft = { ...osmDraftOf(osmStored), contactEmail: " ops@adx.in ", userAgent: "", tileMaxZoom: "20", tileApiKey: "mt-key", nominatimBaseUrl: "https://nominatim.openstreetmap.org" };
+        expect(osmSectionPatch(osmStored, draft)).toEqual({ contactEmail: "ops@adx.in", userAgent: null, tileMaxZoom: 20, tileApiKey: "mt-key" });
         expect(osmSectionPatch(osmStored, { ...osmDraftOf(osmStored), tileApiKey: "••••9f3a" })).toEqual({});
         expect(osmSectionPatch(osmStored, { ...osmDraftOf(osmStored), tileMaxZoom: "23" })).toEqual({});
         expect(mapsSectionPatch(mapsStored, "OSM", { googleServerKey: "" }, draft)).toEqual({
             provider: "OSM",
-            osm: { contactEmail: "ops@adx.example", userAgent: null, tileMaxZoom: 20, tileApiKey: "mt-key" },
+            osm: { contactEmail: "ops@adx.in", userAgent: null, tileMaxZoom: 20, tileApiKey: "mt-key" },
         });
         /* An older backend without the section: the sub-object is never sent. */
         expect(mapsSectionPatch({ ...mapsStored, osm: undefined }, "OSM", {}, draft)).toEqual({ provider: "OSM" });

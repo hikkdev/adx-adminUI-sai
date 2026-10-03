@@ -34,6 +34,12 @@ function ChartSkeleton({ height }: { height: number }) {
     );
 }
 
+/** AN-2: Explore's multi-metric line chart. */
+export const ExploreChart = dynamic(
+    () => import("./explore-chart").then((m) => m.ExploreChart),
+    { ssr: false, loading: () => <ChartSkeleton height={320} /> },
+);
+
 export const MonthSeriesChart = dynamic(
     () => import("./month-series-chart").then((m) => m.MonthSeriesChart),
     { ssr: false, loading: () => <ChartSkeleton height={280} /> },

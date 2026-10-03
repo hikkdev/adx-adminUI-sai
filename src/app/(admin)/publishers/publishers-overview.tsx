@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BreakdownTable, CountTile, FunnelCard, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
+import { BreakdownTable, CostTile, CountTile, FunnelCard, MixBar, MoneyTile, SectionOverviewLoader, SeriesCard, TopList } from "@/components/adx/overview";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { LISTING_CATEGORY_LABEL, type ListingCategory } from "@/services/overview";
 import { SECTION_META, consoleHref, kycMixItems, typedSpellingsHover, type PublishersOverview } from "@/services/section-overviews";
@@ -40,7 +40,7 @@ export function PublishersOverviewView() {
 }
 
 export function PublishersOverviewBody({ data, link }: { data: PublishersOverview; link: (href: string | null) => string | null }) {
-    const { tiles, money, funnel, series, breakdowns, top } = data;
+    const { tiles, money, funnel, series, breakdowns, top, cost } = data;
     return (
         <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -52,6 +52,9 @@ export function PublishersOverviewBody({ data, link }: { data: PublishersOvervie
                 <CountTile label="First bookings" figure={series.firstBookings.total} hint="publishers whose first delivered day fell in the window" />
                 <MoneyTile label="Earnings accrued" figure={money.earningsPaid} hint="accrual net" />
                 <MoneyTile label="Payouts released" figure={money.payoutsReleased} hint="withdrawals paid" href="/finance/payouts" />
+                {/* CP-2: the agent money behind a publisher signed up — salary and
+                    rewards over the publishers agents actually brought. */}
+                <CostTile label="Cost per publisher onboarded" cost={cost} noun="publisher" href="/agents" />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
@@ -83,7 +86,7 @@ export function PublishersOverviewBody({ data, link }: { data: PublishersOvervie
             <div className="grid gap-4 xl:grid-cols-2">
                 <BreakdownTable
                     title="By city"
-                    hint="Publishers, their live listings, and the accrual gross in the window — a city narrows this overview."
+                    hint="Publishers, their live listings, the accrual gross in the window, and what an onboarding cost there — a city narrows this overview."
                     labelHeading="City"
                     page={breakdowns.byCity}
                     initialSort="count"
@@ -93,6 +96,14 @@ export function PublishersOverviewBody({ data, link }: { data: PublishersOvervie
                         { key: "count", label: "Publishers", align: "right", render: (row) => formatNumber(row.count), sortValue: (row) => row.count },
                         { key: "listings", label: "Live listings", align: "right", render: (row) => formatNumber(row.listings), sortValue: (row) => row.listings },
                         { key: "gmv", label: "GMV", align: "right", render: (row) => formatMoney(row.gmv), sortValue: (row) => Number(row.gmv) },
+                        {
+                            key: "cost",
+                            label: "Cost each",
+                            align: "right",
+                            // CP-2: null is "not recorded here", so it prints a dash rather than a free onboarding.
+                            render: (row) => (row.cost === null ? "—" : formatMoney(row.cost)),
+                            sortValue: (row) => (row.cost === null ? -1 : Number(row.cost)),
+                        },
                     ]}
                 />
                 <BreakdownTable

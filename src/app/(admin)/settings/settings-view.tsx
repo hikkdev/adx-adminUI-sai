@@ -29,6 +29,7 @@ import { NO_TIERS, SubscriptionsCard, type PolicyTiers } from "./subscriptions-c
 
 const sections = [
     { id: "marketplace", label: "Marketplace" },
+    { id: "booking", label: "Booking" },
     { id: "verification", label: "Verification" },
     { id: "publisher", label: "Publisher" },
     { id: "support", label: "Support" },
@@ -98,6 +99,9 @@ export function SettingsView({ settings, tiers = NO_TIERS, onSaved }: SettingsVi
         setDraft((current) => (current.comms ? { ...current, comms: { ...current.comms, ...patch } } : current));
     const setHr = (patch: Partial<NonNullable<SettingsDraft["hr"]>>) =>
         setDraft((current) => (current.hr ? { ...current, hr: { ...current.hr, ...patch } } : current));
+    /* RF-1: the reservation fee. Null when the backend did not serve `booking`, and the card says so. */
+    const setReservationFee = (patch: Partial<NonNullable<SettingsDraft["reservationFee"]>>) =>
+        setDraft((current) => (current.reservationFee ? { ...current, reservationFee: { ...current.reservationFee, ...patch } } : current));
     /* Lot K2: the authenticator-app policy. Null when the backend did not serve it, and the card says so. */
     const setAdminTwoFactor = (patch: Partial<NonNullable<SettingsDraft["adminTwoFactor"]>>) =>
         setDraft((current) => (current.adminTwoFactor ? { ...current, adminTwoFactor: { ...current.adminTwoFactor, ...patch } } : current));
@@ -226,6 +230,95 @@ export function SettingsView({ settings, tiers = NO_TIERS, onSaved }: SettingsVi
                                     )}
                                 </div>
                             </div>
+                        </SectionCard>
+                    </div>
+
+                    {/* RF-1 (the owner, 25 Sep 2026): a big checkout held against a fee. The card is the console's surface of
+                        `campaigns.reservation-fee`; with the flag off the note says where the kill switch is. */}
+                    <div id="booking" className="scroll-mt-24">
+                        <SectionCard
+                            title="Reservation fee"
+                            description="A checkout at or above the threshold may be held against a fee, due within the hour; folded into the checkout when the advertiser goes ahead, part of it kept when they do not"
+                        >
+                            {draft.reservationFee ? (
+                                <FeatureGate
+                                    feature="campaigns.reservation-fee"
+                                    fallback={
+                                        <p className="text-sm text-muted-foreground">
+                                            Reservations are switched off under{" "}
+                                            <Link href="/settings/flags" className="font-medium text-foreground underline-offset-4 hover:underline">
+                                                Feature flags
+                                            </Link>
+                                            ; the terms below wait until the feature is on.
+                                        </p>
+                                    }
+                                >
+                                    <div className="space-y-5">
+                                        {switchRow(
+                                            "booking.reservationFee.enabled",
+                                            "Offer a reservation",
+                                            "On, Review & pay offers to hold the spots against the fee when the total reaches the threshold. Off, every checkout pays in full or not at all; a reservation already taken runs its course.",
+                                            draft.reservationFee.enabled,
+                                            (value) => setReservationFee({ enabled: value }),
+                                        )}
+                                        <div className="grid gap-5 md:grid-cols-2">
+                                            {numberField(
+                                                "booking.reservationFee.minCheckoutValue",
+                                                "Offered from",
+                                                draft.reservationFee.minCheckoutValue,
+                                                (value) => setReservationFee({ minCheckoutValue: value }),
+                                                SETTING_BOUNDS["booking.reservationFee.minCheckoutValue"],
+                                                "The checkout total at or above which a reservation is offered. ₹1,00,000 is the owner's open figure — the rest of the terms are decided.",
+                                                "₹",
+                                                "decimal",
+                                            )}
+                                            {numberField(
+                                                "booking.reservationFee.feePct",
+                                                "Fee",
+                                                draft.reservationFee.feePct,
+                                                (value) => setReservationFee({ feePct: value }),
+                                                SETTING_BOUNDS["booking.reservationFee.feePct"],
+                                                "Of the checkout total, charged to hold the spots. Folded into the checkout when the advertiser goes ahead.",
+                                                "% of the total",
+                                                "decimal",
+                                            )}
+                                            {numberField(
+                                                "booking.reservationFee.payWithinMinutes",
+                                                "Fee due within",
+                                                draft.reservationFee.payWithinMinutes,
+                                                (value) => setReservationFee({ payWithinMinutes: value }),
+                                                SETTING_BOUNDS["booking.reservationFee.payWithinMinutes"],
+                                                "How long the advertiser has to pay the fee once they choose to reserve. Unpaid past this, the reservation lapses and the spots are free again.",
+                                                "minutes",
+                                            )}
+                                            {numberField(
+                                                "booking.reservationFee.holdHours",
+                                                "Spots held for",
+                                                draft.reservationFee.holdHours,
+                                                (value) => setReservationFee({ holdHours: value }),
+                                                SETTING_BOUNDS["booking.reservationFee.holdHours"],
+                                                "How long a paid reservation holds the spots against every other campaign. Past this, the hold ends and the fee's retained part is kept.",
+                                                "hours",
+                                            )}
+                                            {numberField(
+                                                "booking.reservationFee.retainPct",
+                                                "Kept when they walk away",
+                                                draft.reservationFee.retainPct,
+                                                (value) => setReservationFee({ retainPct: value }),
+                                                SETTING_BOUNDS["booking.reservationFee.retainPct"],
+                                                "Of the fee, retained when the hold lapses unpaid; the rest goes back to the advertiser's wallet.",
+                                                "% of the fee",
+                                                "decimal",
+                                            )}
+                                        </div>
+                                    </div>
+                                </FeatureGate>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">
+                                    This backend does not serve the <code className="rounded bg-muted px-1 py-0.5 text-xs">booking.reservationFee</code> section
+                                    of the platform row, so the terms cannot be read or edited here.
+                                </p>
+                            )}
                         </SectionCard>
                     </div>
 

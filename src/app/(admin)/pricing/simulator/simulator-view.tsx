@@ -59,12 +59,30 @@ const daysBetween = (from: string, to: string) => {
 const isSizeBand = (dimension: PriceDimension) =>
     dimension.values.some((value) => value.minAreaSqFt !== null || value.maxAreaSqFt !== null);
 
-/** Match a listing's free-text attribute ("Back-lit") to a dimension value. */
-function guessValue(dimension: PriceDimension, site: SiteOption | null): string {
+/**
+ * Since 3 Oct 2026 a listing stores height and sight distance as codes
+ * (`ROOFTOP`, `OVER_300M`); the starter dimensions name them in words. These
+ * are the words a code reads as when guessing — older listings keep the free
+ * text they were typed with, which matches as before. A short sight line
+ * guesses nothing (its code would strip to a lone "m" and match everything).
+ */
+const CODE_HINTS: Record<string, string> = {
+    GROUND: "eye level",
+    FIRST_FLOOR: "eye level",
+    ELEVATED: "mid rise",
+    ROOFTOP: "high rise",
+    UNDER_50M: "",
+    "50_150M": "",
+    "150_300M": "clear",
+    OVER_300M: "clear",
+};
+
+/** Match a listing's attribute ("Back-lit", or a code such as `ROOFTOP`) to a dimension value. */
+export function guessValue(dimension: PriceDimension, site: SiteOption | null): string {
     if (!site) return NONE;
     const hints = [site.illumination, site.facing, site.elevation, site.visibility]
         .filter((hint): hint is string => Boolean(hint))
-        .map((hint) => hint.toLowerCase().replace(/[^a-z]/g, ""));
+        .map((hint) => (CODE_HINTS[hint] ?? hint).toLowerCase().replace(/[^a-z]/g, ""));
     const hit = dimension.values.find((value) => {
         const key = value.label.toLowerCase().replace(/[^a-z]/g, "");
         return hints.some((hint) => hint && (key.includes(hint) || hint.includes(key)));

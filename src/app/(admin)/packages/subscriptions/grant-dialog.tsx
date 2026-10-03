@@ -271,7 +271,7 @@ export function GrantDialog({ open, onOpenChange, plans, publisher = null, onGra
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="grant-starts">Starts</Label>
                             <Input
                                 id="grant-starts"
@@ -282,7 +282,7 @@ export function GrantDialog({ open, onOpenChange, plans, publisher = null, onGra
                             />
                             {fieldErrors.startsAt?.[0] && <p className="text-xs text-danger">{fieldErrors.startsAt[0]}</p>}
                         </div>
-                        <div className="grid gap-1.5">
+                        <div className="grid content-start gap-1.5">
                             <Label htmlFor="grant-ends">
                                 Ends <span className="ml-1 font-normal text-muted-foreground">optional</span>
                             </Label>
@@ -294,10 +294,10 @@ export function GrantDialog({ open, onOpenChange, plans, publisher = null, onGra
                                 disabled={busy}
                                 onChange={(event) => setEndsAt(event.target.value)}
                             />
-                            <p className="text-xs text-muted-foreground">
-                                {fieldErrors.endsAt?.[0] ?? "Empty is open-ended: it runs until somebody ends it."}
-                            </p>
+                            {fieldErrors.endsAt?.[0] && <p className="text-xs text-danger">{fieldErrors.endsAt[0]}</p>}
                         </div>
+                        {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                        <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">An empty end is open-ended: it runs until somebody ends it.</p>
                     </div>
 
                     {formError && <p className="text-sm text-danger">{formError}</p>}

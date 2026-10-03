@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { identifierService, partyLabel } from "@/services/identifiers";
+import { backfillSummary, identifierService, partyLabel } from "@/services/identifiers";
 import { PATTERN_TOKENS, renderIdentifierPreview, type IdentifierFormat } from "@/types";
 
 interface Props {
@@ -90,13 +90,8 @@ export function IdentifiersView({ formats, onSaved }: Props) {
         if (backfilling) return;
         setBackfilling(true);
         try {
-            const { assigned, remaining } = await identifierService.backfillPublishers();
-            toast.success(
-                assigned === 0
-                    ? "Every publisher already has an identifier"
-                    : `Issued ${assigned} identifier${assigned === 1 ? "" : "s"}` +
-                          (remaining > 0 ? `, ${remaining} still to go` : "")
-            );
+            /* QR-4 / BK-1: one run issues publisher, people and booking identifiers; the sentence names each series it touched. */
+            toast.success(backfillSummary(await identifierService.backfillPublishers()));
             onSaved();
         } catch (cause) {
             toast.error(cause instanceof Error ? cause.message : "Could not run the backfill");
@@ -169,11 +164,12 @@ export function IdentifiersView({ formats, onSaved }: Props) {
                                     setDraft({ ...draft, seqPadding: Number(e.target.value) || 1 })
                                 }
                             />
-                            <p className="text-xs text-muted-foreground">
-                                A minimum width, not a limit. The 143rd joiner on a two-digit day
-                                gets 143, never a repeat.
-                            </p>
                         </div>
+                        {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                        <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">
+                            Sequence digits are a minimum width, not a limit. The 143rd joiner on a two-digit day
+                            gets 143, never a repeat.
+                        </p>
                         <div className="space-y-1.5 sm:col-span-2">
                             <Label htmlFor="pattern">Pattern</Label>
                             <Input
@@ -252,12 +248,13 @@ export function IdentifiersView({ formats, onSaved }: Props) {
                     {party === "PUBLISHER" && (
                         <Card className="rounded-lg border-border p-5 shadow-none">
                             <p className="text-sm font-medium text-foreground">
-                                Publishers from before this existed
+                                Rows from before their series existed
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                                Issues an identifier against each publisher&apos;s own signup date,
-                                oldest first, so the date in the code stays true. Safe to run more
-                                than once.
+                                Issues an identifier to every publisher, person (ADX-…) and booking
+                                (BKG-DDMM-YYNN) minted before its series was, each against its own
+                                creation date, oldest first, so the date in the code stays true.
+                                Safe to run more than once.
                             </p>
                             <Button
                                 size="sm"

@@ -17,7 +17,10 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDate, formatDateTime, formatINR, formatMoney } from "@/lib/format";
 import { isLive } from "@/lib/api-config";
 import { useInstallationMode } from "@/lib/use-installation-mode";
-import { opsOverridesFor, orderService, type OpsOverride } from "@/services/orders";
+import { PrivateFile } from "@/components/adx/private-file";
+import { PlacedByLine as SharedPlacedByLine } from "@/components/adx/placed-by";
+import { opsOverridesFor, orderLabel, orderService, type OpsOverride } from "@/services/orders";
+import { isHeld } from "@/services/order-screening";
 import { PickupCodeCard } from "./pickup-code-card";
 import { OrderJourneyCard } from "./order-journey-card";
 import { OrderMilestonesCard } from "./order-milestones-card";
@@ -25,6 +28,7 @@ import { OrderOffersCard } from "./order-offers-card";
 import { OPS_OVERRIDE_COPY, OPS_REASON_MIN, OpsOverrideDialog, ReasonField, ReassignAgentDialog } from "./order-ops-dialogs";
 import { OrderPayoutCard } from "./order-payout-card";
 import { OrderPrintingCard } from "./order-printing-card";
+import { HeldBanner, OrderScreeningCard } from "./order-screening-card";
 import {
     ORDER_PIPELINE_STAGES,
     ORDER_STAGE_OF,
@@ -46,6 +50,18 @@ import {
  *  them: it is where an order stops, not a step towards finishing. */
 const JOURNEY = ORDER_PIPELINE_STAGES.filter((stage) => stage.id !== "stopped");
 
+/**
+ * PB-1 (the owner, 2 Oct 2026): "Placed by Rao Sweets (Asha Rao) on 2 Oct,
+ * 3:45 pm" — the business opens the advertiser, the person opens the user.
+ * With no business, the person and their ADX-… lead. Just the time when the
+ * read does not carry who placed it.
+ */
+export function PlacedByLine({ order }: { order: Pick<Order, "placedBy" | "createdAt"> }) {
+    const when = formatDateTime(order.createdAt);
+    /* The shared line (components/adx/placed-by) — the campaign header draws the same party the same way. */
+    return <SharedPlacedByLine placedBy={order.placedBy} lead="Placed by" when={when} fallback={`Placed on ${when}`} testId="order-placed-by-line" />;
+}
+
 /** An amount as the wire wants it: digits, optionally two decimal places. */
 const AMOUNT = /^\d{1,12}(\.\d{1,2})?$/;
 
@@ -66,6 +82,9 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
     /* Lot D (Q51/Q90): which ops moves the backend would accept right now.
        Evaluated when the order arrives; the page reloads after every write. */
     const moves = opsOverridesFor(order);
+    /* Order screening: a held order is not dispatched and not signed off — the server answers 409 ORDER_ON_HOLD, so the buttons say so first. */
+    const held = isHeld(order);
+    const heldTitle = held ? "Held for review — release or clear it first." : undefined;
 
     async function run(label: string, action: () => Promise<unknown>) {
         setBusy(true);
@@ -90,18 +109,22 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                     <ChevronLeft className="size-4" />
                     Orders
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                             {order.listing}
                         </h1>
                         <p className="mt-1 text-sm text-muted-foreground">
                             {[order.city, order.campaignName].filter(Boolean).join(" · ")}
-                            <span className="ml-2 font-mono text-xs">{order.id}</span>
+                            {/* BK-1: the booking id once minted, the short id until the backfill runs; the cuid on hover. */}
+                            <span className="ml-2 font-mono text-xs" title={order.id} data-testid="order-label">
+                                {orderLabel(order)}
+                            </span>
                         </p>
+                        <PlacedByLine order={order} />
                     </div>
                     {live && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                             {order.status === "PENDING_PRINT" && (
                                 <Button
                                     variant="outline"
@@ -134,7 +157,7 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                                 </Button>
                             )}
                             {moves.reassign && (
-                                <Button variant="outline" className="bg-card" disabled={busy} onClick={() => setReassigning(true)}>
+                                <Button variant="outline" className="bg-card" disabled={busy || held} title={heldTitle} onClick={() => setReassigning(true)}>
                                     Reassign agent
                                 </Button>
                             )}
@@ -150,7 +173,8 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                             )}
                             {order.status === "PENDING_APPROVAL" && (
                                 <Button
-                                    disabled={busy}
+                                    disabled={busy || held}
+                                    title={heldTitle}
                                     onClick={() =>
                                         run("Order signed off", () => orderService.approve(order.id))
                                     }
@@ -162,6 +186,9 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                     )}
                 </div>
             </div>
+
+            {/* Order screening: the order is paused for review. */}
+            <HeldBanner screening={order.screening} />
 
             {/* A9: the package's code, once the prints are ready and until the agent collects. */}
             {live && <PickupCodeCard order={order} />}
@@ -197,6 +224,9 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                     }}
                 />
             </div>
+
+            {/* Order screening (2 Oct 2026): the score, its signals and the review — admin reads only. */}
+            {live && <OrderScreeningCard order={order} onChanged={onChanged} />}
 
             <div className="grid gap-4 lg:grid-cols-5">
                 <Card className="rounded-lg border-border p-5 shadow-none lg:col-span-3">
@@ -282,7 +312,16 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                         items={[
                             ["Site", order.listing],
                             ["City", order.city ?? "—"],
-                            ["Campaign", order.campaignName ?? "—"],
+                            [
+                                "Campaign",
+                                order.campaignId ? (
+                                    <Link href={`/campaigns/${order.campaignId}`} className="text-primary underline-offset-4 hover:underline">
+                                        {order.campaignName ?? order.campaignId}
+                                    </Link>
+                                ) : (
+                                    (order.campaignName ?? "—")
+                                ),
+                            ],
                             [
                                 "Agent",
                                 // Not linked in live mode: the agents directory
@@ -323,6 +362,65 @@ export function OrderDetail({ order, onChanged }: { order: Order; onChanged?: ()
                     <OrderPrintingCard order={order} onChanged={onChanged} />
                     <OrderPayoutCard order={order} onChanged={onChanged} />
                 </div>
+            )}
+
+            {/* SI-N: the publisher's own self-install proof — the photos, and what they wrote beside them. */}
+            {order.selfInstall && (
+                <Card className="rounded-lg border-border p-5 shadow-none" data-testid="order-self-install">
+                    <h3 className="text-base font-semibold text-foreground">Self-install</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        The publisher put this one up themselves: the site as it was, the creative once installed, and their note.
+                        {order.selfInstall.checkedInAt ? ` Checked in ${formatDateTime(order.selfInstall.checkedInAt)}.` : ""}
+                    </p>
+                    <div className="mt-4 grid gap-4 md:grid-cols-[1fr_minmax(0,320px)]">
+                        <div>
+                            {order.selfInstall.conditionPhotoUrls.length > 0 && (
+                                <div>
+                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Before</p>
+                                    <ul className="mt-1.5 flex flex-wrap gap-2">
+                                        {order.selfInstall.conditionPhotoUrls.map((url, index) => (
+                                            <li key={url}>
+                                                <PrivateFile src={url} alt={`Site condition ${index + 1}`} className="size-24 rounded-md object-cover" frameClassName="size-24 rounded-md" />
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {(order.selfInstall.installPhotoUrl || order.selfInstall.collectPhotoUrl) && (
+                                <div className={order.selfInstall.conditionPhotoUrls.length > 0 ? "mt-3" : undefined}>
+                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                        {order.selfInstall.installPhotoUrl ? "Installed" : "Prints collected"}
+                                    </p>
+                                    <ul className="mt-1.5 flex flex-wrap gap-2">
+                                        {order.selfInstall.collectPhotoUrl && (
+                                            <li>
+                                                <PrivateFile src={order.selfInstall.collectPhotoUrl} alt="Prints collected" className="size-24 rounded-md object-cover" frameClassName="size-24 rounded-md" />
+                                            </li>
+                                        )}
+                                        {order.selfInstall.installPhotoUrl && (
+                                            <li>
+                                                <PrivateFile src={order.selfInstall.installPhotoUrl} alt="Installed creative" className="size-24 rounded-md object-cover" frameClassName="size-24 rounded-md" />
+                                            </li>
+                                        )}
+                                    </ul>
+                                </div>
+                            )}
+                            {order.selfInstall.conditionPhotoUrls.length === 0 && !order.selfInstall.installPhotoUrl && !order.selfInstall.collectPhotoUrl && (
+                                <p className="text-sm text-muted-foreground">No photos sent yet.</p>
+                            )}
+                        </div>
+                        <div>
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Publisher&rsquo;s note</p>
+                            {order.selfInstall.notes ? (
+                                <p className="mt-1.5 whitespace-pre-line rounded-md bg-muted/60 px-3 py-2 text-sm text-foreground" data-testid="order-self-install-notes">
+                                    {order.selfInstall.notes}
+                                </p>
+                            ) : (
+                                <p className="mt-1.5 text-sm text-muted-foreground">Nothing written.</p>
+                            )}
+                        </div>
+                    </div>
+                </Card>
             )}
 
             {/* A12: the steps and the offer on each visit — ops dispatches from here. */}

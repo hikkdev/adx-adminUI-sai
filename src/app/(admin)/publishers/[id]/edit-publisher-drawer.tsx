@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PublisherOnboardingForm, valuesOf } from "@/components/adx/publisher-onboarding-form";
 import { useAuth } from "@/lib/auth";
+import type { KycEntityType } from "@/services/kyc-entity-types";
 import type { Publisher } from "@/types";
 
 /**
@@ -15,7 +16,9 @@ import type { Publisher } from "@/types";
  * supply side of the permission groups); without it the
  * button is not drawn. A publisher with no account yet who is given a
  * first name here gets one opened and linked, the way a fresh onboarding
- * does.
+ * does. Phase D: the entity type is edited here too, beside the account
+ * type; on a verified publisher only Individual → a business form is
+ * taken, and that restarts verification.
  */
 export function EditPublisherDrawer({ publisher, onChanged }: { publisher: Publisher; onChanged: () => void }) {
     const { can } = useAuth();
@@ -40,6 +43,7 @@ export function EditPublisherDrawer({ publisher, onChanged }: { publisher: Publi
                             mode="edit"
                             publisherId={publisher.id}
                             initial={valuesOf(publisher)}
+                            entity={{ value: publisher.entityType as KycEntityType | null, verified: publisher.kycStatus === "VERIFIED", stored: publisher.entityTypeStored }}
                             onSaved={() => {
                                 setOpen(false);
                                 onChanged();

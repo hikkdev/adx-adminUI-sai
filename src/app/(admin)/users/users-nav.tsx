@@ -17,6 +17,8 @@ export const USERS_NAV_ITEMS: { label: string; href: string; exact?: boolean }[]
     { label: "Accounts", href: "/users/accounts" },
     /* Lot K2 — the console's own operators: role, second factor, sign-in. */
     { label: "Admin users", href: "/users/admins" },
+    /* The role builder: what each admin role can see and do (was `/roles`). */
+    { label: "Roles & permissions", href: "/users/roles" },
     /* Package CD — Lot A's closure and erasure desks. */
     { label: "Closure cases", href: "/users/closures" },
     { label: "Erasure requests", href: "/users/erasure" },

@@ -26,8 +26,8 @@ import { countDelta, moneyDelta, moneyAsNumber, shiftDay, todayIST, type Delta }
 /* The sections                                                        */
 /* ------------------------------------------------------------------ */
 
-// LH9: the Leads section joined the six user sections.
-export const SECTIONS = ["publishers", "advertisers", "agents", "print-partners", "employees", "users", "leads"] as const;
+// LH9: the Leads section joined the six user sections; Listings joined on 2 Oct 2026, Campaigns the same day.
+export const SECTIONS = ["publishers", "advertisers", "agents", "print-partners", "employees", "users", "leads", "listings", "campaigns"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export interface SectionMeta {
@@ -51,7 +51,7 @@ export const SECTION_META: Record<Section, SectionMeta> = {
     "print-partners": {
         label: "Print partners",
         root: "/print-partners",
-        directory: "/print-partners/roster",
+        directory: "/print-partners/directory",
         kycQueue: "/kyc/print-partners",
         cityFilter: true,
         domain: "printPartners",
@@ -60,6 +60,10 @@ export const SECTION_META: Record<Section, SectionMeta> = {
     users: { label: "Users", root: "/users", directory: "/users/accounts", kycQueue: null, cityFilter: true, domain: "users" },
     // LH9: the list moved to `/leads/list` so the overview sits at the section's root like every other section's.
     leads: { label: "Leads", root: "/leads", directory: "/leads/list", kycQueue: null, cityFilter: true, domain: "leads" },
+    // 2 Oct 2026: the table moved to `/listings/directory` so the overview sits at the section's root, as Publishers does.
+    listings: { label: "Listings", root: "/listings", directory: "/listings/directory", kycQueue: null, cityFilter: true, domain: "listings" },
+    // 2 Oct 2026: the campaigns list moved to `/campaigns/directory` so the overview sits at the section's root, as Listings did.
+    campaigns: { label: "Campaigns", root: "/campaigns", directory: "/campaigns/directory", kycQueue: null, cityFilter: true, domain: "campaigns" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -192,17 +196,52 @@ interface Base {
     generatedAt: string;
 }
 
+/**
+ * CP-2: what an onboarding cost over the window.
+ *
+ * `perOnboarding` is the money that buys accounts over the accounts agents
+ * actually brought. It divides by the AGENT-led onboardings only — an
+ * account that walked in through the app cost no agent anything, and folding
+ * it into the denominator would flatter the figure. `selfServe` is beside it
+ * so the split is visible rather than hidden.
+ *
+ * `basis` is salary committed plus rewards paid; the per-onboarding
+ * commission sits outside it and `allInPerOnboarding` adds it back over the
+ * same denominator.
+ *
+ * Null means "not recorded", never "free": either nothing was onboarded, or
+ * no agent here has a salary on record. The screens say which.
+ */
+export interface CostBlock {
+    side: "PUBLISHER" | "ADVERTISER" | "ALL";
+    perOnboarding: Money | null;
+    allInPerOnboarding: Money | null;
+    salary: Money;
+    rewards: Money;
+    commission: Money;
+    basis: Money;
+    allIn: Money;
+    onboardings: { byAgent: number; selfServe: number };
+    /** How many agents of this side have a salary on record — the figure's coverage. */
+    agentsOnTerms: number;
+}
+
+/** CP-2: the same figure per city, folded onto the `byCity` row. */
+export type CostCityColumns = { cost: Money | null; onboardings: number };
+
 export interface PublishersOverview extends Base {
     section: "publishers";
     tiles: { total: Figure; newInWindow: Figure; active: Figure; kyc: KycByState; suspended: Figure; closed: Figure };
     funnel: SupplyFunnel;
     series: { newPublishers: Series; firstListingsPublished: Series; firstBookings: Series };
     breakdowns: {
-        byCity: ListPage<CityRow & { listings: number; gmv: Money }>;
+        byCity: ListPage<CityRow & { listings: number; gmv: Money } & CostCityColumns>;
         byCategory: ListPage<{ key: string; label: string; href: string; publishers: number; listings: number }>;
         bySubscriptionTier: ListPage<CountRow>;
         byAgent: ListPage<LabelledCountRow>;
     };
+    /** CP-2: what a publisher onboarded cost in agent money over the window. */
+    cost: CostBlock;
     top: { byEarnings: ListPage<LabelledSumRow> };
     money: { earningsPaid: MoneyFigure; payoutsReleased: MoneyFigure };
 }
@@ -213,11 +252,13 @@ export interface AdvertisersOverview extends Base {
     funnel: AdvertiserFunnel;
     series: { newAdvertisers: Series; firstCampaigns: Series; spend: MoneySeries };
     breakdowns: {
-        byCity: ListPage<CityRow & { spend: Money }>;
+        byCity: ListPage<CityRow & { spend: Money } & CostCityColumns>;
         byIndustry: ListPage<CountRow>;
         byPackageTier: ListPage<CountRow>;
         byAgent: ListPage<LabelledCountRow>;
     };
+    /** CP-2: what an advertiser onboarded cost in agent money over the window. */
+    cost: CostBlock;
     top: { bySpend: ListPage<LabelledSumRow> };
     money: { walletBalanceHeld: MoneyFigure; topUps: MoneyFigure };
 }
@@ -234,7 +275,9 @@ export interface AgentsOverview extends Base {
         suspended: Figure;
     };
     series: { onboardingsDone: Series; visitsCompleted: Series; jobsCompleted: Series };
-    breakdowns: { byCity: ListPage<CityRow>; byTier: ListPage<CountRow> };
+    /** CP-2: the blended cost — both sides over one denominator. It never equals the two side figures added up: an agent holding both roles counts on both. */
+    cost: CostBlock;
+    breakdowns: { byCity: ListPage<CityRow & CostCityColumns>; byTier: ListPage<CountRow> };
     top: { byCommission: ListPage<LabelledSumRow>; leaderboard: LeaderboardView | null };
     money: { incentivesPaid: MoneyFigure };
 }
@@ -344,6 +387,87 @@ export interface LeadsOverview extends Base {
     money: { incentives: MoneyFigure; topUps: MoneyFigure };
 }
 
+/**
+ * The Listings overview (2 Oct 2026). The inventory now and over the
+ * window — live, awaiting review and suspended are states (no previous);
+ * the section's three queues as their tabs count them; the inventory by
+ * status, city, category and publisher.
+ */
+export interface ListingsOverview extends Base {
+    section: "listings";
+    tiles: {
+        total: Figure;
+        live: Figure;
+        awaitingReview: Figure;
+        suspended: Figure;
+        newInWindow: Figure;
+        published: Figure;
+        bookings: Figure;
+    };
+    series: { newListings: Series; published: Series };
+    work: {
+        renewals: { due: number; lapsed: number; horizonDays: number };
+        claimsOpen: number;
+        verification: { due: number; lapsed: number; horizonDays: number };
+    };
+    breakdowns: {
+        byStatus: ListPage<CountRow>;
+        byCity: ListPage<CityRow & { live: number; gmv: Money }>;
+        byCategory: ListPage<{ key: string; label: string; href: string; count: number; live: number; gmv: Money }>;
+        byPublisher: ListPage<LabelledCountRow & { live: number }>;
+    };
+    money: { gmv: MoneyFigure };
+}
+
+/**
+ * The Campaigns overview (2 Oct 2026). Live, scheduled, awaiting payment
+ * and waiting to launch are states (no previous); paid, completed,
+ * cancelled, the booked value (campaigns paid in the window) and the
+ * engagement are the window's. The work lists look `horizonDays` ahead,
+ * each with the console address it opens; waiting to launch is split by
+ * reason, each reason the launch queue's own filter.
+ */
+export interface CampaignWorkList {
+    count: number;
+    horizonDays: number;
+    href: string;
+}
+
+export interface CampaignsOverview extends Base {
+    section: "campaigns";
+    tiles: {
+        live: Figure;
+        scheduled: Figure;
+        awaitingPayment: Figure;
+        /** Paid (or reservation-fee-paid) and blocked — the launch queue's size. A state. */
+        waitingToLaunch: Figure;
+        paid: Figure;
+        completed: Figure;
+        cancelled: Figure;
+        scans: Figure;
+        landingViews: Figure;
+        ctaClicks: Figure;
+        enquiries: Figure;
+    };
+    series: { bookedValue: MoneySeries; scans: Series };
+    work: {
+        /** SCHEDULED campaigns whose flight overlaps the next `horizonDays` days. */
+        launchingSoon: CampaignWorkList;
+        /** LIVE campaigns ending within the next `horizonDays` days. */
+        endingSoon: CampaignWorkList;
+        /** The launch queue by what each campaign waits on (a campaign waiting on two counts under both). */
+        waitingToLaunch: { total: number; href: string; byReason: ListPage<CountRow> };
+    };
+    breakdowns: {
+        byStatus: ListPage<CountRow>;
+        byCity: ListPage<CityRow & { live: number; bookedValue: Money }>;
+        byGoal: ListPage<CountRow & { live: number }>;
+        /** The ten advertisers whose campaigns paid in the window are worth the most. */
+        byAdvertiser: ListPage<LabelledSumRow & { count: number }>;
+    };
+    money: { bookedValue: MoneyFigure };
+}
+
 /** "5.7 days · median 5" — the time to convert, or what it is when nothing converted. */
 export function timeToConvertLine(time: LeadsOverview["conversion"]["timeToConvert"]): string {
     if (time.meanDays === null) return "Nothing converted in this window";
@@ -370,7 +494,11 @@ export type SectionOverviewOf<S extends Section> = S extends "publishers"
             ? EmployeesOverviewSection
             : S extends "leads"
               ? LeadsOverview
-              : UsersOverview;
+              : S extends "listings"
+                ? ListingsOverview
+                : S extends "campaigns"
+                  ? CampaignsOverview
+                  : UsersOverview;
 
 /* ------------------------------------------------------------------ */
 /* The window, in the URL                                              */
@@ -592,6 +720,9 @@ export function foldMoneySeries(series: MoneySeries, format: (amount: Money) => 
  * - a users role (`/users?role=`) opens the accounts directory, which
  *   keeps the role facet in its URL;
  * - a department (`/hr/departments/:id`) opens the console's department page;
+ * - the listings directory (`/listings/directory?status=` / `?category=`)
+ *   opens as it is, from any section — the directory keeps both facets in
+ *   its URL;
  * - anything else (a listing category, an employee work mode) has no
  *   route that filters on it, so the row stays a label.
  */
@@ -603,6 +734,10 @@ export function consoleHref(section: Section, href: string | null, window: Overv
     if (record.test(path) && !query) return href;
     // LH9: the leads list and the sources desk keep their facets in the URL, so those rows open as they are.
     if (section === "leads" && (path === "/leads/list" || path === "/leads/sources")) return href;
+    if (path === "/listings/directory") return href;
+    /* 2 Oct 2026: the campaigns list and the launch queue keep their facets in the URL, so those rows open as they are. */
+    if (path === "/campaigns/directory" || path === "/campaigns/launch-queue") return href;
+    if (/^\/campaigns\/[^/?]+$/.test(path) && !query && path !== "/campaigns/landing-pages") return href;
     if (path.startsWith("/hr/departments/")) return `/employees/departments/${path.slice("/hr/departments/".length)}`;
     const meta = SECTION_META[section];
     if (path === meta.root && params.has("city") && meta.cityFilter) {

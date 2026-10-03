@@ -1,6 +1,9 @@
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
+import type { KycEntityType } from "./kyc-entity-types";
 import { shapeKycSummary } from "./kyc-state";
+import { accountStateOf, accountStatusCountsOf } from "./account-state";
+import { rosterParams, type PartyRosterPage, type PartyRosterQuery } from "./party-roster";
 import type { WireKycSummary } from "@/types";
 import type {
     Advertiser,
@@ -30,6 +33,9 @@ import type {
  */
 
 type Paged<T> = { rows: T[]; nextCursor: string | null };
+
+/** The cursor read's ceiling on `limit` — one directory read. */
+export const ADVERTISER_ROSTER_PAGE_SIZE = 200;
 
 export type TopUpMethod = "BANK_TRANSFER" | "CHEQUE";
 
@@ -94,7 +100,17 @@ export interface RefundRequestInput {
 }
 
 /** The advertiser row as the API sends it — no derived `status`; `industry` absent from a server one release behind; N3-B: `kyc` the six facts on the by-id read. */
-type WireAdvertiser = Omit<Advertiser, "status" | "joinedAt" | "industry" | "kyc"> & { createdAt: string; industry?: string | null; kyc?: WireKycSummary | null };
+type WireAdvertiser = Omit<Advertiser, "status" | "joinedAt" | "industry" | "kyc" | "contact" | "accountState"> & {
+    createdAt: string;
+    /** 2 Oct 2026: ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED) — on a roster row. Absent from a server one release behind. */
+    accountState?: string | null;
+
+    industry?: string | null;
+    kyc?: WireKycSummary | null;
+    /** The advertiser's phone — the column the backend holds (`Advertiser.mobile`); `contact` is the console's name for it. */
+    mobile?: string | null;
+    contact?: string | null;
+};
 
 /**
  * Whether an account can actually spend.
@@ -120,7 +136,8 @@ export function shapeAdvertiser(raw: WireAdvertiser): Advertiser {
         displayId: raw.displayId ?? null,
         userId: raw.userId ?? null,
         user: raw.user ?? null,
-        contact: raw.contact,
+        // 29 Sep 2026: the roster read `contact`, which the backend never sends — the phone is `mobile`.
+        contact: raw.contact ?? raw.mobile ?? "",
         email: raw.email ?? null,
         type: raw.type,
         companyName: raw.companyName ?? null,
@@ -137,10 +154,19 @@ export function shapeAdvertiser(raw: WireAdvertiser): Advertiser {
         suspensionScopes: raw.suspensionScopes ?? [],
         suspensionReason: raw.suspensionReason ?? null,
         suspendedAt: raw.suspendedAt ?? null,
+        accountState: accountStateOf(raw.accountState),
         // QR-15: the billing address, the person behind the account (the by-id read) and who onboarded them.
         billingAddress: raw.billingAddress ?? null,
+        // AD-1: the PIN and the country on the billing address.
+        postalCode: raw.postalCode ?? null,
+        country: raw.country ?? null,
         person: raw.person ?? null,
         onboarding: raw.onboarding ?? null,
+        // 29 Sep 2026: the roster read counts the campaigns; the by-id read does not.
+        campaignCount: raw.campaignCount ?? null,
+        // Phase D: the entity type the advertiser verifies as; null means it is asked at the Digio start.
+        entityType: raw.entityType ?? null,
+        entityTypeStored: raw.entityTypeStored ?? false,
     };
 }
 
@@ -179,6 +205,12 @@ export interface CreateAdvertiserInput extends AdvertiserDeskFields {
     industry?: string;
     city?: string;
     state?: string;
+    /**
+     * The precise legal form (1 Oct 2026), chosen beside DR 08's account
+     * type. Optional: while none is sent the server reads it off `type`, or
+     * asks it when verification starts.
+     */
+    entityType?: KycEntityType;
 }
 
 /**
@@ -195,6 +227,9 @@ export interface AdvertiserDeskFields {
     dateOfBirth?: string;
     gender?: "MALE" | "FEMALE" | "OTHER" | "PREFER_NOT_TO_SAY";
     billingAddress?: string;
+    /** AD-1 (DR 12 board 04): six digits, and the country — both on the billing address. */
+    postalCode?: string;
+    country?: string;
     gstin?: string;
 }
 
@@ -207,9 +242,16 @@ export interface UpdateAdvertiserInput extends AdvertiserDeskFields {
     industry?: string | null;
     city?: string;
     state?: string;
+    /**
+     * Phase D: the entity type, sent only when the desk changed it. On a
+     * VERIFIED account only Individual → a business form is taken, and it
+     * fires a fresh Digio request (503/502 when Digio fails); any other
+     * change is 409 `KYC_LOCKED` and nothing in the patch is written.
+     */
+    entityType?: KycEntityType;
 }
 
-const TEXT_KEYS = ["name", "email", "companyName", "city", "state", "firstName", "lastName", "dateOfBirth", "gender", "billingAddress", "gstin"] as const;
+const TEXT_KEYS = ["name", "email", "companyName", "city", "state", "firstName", "lastName", "dateOfBirth", "gender", "billingAddress", "postalCode", "country", "gstin"] as const;
 
 /** The desk's fields onto a body: trimmed text where given, blanks left off, the industry as sent (null clears it). */
 export function advertiserBody(input: UpdateAdvertiserInput): Record<string, unknown> {
@@ -220,6 +262,7 @@ export function advertiserBody(input: UpdateAdvertiserInput): Record<string, unk
     }
     if (input.type) body.type = input.type;
     if (input.industry === null || (typeof input.industry === "string" && input.industry.trim() !== "")) body.industry = input.industry;
+    if (input.entityType) body.entityType = input.entityType;
     return body;
 }
 
@@ -273,8 +316,28 @@ export const advertiserService = {
         shapeAdvertiser(await mutable().post<WireAdvertiser>("/advertisers", { ...advertiserBody(input), mobile: input.mobile.trim(), onBehalf: true })),
 
     list: async (): Promise<Advertiser[]> => {
-        const page = await live().get<Paged<WireAdvertiser>>("/advertisers?limit=200");
+        /* 2 Oct 2026: the roster answers working accounts by default; a picker or a name lookup needs everyone. */
+        const page = await live().get<Paged<WireAdvertiser>>("/advertisers?limit=200&status=ALL");
         return page.rows.map(shapeAdvertiser);
+    },
+
+    /**
+     * 29 Sep 2026 — the directory, cut on the server by the five filters
+     * every party roster takes (`services/party-roster`), a cursor page of
+     * the largest size the route allows, with the count of every row the
+     * filters match beside it.
+     */
+    rosterPage: async (query: PartyRosterQuery, cursor: string | null): Promise<PartyRosterPage<Advertiser>> => {
+        const params = rosterParams(query);
+        params.set("limit", String(ADVERTISER_ROSTER_PAGE_SIZE));
+        if (cursor) params.set("cursor", cursor);
+        const page = await live().get<Paged<WireAdvertiser> & { total?: number; counts?: unknown; statusCounts?: unknown }>(`/advertisers?${params.toString()}`);
+        return {
+            rows: (page.rows ?? []).map(shapeAdvertiser),
+            nextCursor: page.nextCursor ?? null,
+            total: page.total ?? null,
+            statusCounts: accountStatusCountsOf(page),
+        };
     },
 
     /**
@@ -285,7 +348,8 @@ export const advertiserService = {
     search: async (q: string, limit = 25): Promise<Advertiser[]> => {
         const needle = q.trim();
         if (!needle) return [];
-        const params = new URLSearchParams({ q: needle, limit: String(limit) });
+        /* 2 Oct 2026: the roster answers working accounts by default; a picker or a name lookup needs everyone. */
+        const params = new URLSearchParams({ q: needle, limit: String(limit), status: "ALL" });
         const page = await mutable().get<Paged<WireAdvertiser>>(`/advertisers?${params.toString()}`);
         return (page.rows ?? []).map(shapeAdvertiser);
     },

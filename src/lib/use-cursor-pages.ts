@@ -10,9 +10,9 @@ export interface CursorPageOf<T> {
     nextCursor: string | null;
 }
 
-export interface CursorPages<T> {
+export interface CursorPages<T, P extends CursorPageOf<T> = CursorPageOf<T>> {
     /** The first page as a resource — loading, error and reload exactly as `useApiResource` gives them. */
-    resource: ApiResource<CursorPageOf<T>>;
+    resource: ApiResource<P>;
     /** Every row read so far: the first page and the pages loaded after it, in order. */
     rows: T[];
     /** The server said there is a page after the last one read. */
@@ -42,9 +42,9 @@ export interface CursorPages<T> {
  * reload of the first page drops them without an effect: rows from before
  * a mutation never sit under rows from after it.
  */
-export function useCursorPages<T>(key: string, fetchPage: (cursor: string | null) => Promise<CursorPageOf<T>>): CursorPages<T> {
-    const resource = useApiResource<CursorPageOf<T>>(key, () => fetchPage(null));
-    const [extra, setExtra] = React.useState<{ after: CursorPageOf<T>; rows: T[]; nextCursor: string | null } | null>(null);
+export function useCursorPages<T, P extends CursorPageOf<T> = CursorPageOf<T>>(key: string, fetchPage: (cursor: string | null) => Promise<P>): CursorPages<T, P> {
+    const resource = useApiResource<P>(key, () => fetchPage(null));
+    const [extra, setExtra] = React.useState<{ after: P; rows: T[]; nextCursor: string | null } | null>(null);
     const [loadingMore, setLoadingMore] = React.useState(false);
     const [moreError, setMoreError] = React.useState<string | null>(null);
 

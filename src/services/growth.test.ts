@@ -230,6 +230,8 @@ const wireCard = (over: Partial<WireMilestoneCard> = {}): WireMilestoneCard => (
     claimedAt: null,
     claimable: false,
     link: "EARNINGS",
+    // CP-5: a revenue card counts no onboardings, so the quota never judges it.
+    stretch: null,
     ...over,
 });
 

@@ -1,241 +1,148 @@
 "use client";
 
-import { ONBOARDING_SOURCE_LABEL, onboardingLine, type OnboardingSource } from "@/types";
-
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Plus, Tag } from "lucide-react";
+import { Plus, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { DataTable, SortableHeader, selectionColumn } from "@/components/adx/data-table";
 import { EmptyState } from "@/components/adx/empty-state";
-import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { PageHeader } from "@/components/adx/page-header";
-import { StatusBadge } from "@/components/adx/status-badge";
-import { VerifiedTick } from "@/components/adx/verified-tick";
-import { SuspendedChip } from "@/components/adx/suspended-chip";
-import { KYC_TONE, kycLabel, type RosterPublisher } from "@/services/supply";
+import { partyRosterColumns, type PartyRosterSpec, type RosterRowAction } from "@/components/adx/party-roster-columns";
+import { PartyRosterFilterBar, type PartyRosterFilterSpec, type PartyRosterFilterState } from "@/components/adx/party-roster-filter-bar";
+import { kycReviewHref, useRosterSuspension, type SuspensionRowFacts } from "@/components/adx/party-roster-row-actions";
+import { PartyRosterTable, type PartyRosterView } from "@/components/adx/party-roster-table";
+import { accountStatusOptions } from "@/services/account-state";
+import { ONBOARDING_DOOR_OPTIONS, rosterFiltersActive } from "@/services/party-roster";
+import { PUBLISHER_TYPES, PUBLISHER_TYPE_LABEL } from "@/services/publishers";
+import type { RosterPublisher } from "@/services/supply";
+import { onboardingLine } from "@/types";
 import { CreatePublisherDialog } from "./create-publisher-dialog";
 
 interface PublishersTableProps {
-    publishers: RosterPublisher[];
+    view: PartyRosterView<RosterPublisher>;
+    filters: PartyRosterFilterState;
     onChanged: () => void;
 }
 
-/** The KYC states a publisher record can be in, as the API words them. */
-const KYC_FILTERS = ["VERIFIED", "SUBMITTED", "UNDER_REVIEW", "REJECTED", "PENDING", "NOT_STARTED"];
+/** `PublisherType` labelled; a value the enum grows reads as itself. */
+const publisherTypeLabel = (type: string | null): string | null =>
+    type ? ((PUBLISHER_TYPE_LABEL as Partial<Record<string, string>>)[type] ?? type) : null;
 
-export function PublishersTable({ publishers, onChanged }: PublishersTableProps) {
+/** The bar's publisher half: the QR-14 doors and the four publisher types. */
+export const PUBLISHER_FILTER_SPEC: PartyRosterFilterSpec = {
+    searchPlaceholder: "Search name, ID, phone, email, city",
+    doors: ONBOARDING_DOOR_OPTIONS,
+    types: PUBLISHER_TYPES.map((type) => ({ value: type, label: PUBLISHER_TYPE_LABEL[type] })),
+    idPrefix: "publishers",
+    statuses: accountStatusOptions(false),
+};
+
+/**
+ * The publisher roster — 29 Sep 2026, on the shared party layout
+ * (`party-roster-columns`): Name · Contact · Type · City · KYC status ·
+ * Activity (the spots) · Joined · Onboarded, and the shared filter bar.
+ * The row menu is the shared one: View details, Review KYC, then Suspend…
+ * or Reinstate.
+ */
+export function publisherRosterSpec(
+    open: (row: RosterPublisher) => void,
+    reviewKyc: (row: RosterPublisher) => void,
+    statusActions?: (row: RosterPublisher) => RosterRowAction[],
+): PartyRosterSpec<RosterPublisher> {
+    return {
+        idOwner: "PUBLISHER",
+        name: (row) => row.name,
+        displayId: (row) => row.displayId,
+        mobile: (row) => row.mobile,
+        email: (row) => row.email,
+        type: (row) => publisherTypeLabel(row.type),
+        city: (row) => row.city,
+        kycState: (row) => row.kyc.state,
+        suspensionScopes: (row) => row.suspensionScopes,
+        accountState: (row) => row.accountState,
+        activity: { count: (row) => row.listingCount, noun: ["spot", "spots"], title: "Spots listed" },
+        joinedAt: (row) => row.createdAt,
+        // QR-14: the door and the person — "Desk · Asha Rao (Ops manager)"; a row
+        // older than the stamp falls back to what the agent link says.
+        onboarded: (row) => (row.onboarding?.via ? onboardingLine(row.onboarding) : row.onboardedByAgent ? "Onboarded by agent" : "Self-serve"),
+        open,
+        reviewKyc,
+        statusActions,
+    };
+}
+
+/** The publisher row as the suspension items read it. */
+export const publisherSuspensionFacts = (row: RosterPublisher): SuspensionRowFacts => ({
+    id: row.id,
+    name: row.name,
+    scopes: row.suspensionScopes,
+    accountState: row.accountState,
+});
+
+/** "Review KYC" for a publisher row: the case when there is one, else the queue searched for it. */
+export const publisherKycHref = (row: RosterPublisher): string =>
+    kycReviewHref("PUBLISHER", { id: row.id, kycId: row.kyc.kycId, search: row.displayId ?? row.name });
+
+export function PublishersTable({ view, filters, onChanged }: PublishersTableProps) {
     const router = useRouter();
     const [createOpen, setCreateOpen] = React.useState(false);
-    const [kycFilter, setKycFilter] = React.useState<string>("all");
-    // QR-14: the door a row came through.
-    const [doorFilter, setDoorFilter] = React.useState<string>("all");
+    const suspension = useRosterSuspension("PUBLISHER", "PUBLISHER", onChanged);
+    const { statusActions } = suspension;
 
-    const filtered = React.useMemo(
+    const columns = React.useMemo(
         () =>
-            (kycFilter === "all" ? publishers : publishers.filter((publisher) => publisher.kycStatus === kycFilter)).filter(
-                (publisher) => doorFilter === "all" || (publisher.onboarding?.via ?? (publisher.onboardedByAgent ? "AGENT" : "SELF")) === doorFilter,
+            partyRosterColumns(
+                publisherRosterSpec(
+                    (row) => router.push(`/publishers/${row.id}`),
+                    (row) => router.push(publisherKycHref(row)),
+                    (row) => statusActions(publisherSuspensionFacts(row)),
                 ),
-        [publishers, kycFilter, doorFilter]
+            ),
+        [router, statusActions],
     );
 
-    const columns = React.useMemo<ColumnDef<RosterPublisher>[]>(
-        () => [
-            selectionColumn<RosterPublisher>(),
-            {
-                id: "name",
-                accessorKey: "name",
-                header: ({ column }) => <SortableHeader column={column}>Name</SortableHeader>,
-                cell: ({ row }) => (
-                    <div className="flex items-center gap-2.5">
-                        <InitialsAvatar name={row.original.name} size="sm" />
-                        <div className="min-w-0">
-                            <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                                {row.original.name}
-                                <VerifiedTick kycStatus={row.original.kycStatus} />
-                            </span>
-                            <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                                {row.original.displayId ?? "No identifier yet"}
-                            </p>
-                        </div>
-                    </div>
-                ),
-            },
-            {
-                id: "contact",
-                accessorKey: "mobile",
-                header: "Mobile",
-                cell: ({ row }) => (
-                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                        {row.original.mobile}
-                    </span>
-                ),
-            },
-            {
-                id: "city",
-                accessorFn: (publisher) => publisher.city ?? "",
-                header: "City",
-                cell: ({ row }) => (
-                    <span className="text-muted-foreground">{row.original.city ?? "—"}</span>
-                ),
-            },
-            {
-                id: "arrived",
-                accessorFn: (publisher) => onboardingLine(publisher.onboarding) ?? (publisher.onboardedByAgent ? "Agent" : "Self-serve"),
-                header: "Onboarded",
-                cell: ({ row }) => (
-                    // QR-14: the door and the person — "Desk · Asha Rao (Ops manager)"; a row
-                    // older than the stamp falls back to what the agent link says.
-                    <span className="text-muted-foreground" data-testid={`onboarded-${row.original.id}`}>
-                        {row.original.onboarding?.via ? onboardingLine(row.original.onboarding) : row.original.onboardedByAgent ? "Onboarded by agent" : "Self-serve"}
-                    </span>
-                ),
-            },
-            {
-                id: "sites",
-                accessorKey: "listingCount",
-                header: ({ column }) => <SortableHeader column={column}>Spots</SortableHeader>,
-                cell: ({ row }) => (
-                    <span className="tabular-nums">{row.original.listingCount}</span>
-                ),
-            },
-            {
-                id: "kyc-status",
-                accessorKey: "kycStatus",
-                header: "KYC status",
-                cell: ({ row }) => (
-                    <span className="inline-flex flex-wrap items-center gap-1.5">
-                        <StatusBadge
-                            status={{
-                                label: kycLabel(row.original.kycStatus),
-                                tone: KYC_TONE[row.original.kycStatus] ?? "neutral",
-                            }}
-                        />
-                        {/* Lot A: a publisher stays KYC-verified while suspended; the chip says which. */}
-                        <SuspendedChip scopes={row.original.suspensionScopes} />
-                    </span>
-                ),
-            },
-            {
-                id: "actions",
-                enableHiding: false,
-                size: 48,
-                cell: ({ row }) => (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-8">
-                                <MoreHorizontal className="size-4" />
-                                <span className="sr-only">Row actions</span>
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-52">
-                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            {/* "Send KYC reminder", "Suspend account" and "Export
-                                CSV" used to live here and each only fired a
-                                success toast — no endpoint, nothing written.
-                                They are gone rather than left looking real;
-                                what remains navigates somewhere that acts. */}
-                            <DropdownMenuItem
-                                onSelect={() => router.push(`/publishers/${row.original.id}`)}
-                            >
-                                View details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => router.push(`/kyc/${row.original.id}`)}>
-                                Review KYC
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                ),
-            },
-        ],
-        [router]
-    );
+    const filtered = rosterFiltersActive(filters.filters);
 
     return (
         <div className="space-y-5">
             <PageHeader
                 title="Publishers"
-                subtitle={`${publishers.length} on the marketplace`}
+                subtitle={view.total === null ? undefined : filtered ? `${view.total} match these filters` : `${view.total} on the marketplace`}
                 actions={
-                    <>
-                        {/* Lot D (Q43): the legacy book as CSV — validated, then committed. */}
-                        <Button variant="outline" className="bg-card" asChild>
-                            <Link href="/publishers/import">Import publishers</Link>
-                        </Button>
-                        <Button onClick={() => setCreateOpen(true)}>
-                            <Plus className="mr-1.5 size-4" />
-                            Onboard a publisher
-                        </Button>
-                    </>
+                    /* 2 Oct 2026: the one primary add button, as on every directory — the CSV import is the section's Import tab. */
+                    <Button onClick={() => setCreateOpen(true)}>
+                        <Plus className="mr-1.5 size-4" />
+                        Onboard a publisher
+                    </Button>
                 }
             />
 
-            <DataTable
+            <PartyRosterTable
                 columns={columns}
-                data={filtered}
-                searchPlaceholder="Search publishers, identifier, city"
-                initialPageSize={10}
+                view={view}
+                noun="publisher"
+                filterBar={<PartyRosterFilterBar spec={PUBLISHER_FILTER_SPEC} state={filters} refreshing={view.refreshing} statusCounts={view.statusCounts} />}
                 onRowClick={(publisher) => router.push(`/publishers/${publisher.id}`)}
-                toolbar={
-                    <div className="flex items-center gap-2">
-                    <Select value={doorFilter} onValueChange={setDoorFilter}>
-                        <SelectTrigger className="h-9 w-[190px]" aria-label="Onboarded via">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Every door</SelectItem>
-                            {(Object.keys(ONBOARDING_SOURCE_LABEL) as OnboardingSource[]).map((door) => (
-                                <SelectItem key={door} value={door}>
-                                    {ONBOARDING_SOURCE_LABEL[door]}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Select value={kycFilter} onValueChange={setKycFilter}>
-                        <SelectTrigger className="h-9 w-[190px] bg-card">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">KYC: All</SelectItem>
-                            {KYC_FILTERS.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                    {kycLabel(status)}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    </div>
-                }
+                getRowId={(publisher) => publisher.id}
                 emptyState={
-                    <EmptyState
-                        icon={Tag}
-                        title="No publishers yet"
-                        description="Publishers appear here once they sign up or an agent onboards them."
-                        action={
-                            <Button onClick={() => setCreateOpen(true)}>
-                                <Plus className="mr-1.5 size-4" />
-                                Onboard a publisher
-                            </Button>
-                        }
-                    />
+                    filtered ? (
+                        <EmptyState icon={Tag} title="No publisher matches" description="Nobody on the roster matches these filters." action={<Button variant="outline" className="bg-card" onClick={filters.clear}>Clear filters</Button>} />
+                    ) : (
+                        <EmptyState
+                            icon={Tag}
+                            title="No publishers yet"
+                            description="Publishers appear here once they sign up or an agent onboards them."
+                            action={
+                                <Button onClick={() => setCreateOpen(true)}>
+                                    <Plus className="mr-1.5 size-4" />
+                                    Onboard a publisher
+                                </Button>
+                            }
+                        />
+                    )
                 }
             />
+
+            {suspension.dialogs}
 
             <CreatePublisherDialog
                 open={createOpen}

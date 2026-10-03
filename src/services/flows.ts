@@ -111,6 +111,33 @@ export const flowService = {
         if (!source || !isLive(source.domain)) return null;
         return live().get<LadderInForce>(source.route);
     },
+
+    /**
+     * FL-3 (27 Sep 2026): the listing wizard the desk's Create listing form
+     * is drawn from — `flows.listing` off the public `GET /config`, the same
+     * read both apps make on boot. Null when the row does not hold one or the
+     * console is on fixtures; the form then says so rather than drawing a
+     * shape of its own.
+     */
+    listingFlow: async (): Promise<WizardFlow | null> => {
+        if (!isLive("flows")) return null;
+        const row = await http.get<Partial<ConfigDocument>>("/config");
+        const flow = row.flows?.[LISTING_FLOW_KEY];
+        return isWizardFlow(flow) ? flow : null;
+    },
+
+    /**
+     * FL-3: the onboarding ladder the desk's onboarding forms take their
+     * sections from — `flows.onboarding` off the same public read. Null
+     * when the row does not hold one; the forms then draw the code ladder
+     * the manifest falls back to, so the desk and the phone still agree.
+     */
+    onboardingTemplate: async (): Promise<OnboardingTemplate | null> => {
+        if (!isLive("flows")) return null;
+        const row = await http.get<Partial<ConfigDocument>>("/config");
+        const flow = row.flows?.[ONBOARDING_FLOW_KEY];
+        return isOnboardingTemplate(flow) ? flow : null;
+    },
 };
 
 /* ------------------------------------------------------------------ */

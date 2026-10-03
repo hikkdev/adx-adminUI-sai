@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { formatMoney, formatNumber } from "@/lib/format";
 import type { Delta } from "@/services/overview";
-import { figureDelta, moneyFigureDelta, type Figure, type MoneyFigure } from "@/services/section-overviews";
+import { figureDelta, moneyFigureDelta, type CostBlock, type Figure, type MoneyFigure } from "@/services/section-overviews";
 
 const deltaTone = { positive: "text-success", negative: "text-danger", neutral: "text-muted-foreground" } as const;
 const deltaIcon = { positive: ArrowUpRight, negative: ArrowDownRight, neutral: Minus } as const;
@@ -88,6 +88,58 @@ export function MoneyTile({ label, figure, hint, href, className }: { label: str
             value={formatMoney(figure.value)}
             delta={moneyFigureDelta(figure)}
             previous={figure.previous === null ? null : formatMoney(figure.previous)}
+            hint={hint}
+            href={href}
+            className={className}
+        />
+    );
+}
+
+
+/**
+ * CP-2: what an onboarding cost.
+ *
+ * Three things this tile refuses to do, each for a reason.
+ *
+ * It does **not** show a movement against the previous window: the platform
+ * computes no previous cost, and an arrow drawn from nothing would be a lie
+ * the eye believes before the caption does.
+ *
+ * It does **not** print ₹0 when the figure is null. Null means nothing is
+ * recorded — no salary against any agent here, or nothing onboarded at all —
+ * and "₹0.00" says the opposite of that. The tile names which it is.
+ *
+ * And it divides by the agent-led onboardings only, saying so: an account
+ * that signed itself up cost no agent anything, and burying it in the
+ * denominator would quietly flatter the number every month.
+ */
+export function CostTile({
+    label,
+    cost,
+    noun,
+    href,
+    className,
+}: {
+    label: string;
+    cost: CostBlock;
+    /** What was onboarded, singular — "publisher", "advertiser", "account". */
+    noun: string;
+    href?: string | null;
+    className?: string;
+}) {
+    const { byAgent, selfServe } = cost.onboardings;
+    const hint =
+        cost.perOnboarding === null
+            ? byAgent === 0
+                ? `No ${noun} was onboarded by an agent in this window`
+                : `${formatNumber(byAgent)} onboarded, but no agent here has a salary on record`
+            : `${formatNumber(byAgent)} by agents${selfServe > 0 ? `, ${formatNumber(selfServe)} self-serve` : ""} · ${formatMoney(cost.allInPerOnboarding ?? cost.perOnboarding)} with commission`;
+    return (
+        <StatTile
+            label={label}
+            value={cost.perOnboarding === null ? "Not recorded" : formatMoney(cost.perOnboarding)}
+            delta={null}
+            previous={null}
             hint={hint}
             href={href}
             className={className}

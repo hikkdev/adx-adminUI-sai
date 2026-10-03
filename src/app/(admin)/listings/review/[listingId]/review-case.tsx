@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Camera, FileText } from "lucide-react";
+import { Camera, FileText, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -23,9 +23,14 @@ import { EmptyState } from "@/components/adx/empty-state";
 import { MiniMap } from "@/components/adx/mini-map";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { DocumentReadingPanel } from "@/components/adx/document-reading";
+import { PrivateFileLink } from "@/components/adx/private-file";
+import { kindForDocument } from "@/services/document-reading";
+import { ID_LABEL, idLine } from "@/services/identifiers";
 import { ApiError } from "@/lib/api-client";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
+import { codeText } from "@/services/listing-record";
 import {
     ageLabel,
     approvalBlockers,
@@ -38,6 +43,7 @@ import {
     gateSentence,
     listingReviewService,
     PRICING_UNIT_LABEL,
+    SEND_BACK_OUTCOMES,
     sizeLabel,
     type ReviewCase,
     type ReviewDocument,
@@ -208,12 +214,13 @@ export function ReviewCaseView({ theCase, queue, onChanged }: Props) {
                                                         "—"
                                                     ),
                                                 ],
-                                                ["Publisher ID", theCase.publisher?.displayId ?? "—"],
+                                                /* 29 Sep 2026: each party id named by its kind — the publisher's account, the agent's profile. */
+                                                [ID_LABEL.PUBLISHER, theCase.publisher?.displayId ?? "—"],
                                                 ["Publisher mobile", theCase.publisherMobile ?? "—"],
                                                 [
                                                     "Listed by",
                                                     theCase.agent
-                                                        ? [theCase.agent.name, theCase.agent.displayId].filter(Boolean).join(" · ") || "An agent"
+                                                        ? [theCase.agent.name, idLine("AGENT", theCase.agent.displayId)].filter(Boolean).join(" · ") || "An agent"
                                                         : "The publisher themselves",
                                                 ],
                                                 ["Created", formatDate(theCase.createdAt)],
@@ -237,9 +244,9 @@ export function ReviewCaseView({ theCase, queue, onChanged }: Props) {
                                                 ],
                                                 ["Illumination", theCase.illumination ?? "—"],
                                                 ["Facing", theCase.facing ?? "—"],
-                                                ["Elevation", theCase.elevation ?? "—"],
-                                                ["Visibility", theCase.visibility ?? "—"],
-                                                ["Traffic grade", theCase.trafficGrade ?? "—"],
+                                                ["Elevation", theCase.elevation ? codeText("elevation", theCase.elevation) : "—"],
+                                                ["Viewing distance", theCase.visibility ? codeText("visibility", theCase.visibility) : "—"],
+                                                ["How busy", theCase.trafficGrade ? codeText("trafficGrade", theCase.trafficGrade) : "—"],
                                                 [
                                                     "Footfall",
                                                     theCase.estimatedDailyFootfall !== null
@@ -285,14 +292,9 @@ export function ReviewCaseView({ theCase, queue, onChanged }: Props) {
                                                 [
                                                     "Rate card",
                                                     theCase.rateCardUrl ? (
-                                                        <a
-                                                            href={theCase.rateCardUrl}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="underline-offset-4 hover:underline"
-                                                        >
+                                                        <PrivateFileLink href={theCase.rateCardUrl} fallbackError="The rate card could not be opened." className="underline-offset-4 hover:underline">
                                                             Open
-                                                        </a>
+                                                        </PrivateFileLink>
                                                     ) : (
                                                         "None uploaded"
                                                     ),
@@ -455,6 +457,8 @@ export function ReviewCaseView({ theCase, queue, onChanged }: Props) {
 /* ── Documents ────────────────────────────────────────────────────────── */
 
 function DocumentsTable({ documents, onChanged }: { documents: ReviewDocument[]; onChanged: () => void }) {
+    /** DR-1: the document whose reading is open under the table. */
+    const [reading, setReading] = React.useState<ReviewDocument | null>(null);
     const [rejecting, setRejecting] = React.useState<ReviewDocument | null>(null);
     const [busyId, setBusyId] = React.useState<string | null>(null);
 
@@ -481,14 +485,16 @@ function DocumentsTable({ documents, onChanged }: { documents: ReviewDocument[];
                         key: "kind",
                         label: "Document",
                         render: (document) => (
-                            <a
+                            // ST-2 (28 Sep 2026): venue papers and audience reports are private
+                            // files now; one filed before the move keeps its public URL and
+                            // opens as it always did.
+                            <PrivateFileLink
                                 href={document.url}
-                                target="_blank"
-                                rel="noreferrer"
+                                fallbackError={`${DOCUMENT_KIND_LABEL[document.kind]} could not be opened.`}
                                 className="font-medium text-foreground underline-offset-4 hover:underline"
                             >
                                 {DOCUMENT_KIND_LABEL[document.kind]}
-                            </a>
+                            </PrivateFileLink>
                         ),
                     },
                     {
@@ -517,25 +523,42 @@ function DocumentsTable({ documents, onChanged }: { documents: ReviewDocument[];
                         key: "actions",
                         label: "",
                         className: "text-right",
-                        render: (document) =>
-                            document.status === "PENDING" ? (
-                                <div className="flex justify-end gap-2">
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={busyId === document.id}
-                                        onClick={() => setRejecting(document)}
-                                    >
-                                        Reject
-                                    </Button>
-                                    <Button size="sm" disabled={busyId === document.id} onClick={() => verify(document)}>
-                                        Verify
-                                    </Button>
-                                </div>
-                            ) : null,
+                        render: (document) => (
+                            <div className="flex justify-end gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setReading((current) => (current?.id === document.id ? null : document))}
+                                    data-testid={`document-read-${document.id}`}
+                                >
+                                    <Sparkles className="mr-1 size-3.5" />
+                                    {reading?.id === document.id ? "Hide reading" : "Read"}
+                                </Button>
+                                {document.status === "PENDING" ? (
+                                    <>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={busyId === document.id}
+                                            onClick={() => setRejecting(document)}
+                                        >
+                                            Reject
+                                        </Button>
+                                        <Button size="sm" disabled={busyId === document.id} onClick={() => verify(document)}>
+                                            Verify
+                                        </Button>
+                                    </>
+                                ) : null}
+                            </div>
+                        ),
                     },
                 ]}
             />
+            {reading && (
+                <div className="mt-3">
+                    <DocumentReadingPanel url={reading.url} kind={kindForDocument(reading.kind)} />
+                </div>
+            )}
             <RejectDocumentDialog
                 document={rejecting}
                 onOpenChange={(open) => !open && setRejecting(null)}
@@ -621,18 +644,7 @@ function RejectDocumentDialog({
 
 /* ── Send back ────────────────────────────────────────────────────────── */
 
-const OUTCOMES: { value: SendBackOutcome; label: string; description: string }[] = [
-    {
-        value: "CHANGES_REQUESTED",
-        label: "Send back for changes",
-        description: "Returns to the publisher as a draft they can fix and resubmit.",
-    },
-    {
-        value: "REJECTED",
-        label: "Reject outright",
-        description: "The end of the road for this spot. The reason stays as the record of why.",
-    },
-];
+const OUTCOMES = SEND_BACK_OUTCOMES;
 
 function SendBackDialog({
     open,

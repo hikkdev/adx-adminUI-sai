@@ -225,7 +225,7 @@ function RecentBookingsCard({
             ) : resource.data && resource.data.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
                     No campaign has been paid for yet.{" "}
-                    <Link href="/campaigns" className="underline underline-offset-4">
+                    <Link href="/campaigns/directory" className="underline underline-offset-4">
                         Open the worklist
                     </Link>
                     .

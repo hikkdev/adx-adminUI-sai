@@ -227,6 +227,8 @@ describe("the desk on a live ticket", () => {
         await waitFor(() => expect(rail.textContent).toContain("PUB-0007"));
         expect(backend.calls.map((call) => `${call.method} ${call.path}`)).toContain("GET /support/tickets/tkt_1/requester");
         expect(within(rail).getByRole("link", { name: "PUB-0007" })).toHaveAttribute("href", "/publishers/pub_1");
+        // 29 Sep 2026: the party's id beside the person's name is named by its kind.
+        expect(within(rail).getByRole("link", { name: "PUB-0007" }).parentElement).toHaveTextContent("Publisher account ID PUB-0007");
         expect(within(rail).getByRole("link", { name: /view in admin/i })).toHaveAttribute("href", "/publishers/pub_1");
         expect(rail.textContent).toContain("Payout requested");
         expect(within(rail).getByText("2")).toBeTruthy();

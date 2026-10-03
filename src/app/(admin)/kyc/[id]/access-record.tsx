@@ -6,6 +6,7 @@ import { isLive } from "@/lib/api-config";
 import { formatDateTime } from "@/lib/format";
 import { useApiResource } from "@/lib/use-api-resource";
 import { accessService, type WirePartyLog } from "@/services/access";
+import { idLine } from "@/services/identifiers";
 
 /**
  * Who has had access to this publisher's account — the owner's own record,
@@ -57,7 +58,7 @@ export function AccessRecord({ publisherId }: { publisherId: string }) {
                             {log.scans.map((scan) => (
                                 <li key={scan.id}>
                                     <span className="font-medium text-foreground">
-                                        {[scan.agent.name ?? "An ADX agent", scan.agent.displayId].filter(Boolean).join(" · ")}
+                                        {[scan.agent.name ?? "An ADX agent", idLine("AGENT", scan.agent.displayId)].filter(Boolean).join(" · ")}
                                     </span>
                                     <span className="text-muted-foreground">
                                         {" "}

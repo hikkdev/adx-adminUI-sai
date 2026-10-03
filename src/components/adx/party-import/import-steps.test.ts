@@ -90,7 +90,7 @@ describe("the party configurations", () => {
         expect(keys("advertisers")).toEqual(["name", "mobile", "email", "type", "companyName", "industry", "gstin", "panNumber", "address", "city", "state", "contactName", "firstName", "lastName", "dateOfBirth", "gender"]);
         expect(keys("agents")).toEqual(["name", "mobile", "email", "side", "city", "state"]);
         expect(PARTY_IMPORT_CONFIGS.agents.columns.find((column) => column.key === "side")?.required).toBe(true);
-        expect(keys("print-partners")).toEqual(["name", "mobile", "legalName", "gstin", "panNumber", "contactName", "email", "address", "city", "capabilities", "maxWidthFt", "turnaroundDays"]);
+        expect(keys("print-partners")).toEqual(["name", "mobile", "legalName", "gstin", "panNumber", "contactName", "email", "address", "city", "state", "postalCode", "capabilities", "maxWidthFt", "turnaroundDays"]);
         expect(keys("employees")).toEqual(["name", "mobile", "email", "department", "designation", "region", "workMode", "employmentType"]);
     });
 

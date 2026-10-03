@@ -121,6 +121,11 @@ export function AuthorizeDialog({ campaign, onOpenChange, onDone }: AuthorizeDia
                 const details = error.details as { total?: string; threshold?: string } | undefined;
                 setFourEyes({ total: details?.total ?? campaign.total ?? "", threshold: details?.threshold ?? String(threshold ?? "") });
                 toast.warning("A second admin has to approve this one", { description: error.message });
+            } else if (error instanceof ApiError && error.code === "AGE_REQUIRED") {
+                // AGE-1 (29 Sep 2026): an order needs the advertiser's own date of birth on file and them 18 or over.
+                toast.error("The advertiser can't place this order yet", {
+                    description: `${error.message} A date of birth is added from the advertiser's Edit details.`,
+                });
             } else {
                 toast.error(error instanceof Error ? error.message : "Could not authorise it");
             }

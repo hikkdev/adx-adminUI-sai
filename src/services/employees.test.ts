@@ -101,7 +101,7 @@ const wire = (over: Partial<WireEmployee> = {}): WireEmployee => ({
     isActive: true,
     createdAt: "2026-09-01T09:00:00.000Z",
     updatedAt: "2026-09-01T09:00:00.000Z",
-    user: { id: "cld_user_1", name: "Asha Rao", mobile: "+919800000000", email: "asha@adx.co" },
+    user: { id: "cld_user_1", name: "Asha Rao", mobile: "+919800000000", email: "asha@adx.in" },
     ...over,
 });
 
@@ -115,7 +115,7 @@ describe("shapeEmployeeRow", () => {
     });
 
     it("falls back to the email's local part, then the mobile, for a nameless user", () => {
-        expect(shapeEmployeeRow(wire({ user: { id: "u", name: null, mobile: "+91", email: "kabir.m@adx.co" } })).name).toBe("kabir.m");
+        expect(shapeEmployeeRow(wire({ user: { id: "u", name: null, mobile: "+91", email: "kabir.m@adx.in" } })).name).toBe("kabir.m");
         expect(shapeEmployeeRow(wire({ user: { id: "u", name: "  ", mobile: "+919900011122", email: null } })).name).toBe("+919900011122");
         expect(shapeEmployeeRow(wire({ isActive: false })).status).toBe("inactive");
     });
@@ -150,11 +150,11 @@ describe("documentRows — the mask", () => {
     it("draws presence from the URLs themselves when the viewer may open them", () => {
         const rows = documentRows(
             detail({
-                ndaAgreementUrl: "https://files.adx.co/api/v1/files/abc",
+                ndaAgreementUrl: "https://files.adx.in/api/v1/files/abc",
                 salarySlipUrls: ["https://x/1.pdf", "https://x/2.pdf"],
             }),
         );
-        expect(rows.find((row) => row.key === "ndaAgreementUrl")!.urls).toEqual(["https://files.adx.co/api/v1/files/abc"]);
+        expect(rows.find((row) => row.key === "ndaAgreementUrl")!.urls).toEqual(["https://files.adx.in/api/v1/files/abc"]);
         expect(rows.find((row) => row.key === "salarySlipUrls")!).toMatchObject({ onFile: true, urls: ["https://x/1.pdf", "https://x/2.pdf"] });
         expect(rows.find((row) => row.key === "esiFormUrl")!.onFile).toBe(false);
     });

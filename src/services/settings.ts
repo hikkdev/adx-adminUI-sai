@@ -2,6 +2,7 @@ import { api as http } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
 import { PAYMENT_GATEWAYS, type PaymentGateway } from "@/services/payments";
 import type { AdminTwoFactorPolicy } from "@/services/two-factor";
+import type { OrderScreeningSettings } from "@/services/order-screening";
 
 /**
  * Platform settings — the `AppConfig` row keyed `platform`, wired to
@@ -138,6 +139,12 @@ export interface PlatformSettings {
     kyc: { reviewSlaHours: number; escalationSlaMultiplier: number; printPartnerActivationRequiresKyc?: boolean };
     listings: { autoPublishOnVerification: boolean };
     marketplace: { minBookingDays: number; maxMarketsPerCampaign: number };
+    /**
+     * RF-1 (the owner, 25 Sep 2026): the reservation fee. Optional on the
+     * read for a backend older than the section; the Reservation fee card
+     * on /settings then says it is not served rather than drawing a default.
+     */
+    booking?: { reservationFee: ReservationFeeSettings };
     publisher: { spotInsightsVisible: boolean };
     retention: { financialYears: number; kycYears: number };
     /**
@@ -195,6 +202,77 @@ export interface PlatformSettings {
     tracking?: TrackingSettings;
     /** LH1: the lead score's policy; LH3/LH5: the claims (D3), the referral credit (D9), the priority top-up (D7). Optional on the read for a backend older than the section. */
     leads?: { scoring: LeadScoringPolicy; claims?: LeadClaimsPolicy; referralCredit?: number; priority?: LeadPriorityPolicy };
+    /**
+     * ST-3/ST-4 (28 Sep 2026): whether the weekly sweep may remove files
+     * nothing refers to, and after how long. Off by default — the owner
+     * turns it on from Settings › Storage after reviewing the list. Optional
+     * on the read for a backend older than the section; the page then says
+     * the switch is not served.
+     */
+    storage?: StorageSettings;
+    /**
+     * CP-1: what an agent's pay record starts from, per grade. These are
+     * defaults only — each agent carries their own effective-dated record,
+     * and that is what pays. Optional on the read for a backend older than
+     * the section; the Agent pay by grade card then says it is not served.
+     */
+    agents?: { compensation: AgentPayDefaults };
+    /**
+     * Lot G (Q118/138): the nightly signal scan's threshold and walk limit;
+     * order screening (2 Oct 2026): `orderScreening`, edited on Settings ›
+     * Fraud. Optional throughout on the read — the page says when this
+     * backend does not serve the order screening block.
+     */
+    fraud?: { scanThreshold?: number; scanLimitPerType?: number; orderScreening?: OrderScreeningSettings };
+}
+
+/** The four desk-set grades the pay defaults are kept for. */
+export const PAY_GRADES = ["G1", "G2", "G3", "G4"] as const;
+export type PayGrade = (typeof PAY_GRADES)[number];
+
+/** One grade's starting terms. Plain numbers here, unlike the decimal strings on an agent's own record. */
+export interface GradePay {
+    monthlySalary: number;
+    dailyQuota: number;
+    workingDaysPerMonth: number;
+}
+
+/** CP-1: `settings.agents.compensation`. */
+export interface AgentPayDefaults {
+    /** What an onboarding past the day's quota pays, as a percentage on top of the planned cost. */
+    commissionUpliftPct: number;
+    byGrade: Record<PayGrade, GradePay>;
+}
+
+/** ST-3: `settings.storage`. */
+export interface StorageSettings {
+    /** Off by default: the sweep marks, and removes nothing, until this is on. */
+    removeUnreferenced: boolean;
+    /** Whole days a file stays unreferenced before it may be removed, 7 – 365. */
+    graceDays: number;
+}
+
+/**
+ * RF-1: `settings.booking.reservationFee` — a checkout at or above
+ * `minCheckoutValue` may be reserved for `holdHours` against a fee of
+ * `feePct` of the total, due within `payWithinMinutes`; the fee is folded
+ * into the checkout when the advertiser goes ahead, and `retainPct` of it
+ * is kept when they do not. The threshold (default ₹1,00,000) is the
+ * owner's open figure; 5% / 60 min / 24 h / 10% are their answer of
+ * 25 Sep 2026.
+ */
+export interface ReservationFeeSettings {
+    enabled: boolean;
+    /** Rupees. */
+    minCheckoutValue: number;
+    /** Percent of the checkout total, 0–100; may be fractional. */
+    feePct: number;
+    /** Whole minutes, 5 – 1,440. */
+    payWithinMinutes: number;
+    /** Whole hours, 1 – 336. */
+    holdHours: number;
+    /** Percent of the fee kept when the advertiser walks away, 0–100; may be fractional. */
+    retainPct: number;
 }
 
 /** LH5 (D3): `settings.leads.claims` — the hold, the caps by tier (null = unlimited), the cooldown after a lapse. */
@@ -367,6 +445,7 @@ export type PlatformSettingsPatch = {
     kyc?: Partial<PlatformSettings["kyc"]>;
     listings?: Partial<PlatformSettings["listings"]>;
     marketplace?: Partial<PlatformSettings["marketplace"]>;
+    booking?: { reservationFee?: Partial<ReservationFeeSettings> };
     publisher?: Partial<PlatformSettings["publisher"]>;
     retention?: Partial<PlatformSettings["retention"]>;
     support?: {
@@ -388,6 +467,15 @@ export type PlatformSettingsPatch = {
         referralCredit?: number;
         priority?: Partial<LeadPriorityPolicy>;
     };
+    storage?: Partial<StorageSettings>;
+    fraud?: { scanThreshold?: number; scanLimitPerType?: number; orderScreening?: Partial<OrderScreeningSettings> };
+    /* CP-1: a partial patch per grade, so saving one band leaves the other three alone. */
+    agents?: {
+        compensation?: {
+            commissionUpliftPct?: number;
+            byGrade?: Partial<Record<PayGrade, Partial<GradePay>>>;
+        };
+    };
 };
 
 /** The schema's bounds, so the form refuses what the server would. */
@@ -396,6 +484,12 @@ export const SETTING_BOUNDS = {
     "kyc.escalationSlaMultiplier": { min: 1, max: 30 },
     "marketplace.minBookingDays": { min: 1, max: 365 },
     "marketplace.maxMarketsPerCampaign": { min: 1, max: 50 },
+    /* RF-1: the schema's own bounds on the reservation fee; the threshold has no ceiling there, so a generous one here. */
+    "booking.reservationFee.minCheckoutValue": { min: 0, max: 1_000_000_000 },
+    "booking.reservationFee.feePct": { min: 0, max: 100 },
+    "booking.reservationFee.payWithinMinutes": { min: 5, max: 24 * 60 },
+    "booking.reservationFee.holdHours": { min: 1, max: 24 * 14 },
+    "booking.reservationFee.retainPct": { min: 0, max: 100 },
     "retention.financialYears": { min: 1, max: 30 },
     "retention.kycYears": { min: 1, max: 30 },
     firstResponseHours: { min: 1, max: 24 * 30 },
@@ -447,6 +541,13 @@ export const SETTING_BOUNDS = {
     "leads.scoring.intent": { min: 0, max: 35 },
     "leads.scoring.fit.points": { min: 0, max: 30 },
     "leads.scoring.fit.localityRadiusM": { min: 200, max: 5000 },
+    /* ST-3: the grace a file nothing refers to is given before the sweep may remove it. */
+    "storage.graceDays": { min: 7, max: 365 },
+    /* CP-1: the pay defaults' own bounds — ₹0 to ₹1,00,00,000, one to a hundred a day, a month of at most 31 days, up to 200% on top. */
+    "agents.compensation.monthlySalary": { min: 0, max: 10_000_000 },
+    "agents.compensation.dailyQuota": { min: 1, max: 100 },
+    "agents.compensation.workingDaysPerMonth": { min: 1, max: 31 },
+    "agents.compensation.commissionUpliftPct": { min: 0, max: 200 },
 } as const;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>

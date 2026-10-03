@@ -52,7 +52,7 @@ vi.mock("@/lib/api-config", () => ({
     apiConfig: { live: true, baseUrl: "https://api.test/api/v1" },
 }));
 vi.mock("@/lib/auth", () => ({
-    useAuth: () => ({ user: { id: "usr_admin", name: "Priya Rao", email: "priya@adx.test", roles: ["ADMIN"] } }),
+    useAuth: () => ({ user: { id: "usr_admin", name: "Priya Rao", email: "priya@adx.in", roles: ["ADMIN"] } }),
 }));
 
 import { tokens } from "@/lib/api-client";

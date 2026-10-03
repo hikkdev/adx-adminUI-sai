@@ -94,6 +94,8 @@ describe("the roster query", () => {
             "/print-partners?q=Balaji&city=Bengaluru&active=false&page=2&pageSize=20"
         );
         expect(partnersPath({ active: true, page: 1 })).toBe("/print-partners?active=true&pageSize=100");
+        // 2 Oct 2026: the Status, as the directory sends it.
+        expect(partnersPath({ status: "CLOSED" })).toBe("/print-partners?status=CLOSED&pageSize=100");
     });
 
     it("answers null for a partner that is not there, and throws for anything else", async () => {

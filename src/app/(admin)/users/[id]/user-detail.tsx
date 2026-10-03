@@ -15,6 +15,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ClosedBanner } from "@/components/adx/account-closure";
 import { CloseAccountDialog } from "@/components/adx/close-account-dialog";
+import { useDeleteAccount } from "@/components/adx/delete-account";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { InitialsAvatar } from "@/components/adx/initials-avatar";
 import { SectionCard } from "@/components/adx/section-card";
@@ -23,6 +24,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { PUBLISHER_READS, ViewAs, type ViewAsRead } from "@/components/adx/view-as-panel";
 import { ApiError } from "@/lib/api-client";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { ID_LABEL } from "@/services/identifiers";
 import { QR_TYPE_LABEL, scanOutcomeMeta, type ScanByRow } from "@/services/qr";
 import type { RoleConfig } from "@/services/roles";
 import {
@@ -30,6 +32,7 @@ import {
     ERASURE_VIA_LABEL,
     PARTY_LINKS,
     USERS_ROLE_FACETS,
+    ERASED_META,
     USER_STATUS_META,
     displayNameOf,
     dueLabel,
@@ -37,6 +40,7 @@ import {
     twoFactorLabel,
     twoFactorResetClears,
     userStatusOf,
+    sessionPlace,
     usersService,
     type ErasureRequest,
     type UsersRoleFacet,
@@ -55,9 +59,10 @@ import { ContactsCard } from "./contacts-card";
  * edit a user as super admin, add or remove emails, phone numbers etc.").
  *
  * The frame's header (avatar, name, status, email · mobile, actions on the
- * right) and its two-column body are kept. The header now carries the ids,
- * the state chips and a link to every party this person is (`parties` off
- * the detail read). The left column is the Identity card with its Edit
+ * right) and its two-column body are kept. The header now carries the
+ * person's one id (the ADX ID), the state chips and a link to every party
+ * this person is (`parties` off the detail read), each chip naming that
+ * party's own id by its kind. The left column is the Identity card with its Edit
  * dialog (`PATCH /users/:id`, the diff only), the Contacts card ("Emails &
  * phone numbers", every move a route under `/users/:id/contacts`), the
  * Activity card (`GET /users/:id/activity`) and the QR scans card (`GET
@@ -131,6 +136,8 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
     const [busy, setBusy] = React.useState(false);
     const [editing, setEditing] = React.useState(false);
     const [closing, setClosing] = React.useState(false);
+    /** 2 Oct 2026: "Delete account", offered only when the server says the account has no history. */
+    const deletion = useDeleteAccount({ userId: user.id, name, directoryHref: "/users/accounts", closed });
     /** The seeded role picked for a grant, confirmed before `POST /users/roles`. */
     const [granting, setGranting] = React.useState<UsersRoleFacet | null>(null);
 
@@ -206,13 +213,13 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                     <ChevronLeft className="size-4" />
                     Users
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-3">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
                         <InitialsAvatar name={name} size="lg" />
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2.5">
                                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">{name}</h1>
-                                <StatusBadge status={USER_STATUS_META[status]} />
+                                <StatusBadge status={user.erasedAt ? ERASED_META : USER_STATUS_META[status]} />
                                 {isAdmin && <StatusBadge status={{ label: user.roleConfig?.name ?? "Super admin", tone: "info" }} />}
                                 {user.twoFactorRequiredAt && <StatusBadge status={{ label: "2FA on", tone: "success" }} />}
                                 {user.roles
@@ -222,9 +229,18 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                                     ))}
                             </div>
                             <p className="mt-0.5 text-sm text-muted-foreground">{[user.email, user.mobile].filter(Boolean).join(" · ")}</p>
-                            <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                                {user.id}
-                                {parties.map((link) => (link.party.displayId ? ` · ${link.party.displayId}` : "")).join("")}
+                            {/* 29 Sep 2026: the one id that is this person's. The raw
+                                row id and the party ids that used to trail it read as
+                                one person holding several ids; each party's id is on
+                                its own chip below, named by its kind. */}
+                            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="adx-id">
+                                {user.displayId ? (
+                                    <>
+                                        {ID_LABEL.USER} <span className="font-mono">{user.displayId}</span>
+                                    </>
+                                ) : (
+                                    "No ADX ID issued yet"
+                                )}
                             </p>
                             {parties.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -234,7 +250,8 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                                             href={link.href(link.party.id)}
                                             className="inline-flex items-center gap-1 rounded-full border bg-card px-2.5 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
                                         >
-                                            {link.label}
+                                            {/* "Advertiser account ID ADV-…" — the party's id, never the person's; the kind alone before one is issued. */}
+                                            {link.party.displayId ? ID_LABEL[link.idOwner] : link.label}
                                             {link.party.displayId && <span className="font-mono text-muted-foreground">{link.party.displayId}</span>}
                                             <ArrowUpRight className="size-3" />
                                         </Link>
@@ -243,7 +260,7 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                             )}
                         </div>
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                         {!closed && (
                             <Button variant="outline" className="bg-card" onClick={() => setEditing(true)} disabled={busy}>
                                 <Pencil className="size-4" />
@@ -298,6 +315,11 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                                                 </DropdownMenuItem>
                                             </>
                                         )}
+                                        {deletion.requestDelete && (
+                                            <DropdownMenuItem className="text-danger focus:text-danger" onSelect={deletion.requestDelete}>
+                                                Delete account
+                                            </DropdownMenuItem>
+                                        )}
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             )}
@@ -323,6 +345,7 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                         <FieldList
                             items={[
                                 ["Name", user.name ?? "—"],
+                                [ID_LABEL.USER, user.displayId ? <span key="adx-id" className="font-mono text-xs">{user.displayId}</span> : "Not issued yet"],
                                 ["Mobile", user.mobile],
                                 ["Email", user.email ?? "—"],
                                 ["Language", user.language ?? "—"],
@@ -467,8 +490,9 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                                         </SelectContent>
                                     </Select>
                                     <p className="mt-1.5 text-xs text-muted-foreground">
-                                        Every operator is a Super admin until per-module enforcement is switched on. The system super-admin role is
-                                        granted only by a super admin, and its last member cannot be moved off it.
+                                        With no role this operator cannot use the console; with one, exactly its list. Only Super admin
+                                        holds every permission: it is granted only by a super admin, and its last member cannot be moved
+                                        off it.
                                     </p>
                                 </div>
                             )}
@@ -560,6 +584,8 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                                                     <p className="text-xs text-muted-foreground">
                                                         {[
                                                             session.ipAddress,
+                                                            /* SL-1: where it signed in from, once the lookup under Settings › Integrations has said. */
+                                                            sessionPlace(session),
                                                             session.lastUsedAt ? `Last used ${formatDateTime(session.lastUsedAt)}` : `Since ${formatDateTime(session.createdAt)}`,
                                                         ]
                                                             .filter(Boolean)
@@ -664,6 +690,7 @@ export function UserDetail({ user, sessions, activity, contacts, scans, erasure,
                 onConfirm={() => void grant()}
             />
             <CloseAccountDialog userId={user.id} name={name} open={closing} onOpenChange={setClosing} onChanged={onChanged} />
+            {deletion.dialog}
         </div>
     );
 }

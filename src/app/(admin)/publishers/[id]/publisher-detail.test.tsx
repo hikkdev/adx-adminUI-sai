@@ -95,6 +95,9 @@ const fresh: Publisher = {
     longitude: null,
     person: null,
     onboarding: null,
+    // Phase D: an individual's entity type is derived from the account type until one is stored.
+    entityType: "INDIVIDUAL",
+    entityTypeStored: false,
     suspensionScopes: [],
     suspensionReason: null,
     suspendedAt: null,
@@ -152,7 +155,8 @@ describe("PublisherDetail over a publisher opened from the desk", () => {
         draw(fresh);
 
         expect(screen.getByRole("heading", { level: 1, name: "Sharma Hoardings" })).toBeInTheDocument();
-        expect(screen.getByText("PUB-1409-2601")).toBeInTheDocument();
+        // 29 Sep 2026: the account's id is named by its kind, never printed bare.
+        expect(screen.getByTestId("account-id")).toHaveTextContent("Publisher account ID PUB-1409-2601");
         expect(screen.getByText("0 sites, KYC pending")).toBeInTheDocument();
 
         // The KYC KPI: the enum value labelled, and no PAN invented.
@@ -170,10 +174,29 @@ describe("PublisherDetail over a publisher opened from the desk", () => {
 
         expect(row("Owner").getByText("Sharma Hoardings")).toBeInTheDocument();
         expect(row("Phone").getByText("+919845012345")).toBeInTheDocument();
-        expect(row("Business type").getByText("Individual")).toBeInTheDocument();
+        expect(row("Account type").getByText("Individual")).toBeInTheDocument();
+        // Phase D: the entity type beside the business type, in the server's words.
+        expect(row("Entity type").getByText("Individual")).toBeInTheDocument();
         expect(row("Onboarded by").getByText("Self-signup")).toBeInTheDocument();
         expect(row("PAN").getByText("-")).toBeInTheDocument();
         expect(row("GSTIN").getByText("-")).toBeInTheDocument();
+        // Nobody has signed in with the number yet, so there is no person and no ADX ID: the muted marker says so.
+        expect(row("Signs in as").getByTestId("no-app-account")).toHaveTextContent("No app account");
+    });
+
+    it("names who signs in, with their own ADX ID, on the Identity card, apart from the account's PUB id", () => {
+        draw({
+            ...fresh,
+            userId: "usr_1",
+            person: { displayId: "ADX-1409-2601", firstName: "Ravi", lastName: "Sharma", dateOfBirth: null, gender: null, avatarUrl: null, consentAcceptedAt: null },
+        });
+        openIdentity();
+
+        // 2 Oct 2026: the person and their id, linked to their account under Users.
+        const link = row("Signs in as").getByTestId("signs-in-as");
+        expect(link).toHaveTextContent("Ravi Sharma · ADX-1409-2601");
+        expect(link).toHaveAttribute("href", "/users/usr_1");
+        expect(screen.getByTestId("account-id")).not.toHaveTextContent("ADX-1409-2601");
     });
 
     it("names the contact person on a business, links the agent, and labels NEEDS_INFO", () => {
@@ -188,6 +211,8 @@ describe("PublisherDetail over a publisher opened from the desk", () => {
             gstin: "27ABCDE1234F1Z5",
             agentId: "agt_1",
             sites: 3,
+            // Phase D: a business whose legal form nobody has said yet.
+            entityType: null,
         });
 
         expect(screen.getByText("3 sites, KYC needs info · Pune")).toBeInTheDocument();
@@ -195,7 +220,8 @@ describe("PublisherDetail over a publisher opened from the desk", () => {
         openIdentity();
         expect(row("Owner").getByText("Priya Sharma")).toBeInTheDocument();
         expect(row("Email").getByText("priya@sharma.in")).toBeInTheDocument();
-        expect(row("Business type").getByText("Business")).toBeInTheDocument();
+        expect(row("Account type").getByText("Business")).toBeInTheDocument();
+        expect(row("Entity type").getByText("Not chosen yet")).toBeInTheDocument();
         expect(row("Onboarded by").getByRole("link", { name: "Agent · open profile" })).toHaveAttribute(
             "href",
             "/agents/agt_1",
@@ -259,6 +285,7 @@ describe("PublisherDetail over a publisher opened from the desk", () => {
 
         expect(row("Onboarded by").getByRole("link", { name: "Ravi Kulkarni" })).toHaveAttribute("href", "/agents/agt_1");
         expect(row("Onboarded by").getByText("AGT-0007")).toBeInTheDocument();
+        expect(row("Onboarded by").getByText("AGT-0007").parentElement).toHaveTextContent("Agent ID AGT-0007");
         expect(screen.queryByText("Agent · open profile")).not.toBeInTheDocument();
     });
 

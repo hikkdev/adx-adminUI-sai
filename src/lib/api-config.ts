@@ -21,6 +21,13 @@ export const apiConfig = {
      *  the backend does *not* degrade to a no-op here — POST /auth/google
      *  answers 503 while its own copy is unset. */
     googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || null,
+    /**
+     * PB-1 (27 Sep 2026): where the website — and Studio, its page editor —
+     * is served. The console hands a page over with `${siteUrl}/studio/...`
+     * and the session's tokens in the URL fragment (never the query, never
+     * logged). The default is the website's dev server.
+     */
+    siteUrl: (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:5174").replace(/\/$/, ""),
 } as const;
 
 /**
@@ -139,9 +146,7 @@ export const liveDomains = {
      *  the same flag; four parties, one domain. The desk's per-document
      *  decisions, re-upload asks, assignment and liveness video are Lot D's
      *  routes on the same two queues, and every private document is fetched
-     *  through `GET /files/:id` by `<PrivateFile>`. The intake under
-     *  `/onboarding/submissions` — agents and employees approved into being
-     *  — reads this flag too: it is the desk's front door. Lot G (CG2): the
+     *  through `GET /files/:id` by `<PrivateFile>`. Lot G (CG2): the
      *  Escalated chip is `?escalated=true` on both queues, the Escalate
      *  button is `POST …/escalate { reason }` on both desks, and the SLA
      *  column reads `kyc.escalationSlaMultiplier` off `/settings/platform`.
@@ -412,7 +417,7 @@ export const liveDomains = {
     moderation: true,
 
     /** Agreements — the templates rail, the acceptances register, the stale
-     *  report and the party lookup all read `/agreements`. The service has
+     *  report and the party lookup all read `/legal-documents`. The service has
      *  been HTTP-only since D9 with no fixture fallback (a seeded agreement
      *  would look exactly like a published one to the person deciding
      *  whether the terms are ready); the key exists so the claim is made
@@ -557,7 +562,7 @@ export const liveDomains = {
     comms: true,
 
     /** Reports — Lot G (package CG4, Q129) over the `reports` module.
-     *  `/settings/reports` reads `GET /reports/catalogue` for the twelve
+     *  `/analytics/reports` reads `GET /reports/catalogue` for the thirteen
      *  kinds, runs one through `POST /reports/run`, lists runs and
      *  schedules under the list contract and downloads a run's file
      *  through the blob helper with the admin token. The five literal

@@ -10,7 +10,7 @@ export { FunnelCard, type FunnelStep } from "./funnel-card";
 export { MixBar, type MixBarProps } from "./mix-bar";
 export { SectionOverviewLoader, type SectionOverviewLoaderProps } from "./section-overview-loader";
 export { SeriesCard, type SeriesCardProps } from "./series-card";
-export { CountTile, MoneyTile, StatTile, type StatTileProps } from "./stat-tile";
+export { CostTile, CountTile, MoneyTile, StatTile, type StatTileProps } from "./stat-tile";
 export { TopList, type TopListItem, type TopListProps } from "./top-list";
 export { useOverviewWindow } from "./use-overview-window";
 export { WindowPicker, type WindowPickerProps } from "./window-picker";

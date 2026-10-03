@@ -23,6 +23,7 @@ import {
 } from "@/services/flows";
 import type { LadderStep, StepLadder, StepLadderVocabulary } from "@/types";
 import { BoardHeader, IssueList, IssueNote, LiveBanner, useIssueJump } from "./board-chrome";
+import { FlowPreviewPanel } from "./flow-preview";
 
 /** A refusal with its place on the board, resolved once against the ladder that was sent. */
 interface BoardIssue extends FlowIssue {
@@ -185,6 +186,8 @@ export function StepBoard({ flowKey, ladder: initial, vocabulary, stored, label,
                 onDismiss={() => setIssues([])}
             />
 
+            {/* FL-2: the board on the left, the phone on the right, on the step selected. */}
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_424px]">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
                 <Card className="rounded-lg border-border p-4 shadow-none" data-issue-anchor="ladder">
                     <div className="flex items-center justify-between gap-3">
@@ -255,12 +258,11 @@ export function StepBoard({ flowKey, ladder: initial, vocabulary, stored, label,
                     ) : (
                         <div className="space-y-4">
                             <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
-                                <div className="grid gap-1.5">
+                                <div className="grid content-start gap-1.5">
                                     <Label htmlFor="step-key">Key</Label>
                                     <Input id="step-key" defaultValue={step.key} key={step.key} onBlur={(event) => renameStep(step.key, event.target.value)} className="font-mono text-xs" />
-                                    <p className="text-xs text-muted-foreground">Unique on the ladder. Renamed when you leave the field.</p>
                                 </div>
-                                <div className="grid gap-1.5">
+                                <div className="grid content-start gap-1.5">
                                     <Label htmlFor="step-number">Number</Label>
                                     <Input
                                         id="step-number"
@@ -272,6 +274,8 @@ export function StepBoard({ flowKey, ladder: initial, vocabulary, stored, label,
                                         }}
                                     />
                                 </div>
+                                {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                                <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">The key is unique on the ladder. Renamed when you leave the field.</p>
                             </div>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="step-title">Title</Label>
@@ -334,6 +338,8 @@ export function StepBoard({ flowKey, ladder: initial, vocabulary, stored, label,
                         </div>
                     )}
                 </Card>
+            </div>
+            <FlowPreviewPanel shape="steps" ladder={ladder} proofLabel={proofLabel} selectedKey={selected} onSelect={setSelected} />
             </div>
         </div>
     );

@@ -124,7 +124,7 @@ vi.mock("@/lib/api-config", () => ({
     apiConfig: { live: true, baseUrl: "https://api.test/api/v1" },
 }));
 vi.mock("@/lib/auth", () => ({
-    useAuth: () => ({ user: { id: "usr_admin", name: "Priya Rao", email: "priya@adx.test", roles: ["ADMIN"] } }),
+    useAuth: () => ({ user: { id: "usr_admin", name: "Priya Rao", email: "priya@adx.in", roles: ["ADMIN"] } }),
 }));
 /* The attachment bytes are not what this file is about; PrivateFile's own
    suite covers the fetch, and here it would only add an unresolved request. */

@@ -11,8 +11,9 @@ import type { RoleConfig } from "@/services/roles";
 import { usersService, type Invite } from "@/services/users";
 
 /**
- * Pending invitations — the panel the `Admin users` wireframe drew beside its
- * table, now over `GET /users/invites`.
+ * Pending invitations: a section of the Admin users tab, where console
+ * access is managed, over `GET /users/invites` (2 Oct 2026: moved off Users ›
+ * Accounts, which keeps a one-line notice pointing here).
  *
  * Open invitations can be resent (a new token, a new week; the old link
  * stops working) or revoked. An expired one can only be resent. Accepted
@@ -50,10 +51,10 @@ export function InvitesPanel({ invites, roles, onChanged }: InvitesPanelProps) {
     };
 
     return (
-        <Card className="h-fit rounded-lg border-border shadow-none">
+        <Card id="invitations" className="h-fit scroll-mt-20 rounded-lg border-border shadow-none" data-testid="pending-invitations">
             <div className="border-b px-5 py-4">
-                <h3 className="text-base font-semibold text-foreground">Pending invites</h3>
-                <p className="mt-0.5 text-sm text-muted-foreground">Expire automatically after 7 days</p>
+                <h3 className="text-base font-semibold text-foreground">Pending invitations</h3>
+                <p className="mt-0.5 text-sm text-muted-foreground">Each link works for seven days. Resend for a new link.</p>
             </div>
             {pending.length ? (
                 <ul className="divide-y">
@@ -66,7 +67,7 @@ export function InvitesPanel({ invites, roles, onChanged }: InvitesPanelProps) {
                                         {roleName(invite.roleConfigId)} · {invite.method === "GOOGLE" ? "Google" : "Password"} ·{" "}
                                         {invite.status === "EXPIRED"
                                             ? `Expired ${formatDate(invite.expiresAt)}`
-                                            : `Sent ${formatDate(invite.createdAt)}`}
+                                            : `Sent ${formatDate(invite.createdAt)} · Expires ${formatDate(invite.expiresAt)}`}
                                     </p>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">

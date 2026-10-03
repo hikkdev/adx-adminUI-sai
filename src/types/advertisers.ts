@@ -118,7 +118,9 @@ export type WalletEntryType =
     | "REFERRAL"
     | "PAYOUT"
     | "PENALTY"
-    | "EXPIRY";
+    | "EXPIRY"
+    /* LM-1: an ad slot or a sponsored listing, paid from the wallet. */
+    | "PROMOTION_DEBIT";
 
 export const WALLET_ENTRY_META: Record<WalletEntryType, StatusMeta> = {
     TOPUP: { label: "Top-up", tone: "success" },
@@ -135,6 +137,7 @@ export const WALLET_ENTRY_META: Record<WalletEntryType, StatusMeta> = {
     PAYOUT: { label: "Payout", tone: "neutral" },
     PENALTY: { label: "Penalty", tone: "danger" },
     EXPIRY: { label: "Expiry", tone: "warning" },
+    PROMOTION_DEBIT: { label: "Ads & sponsored", tone: "neutral" },
 };
 
 export interface WalletEntry {

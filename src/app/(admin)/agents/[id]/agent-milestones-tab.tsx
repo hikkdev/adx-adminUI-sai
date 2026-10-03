@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { SimpleTable } from "@/components/adx/simple-table";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { formatDate, formatMoney } from "@/lib/format";
-import { milestoneTypeLabel, targetLabel, type MilestoneBoard, type MilestoneCard } from "@/services/growth";
+import { milestoneTypeLabel, targetLabel, type MilestoneBoard, type MilestoneCard, type QuotaTracker } from "@/services/growth";
 
 /** "3 / 10", or the rupees behind a revenue card. */
 function progressLabel(card: MilestoneCard): string {
@@ -22,6 +22,44 @@ function ProgressBar({ pct, done }: { pct: number; done: boolean }) {
                 style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
             />
         </div>
+    );
+}
+
+/**
+ * CP-5: the day's quota, above the milestones and visibly not one of them.
+ *
+ * The salary pays this, so there is no reward column and nothing to claim —
+ * and the card says so in words, because a progress bar next to a list of
+ * rewards is otherwise read as another reward. What the next one past the
+ * quota earns is the figure that actually moves an agent, so it is the line
+ * under the bar.
+ */
+function QuotaCard({ quota }: { quota: QuotaTracker }) {
+    const done = quota.leftToday === 0;
+    return (
+        <Card className="rounded-lg border-border p-5 shadow-none" data-testid="agent-quota-tracker">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-base font-semibold text-foreground">Today&rsquo;s quota</h3>
+                <span className="text-xs text-muted-foreground">Paid by salary · nothing to claim</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2 text-sm">
+                <span className="tabular-nums text-foreground">
+                    {quota.progress} / {quota.target}
+                </span>
+                <span className="tabular-nums text-muted-foreground">{quota.pct}%</span>
+            </div>
+            <div className="mt-2">
+                <ProgressBar pct={quota.pct} done={done} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+                {done
+                    ? quota.commissionPerExtra
+                        ? `The quota is used up — the next onboarding today earns ${formatMoney(quota.commissionPerExtra)}.`
+                        : "The quota is used up. These terms cannot price a commission, so ops should set them."
+                    : `${quota.leftToday} more today are covered by the salary${quota.commissionPerExtra ? `; past that each earns ${formatMoney(quota.commissionPerExtra)}` : ""}.`}{" "}
+                Resets at midnight. A day nobody works simply has no quota.
+            </p>
+        </Card>
     );
 }
 
@@ -47,6 +85,7 @@ export function AgentMilestonesTab({ board }: { board: MilestoneBoard | null }) 
 
     return (
         <div className="space-y-3">
+            {board.quota && <QuotaCard quota={board.quota} />}
             <p className="text-sm text-muted-foreground">
                 {board.counts.ACTIVE} in progress · {board.counts.UPCOMING} upcoming · {board.counts.COMPLETED}{" "}
                 completed. Progress is derived from the agent&rsquo;s own record every time the board is read; a
@@ -94,7 +133,17 @@ export function AgentMilestonesTab({ board }: { board: MilestoneBoard | null }) 
                     {
                         key: "reward",
                         label: "Reward",
-                        render: (card) => <span className="font-medium tabular-nums">{formatMoney(card.reward)}</span>,
+                        render: (card) => (
+                            <div className="min-w-0">
+                                <span className="font-medium tabular-nums">{formatMoney(card.reward)}</span>
+                                {/* CP-5: a target inside the planned month is work the salary
+                                    already bought, so this bonus would pay for it a second
+                                    time. Said here, where the money is, not in a footnote. */}
+                                {card.stretch === false && (
+                                    <p className="text-xs text-warning">Inside the quota — paid by salary too</p>
+                                )}
+                            </div>
+                        ),
                     },
                     {
                         key: "timing",

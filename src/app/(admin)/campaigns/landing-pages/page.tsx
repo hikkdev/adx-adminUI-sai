@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
+import { CampaignsNav } from "../campaigns-nav";
 import { LandingPagesLoader } from "./landing-pages-loader";
 
 export const metadata: Metadata = { title: "Landing pages" };
 
 /** Lot E (Q106): the review list of the ADX pages campaign codes send people to. */
 export default function LandingPagesPage() {
-    return <LandingPagesLoader />;
+    return (
+        <div className="space-y-5">
+            <CampaignsNav />
+            <LandingPagesLoader />
+        </div>
+    );
 }

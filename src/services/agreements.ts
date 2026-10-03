@@ -1,5 +1,6 @@
 import { api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
+import type { IdOwner } from "@/services/identifiers";
 import type { StatusMeta } from "@/types";
 
 /**
@@ -70,6 +71,9 @@ export const PARTY_LABEL: Record<AgreementParty, { singular: string; plural: str
     employee: { singular: "Employee", plural: "Employees" },
     "print-partner": { singular: "Print partner", plural: "Print partners" },
 };
+
+/** 29 Sep 2026: whose id an acceptance party's displayId is, so `idLine` names it by kind — "Publisher account ID PUB-…". */
+export const PARTY_ID_OWNER: Record<PartyType, IdOwner> = { publisher: "PUBLISHER", advertiser: "ADVERTISER", agent: "AGENT" };
 
 export interface KindMeta {
     party: AgreementParty;

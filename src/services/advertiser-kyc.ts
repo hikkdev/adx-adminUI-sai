@@ -1,3 +1,4 @@
+import { isProviderFailed, onlineProviderOf } from "./verification";
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import {
@@ -11,6 +12,8 @@ import {
     type DocumentDecision,
     type KycDeskBody,
 } from "./kyc";
+import { accountStateOf } from "./account-state";
+import type { KycEntityType } from "./kyc-entity-types";
 import { kycStateOf, shapeKycStateCounts, type KycQueueState, type KycStateCounts } from "./kyc-state";
 import {
     ADVERTISER_KYC_REQUIREMENTS,
@@ -93,6 +96,9 @@ export interface WireAdvertiserKyc {
     kycId?: string | null;
     /** N3-B: the profile behind the row, on every queue row. */
     party?: WireAdvertiserParty | null;
+    /** 2 Oct 2026: where the account stands — ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED). Absent from a server one release behind. */
+    accountState?: string | null;
+
     /** Null on a row with no record (N3-B). */
     kycType: string | null;
     nationalIdUrl: string | null;
@@ -210,6 +216,8 @@ export interface AdvertiserKycFilter {
     requested?: boolean;
     /** Absent means late first; `newest` is the arrival order. */
     sort?: "newest";
+    /** 2 Oct 2026 (the account lifecycle): true sends `include=inactive` — the suspended, deactivated and closed come back too. */
+    includeInactive?: boolean;
 }
 
 export function buildAdvertiserKycQuery(filter: AdvertiserKycFilter = {}): string {
@@ -221,6 +229,7 @@ export function buildAdvertiserKycQuery(filter: AdvertiserKycFilter = {}): strin
     if (filter.escalated !== undefined) params.set("escalated", String(filter.escalated));
     if (filter.requested !== undefined) params.set("requested", String(filter.requested));
     if (filter.sort) params.set("sort", filter.sort);
+    if (filter.includeInactive) params.set("include", "inactive");
     return params.toString();
 }
 
@@ -310,10 +319,13 @@ export function shapeAdvertiserKyc(row: WireAdvertiserKyc, slaHours: number = ro
         slaHoursLeft: slaHoursLeftOf(ageHours, slaHours),
         documents,
         panNumber: row.panNumber,
-        method: row.method === "DIGIO" ? "DIGIO" : "MANUAL",
+        // Cashfree Phase 2: CASHFREE is an online check too — `digio.provider` says which provider ran it.
+        method: onlineProviderOf(row.method) ? "DIGIO" : "MANUAL",
         digio:
-            row.method === "DIGIO" || row.digioRequestId
+            onlineProviderOf(row.method) || row.digioRequestId || isProviderFailed(row.digioStatus)
                 ? {
+                      // Absent means Digio, so a Digio record reads as it always did.
+                      ...(row.method === "CASHFREE" ? { provider: "CASHFREE" as const } : {}),
                       requestId: row.digioRequestId ?? null,
                       referenceId: row.digioReferenceId ?? null,
                       status: row.digioStatus ?? null,
@@ -327,6 +339,7 @@ export function shapeAdvertiserKyc(row: WireAdvertiserKyc, slaHours: number = ro
         escalation: escalationOf(row),
         request: requestOf(row),
         recorded: recordedOf(row),
+        accountState: accountStateOf(row.accountState),
     };
 }
 
@@ -404,11 +417,14 @@ export const advertiserKycService = {
         }
     },
 
-    /** The desk asks Digio again for this row; the advertiser is told to open the app. 409 once verified; 503 while the provider is off. */
-    restartDigio: (id: string) =>
+    /**
+     * The desk asks Digio again for this row; the advertiser is told to open the app. 409 once verified; 503 while the provider is off.
+     * Phase D: 409 `ENTITY_TYPE_REQUIRED` while the advertiser's entity type is unknown — sent again with the one the picker chose.
+     */
+    restartDigio: (id: string, entityType?: KycEntityType) =>
         live().post<{ kycId: string; validTill: string; digioStatus: "pending"; notified: boolean }>(
             `/advertiser-kyc/${id}/digio/restart`,
-            {}
+            entityType ? { entityType } : {}
         ),
 
     /** The decision; the reason travels with a rejection, the note with either. 409 LIVENESS_REQUIRED on a manual-path VERIFIED with no video. */
@@ -447,12 +463,14 @@ export const advertiserKycService = {
     /**
      * Lot N: the desk asks the advertiser for their KYC. `id` is the KYC row
      * id, or the advertiser's user id when there is no row yet — the server
-     * tries the row first. 409 `KYC_ALREADY_VERIFIED`.
+     * tries the row first. 409 `KYC_ALREADY_VERIFIED`. Phase D: a Digio ask
+     * answers 409 `ENTITY_TYPE_REQUIRED` while the entity type is unknown;
+     * the dialog asks and sends it here.
      */
-    request: (id: string, channel: KycRequestChannel, note?: string) =>
+    request: (id: string, channel: KycRequestChannel, note?: string, entityType?: KycEntityType) =>
         live().post<{ kyc: WireAdvertiserKyc; digio: { kycId: string; validTill: string } | null; notified: boolean }>(
             `/advertiser-kyc/${id}/request`,
-            kycRequestBody(channel, note)
+            kycRequestBody(channel, note, entityType)
         ),
 
     /**
@@ -460,10 +478,13 @@ export const advertiserKycService = {
      * defaults the channel to DIGIO. `id` is the KYC row id, the PROFILE id
      * or the user id; `notified: false` for an advertiser with no app
      * account (the Digio link still goes to the profile's contact). Behind
-     * `kyc.edit`.
+     * `kyc.edit`. Phase D: after 409 `ENTITY_TYPE_REQUIRED` the click is
+     * sent again with `{ entityType }` alone.
      */
-    requestDigio: (id: string) =>
-        live().post<{ kyc: WireAdvertiserKyc; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/advertiser-kyc/${id}/request`),
+    requestDigio: (id: string, entityType?: KycEntityType) =>
+        entityType
+            ? live().post<{ kyc: WireAdvertiserKyc; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/advertiser-kyc/${id}/request`, { entityType })
+            : live().post<{ kyc: WireAdvertiserKyc; digio: { kycId: string; validTill: string } | null; notified: boolean }>(`/advertiser-kyc/${id}/request`),
 
     /**
      * Lot N: the desk records the documents on the advertiser's behalf —

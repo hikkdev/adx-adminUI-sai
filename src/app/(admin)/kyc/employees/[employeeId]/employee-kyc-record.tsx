@@ -1,8 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,10 +10,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { StatusBadge } from "@/components/adx/status-badge";
+import { ONLINE_PROVIDER_LABEL, PROVIDER_FAILED_META, isProviderFailed } from "@/services/verification";
+import { KycCaseHeader } from "../../_shared/case-header";
+import { ResendOnBackupButton } from "../../_shared/resend-on-backup";
+import { VerificationChecksPanel, backupStateOf, useCaseAttempts } from "../../_shared/verification-checks-panel";
 import {
     EMPLOYEE_KYC_SLOTS,
     EMPLOYEE_KYC_STATUS_META,
     employeeKycService,
+    employeeWorkflowLabel,
     type EmployeeKycCase,
     type EmployeeKycDocuments,
     type EmployeeKycSlot,
@@ -60,6 +63,13 @@ export function EmployeeKycRecord({ employee, kyc, live, onChanged }: EmployeeKy
     const [reason, setReason] = React.useState("");
     const [confirmAction, setConfirmAction] = React.useState<"verify" | "reject" | null>(null);
     const [deciding, setDeciding] = React.useState(false);
+    /* Cashfree Phase 2: every provider call for this case and whether the backup can be sent. */
+    const checks = useCaseAttempts("EMPLOYEE_KYC", employee.id);
+    const backup = backupStateOf("EMPLOYEE_KYC", employee.id, checks.data);
+    const afterBackup = () => {
+        checks.reload();
+        onChanged();
+    };
 
     const set = <K extends keyof EmployeeKycDocuments>(key: K, value: EmployeeKycDocuments[K]) =>
         setForm((current) => ({ ...current, [key]: value }));
@@ -105,40 +115,48 @@ export function EmployeeKycRecord({ employee, kyc, live, onChanged }: EmployeeKy
 
     return (
         <div className="space-y-5">
-            <div>
-                <Link href="/kyc/employees" className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
-                    <ChevronLeft className="size-4" />
-                    Employee KYC
-                </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-primary">Employee KYC record</p>
-                        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{name}</h1>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {[employee.displayId, employee.department, employee.designation, employee.mobile].filter(Boolean).join(" · ")}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {kyc ? (
-                            <>
-                                <StatusBadge status={EMPLOYEE_KYC_STATUS_META[kyc.status]} />
-                                {/* E7-3: hours waiting while PENDING, against the SLA the read named. */}
-                                {kyc.ageHours !== null && (
-                                    <StatusBadge
-                                        status={
-                                            kyc.slaBreached
-                                                ? { label: `Waiting ${Math.floor(kyc.ageHours)}h · past SLA`, tone: "danger" }
-                                                : { label: `Waiting ${Math.floor(kyc.ageHours)}h${kyc.slaHours ? ` of ${kyc.slaHours}h` : ""}`, tone: "neutral" }
-                                        }
-                                    />
-                                )}
-                            </>
-                        ) : (
-                            <StatusBadge status={{ label: "Nothing recorded yet", tone: "neutral" }} />
-                        )}
-                    </div>
-                </div>
-            </div>
+            <KycCaseHeader
+                backHref="/kyc/employees"
+                backLabel="Employee KYC"
+                eyebrow="KYC review · employee"
+                title={name}
+                badges={
+                    kyc ? (
+                        <>
+                            <StatusBadge status={EMPLOYEE_KYC_STATUS_META[kyc.status]} />
+                            {/* Cashfree Phase 2: the online provider on the record — and never the raw PROVIDER_FAILED. */}
+                            {isProviderFailed(kyc.digioStatus) ? (
+                                <span data-testid="kyc-provider-failed">
+                                    <StatusBadge status={PROVIDER_FAILED_META} />
+                                </span>
+                            ) : kyc.provider ? (
+                                <StatusBadge status={{ label: ONLINE_PROVIDER_LABEL[kyc.provider], tone: "info" }} />
+                            ) : null}
+                            {/* E7-3: hours waiting while PENDING, against the SLA the read named. */}
+                            {kyc.ageHours !== null && (
+                                <StatusBadge
+                                    status={
+                                        kyc.slaBreached
+                                            ? { label: `Waiting ${Math.floor(kyc.ageHours)}h · past SLA`, tone: "danger" }
+                                            : { label: `Waiting ${Math.floor(kyc.ageHours)}h${kyc.slaHours ? ` of ${kyc.slaHours}h` : ""}`, tone: "neutral" }
+                                    }
+                                />
+                            )}
+                        </>
+                    ) : (
+                        <StatusBadge status={{ label: "Nothing recorded yet", tone: "neutral" }} />
+                    )
+                }
+                actions={kyc && isProviderFailed(kyc.digioStatus) ? <ResendOnBackupButton backup={backup} onSent={afterBackup} /> : undefined}
+            >
+                <p className="mt-1 text-sm text-muted-foreground">{[employee.displayId, employee.department, employee.designation, employee.mobile].filter(Boolean).join(" · ")}</p>
+                {/* Phase D: an employee's Digio workflow follows their employment type — full time, part time or none set; contract or intern. */}
+                {employee.employmentType !== undefined && (
+                    <p className="mt-0.5 text-sm text-muted-foreground" data-testid="employee-workflow">
+                        Digio workflow: {employeeWorkflowLabel(employee.employmentType)}
+                    </p>
+                )}
+            </KycCaseHeader>
 
             {!live && (
                 <Card className="rounded-lg border-border p-5 shadow-none">
@@ -285,10 +303,12 @@ export function EmployeeKycRecord({ employee, kyc, live, onChanged }: EmployeeKy
                         </div>
                     </Card>
 
+                    <VerificationChecksPanel caseType="EMPLOYEE_KYC" caseId={employee.id} resource={checks} />
+
                     <Card className="rounded-lg border-border p-5 shadow-none">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why the desk</h3>
                         <p className="mt-3 text-sm text-muted-foreground">
-                            Staff are onboarded through the intake form and only ever sign in — nothing lets them submit their own papers. The
+                            Staff are added at the desk (Add employee) and only ever sign in — nothing lets them submit their own papers. The
                             record remembers who at ADX recorded it, and the bank proof is what payroll needs.
                         </p>
                     </Card>

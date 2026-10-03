@@ -1,3 +1,4 @@
+import { isProviderFailed, onlineProviderOf } from "./verification";
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import {
@@ -11,6 +12,8 @@ import {
     type DocumentDecision,
     type KycDeskBody,
 } from "./kyc";
+import { accountStateOf, type AccountState } from "./account-state";
+import type { KycEntityType } from "./kyc-entity-types";
 import { kycStateOf, shapeKycStateCounts, type KycQueueState, type KycStateCounts } from "./kyc-state";
 import type {
     KycDigio,
@@ -57,6 +60,9 @@ export interface WirePrintPartnerKyc {
     printPartnerId: string;
     /** N3-B: the party's state and the record's id — null on a row that is the partner alone. */
     state?: string | null;
+    /** 2 Oct 2026: where the account stands — ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED). Absent from a server one release behind. */
+    accountState?: string | null;
+
     kycId?: string | null;
     panNumber: string | null;
     panFrontUrl: string | null;
@@ -140,6 +146,9 @@ export interface PrintPartnerKycDocument {
 /** The case as the console draws it. */
 export interface PrintPartnerKycCase {
     id: string;
+    /** 2 Oct 2026: where the account stands; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     partnerId: string;
     partnerName: string;
     displayId: string | null;
@@ -201,6 +210,8 @@ export interface PrintPartnerKycFilter {
     /** The partner's name, display id or mobile. */
     q?: string;
     sort?: "oldest" | "newest";
+    /** 2 Oct 2026 (the account lifecycle): true sends `include=inactive` — the suspended, deactivated and closed come back too. */
+    includeInactive?: boolean;
 }
 
 export function buildPrintPartnerKycQuery(filter: PrintPartnerKycFilter = {}): string {
@@ -212,6 +223,7 @@ export function buildPrintPartnerKycQuery(filter: PrintPartnerKycFilter = {}): s
     if (filter.escalated !== undefined) params.set("escalated", String(filter.escalated));
     if (filter.q?.trim()) params.set("q", filter.q.trim());
     if (filter.sort) params.set("sort", filter.sort);
+    if (filter.includeInactive) params.set("include", "inactive");
     return params.toString();
 }
 
@@ -258,7 +270,8 @@ export function shapePrintPartnerKyc(row: WirePrintPartnerKyc, slaHours: number 
         kycId: row.kycId ?? (hasRecord ? row.id : null),
         createdAt: partner.createdAt ?? null,
         status,
-        method: row.method === "DIGIO" ? "DIGIO" : "MANUAL",
+        // Cashfree Phase 2: CASHFREE is an online check too — `digio.provider` says which provider ran it.
+        method: onlineProviderOf(row.method) ? "DIGIO" : "MANUAL",
         panNumber: row.panNumber,
         govIdType: row.govIdType,
         submittedAt: row.submittedAt,
@@ -278,8 +291,10 @@ export function shapePrintPartnerKyc(row: WirePrintPartnerKyc, slaHours: number 
             return { field, label, fileName: present ? fileName(present) : null, url: present };
         }),
         digio:
-            row.method === "DIGIO" || row.digioRequestId
+            onlineProviderOf(row.method) || row.digioRequestId || isProviderFailed(row.digioStatus)
                 ? {
+                      // Absent means Digio, so a Digio record reads as it always did.
+                      ...(row.method === "CASHFREE" ? { provider: "CASHFREE" as const } : {}),
                       requestId: row.digioRequestId,
                       referenceId: row.digioReferenceId,
                       status: row.digioStatus,
@@ -293,6 +308,7 @@ export function shapePrintPartnerKyc(row: WirePrintPartnerKyc, slaHours: number 
         escalation: escalationOf(row),
         request: requestOf(row),
         recorded: recordedOf(row),
+        accountState: accountStateOf(row.accountState),
     };
 }
 
@@ -332,12 +348,21 @@ export const printPartnerKycService = {
         }
     },
 
-    /** The desk asks the partner — Digio on their behalf, or by hand; `KYC_REQUESTED`. `id` the record's or the partner's. 409 `KYC_ALREADY_VERIFIED`. */
-    request: (id: string, channel: KycRequestChannel, note?: string) =>
-        live().post<WirePrintPartnerKyc & { digio: { kycId: string; validTill: string } | null }>(`/print-partner-kyc/${id}/request`, kycRequestBody(channel, note)),
+    /**
+     * The desk asks the partner — Digio on their behalf, or by hand; `KYC_REQUESTED`. `id` the record's or the partner's. 409 `KYC_ALREADY_VERIFIED`.
+     * Phase D: a Digio ask answers 409 `ENTITY_TYPE_REQUIRED` while the shop's entity type is unknown; the dialog asks and sends it here.
+     */
+    request: (id: string, channel: KycRequestChannel, note?: string, entityType?: KycEntityType) =>
+        live().post<WirePrintPartnerKyc & { digio: { kycId: string; validTill: string } | null }>(`/print-partner-kyc/${id}/request`, kycRequestBody(channel, note, entityType)),
 
-    /** N3-C: the one click — the same route with no body; the server defaults the channel to DIGIO. `id` the record's or the partner's. Behind `kyc.edit`. */
-    requestDigio: (id: string) => live().post<WirePrintPartnerKyc & { digio: { kycId: string; validTill: string } | null }>(`/print-partner-kyc/${id}/request`),
+    /**
+     * N3-C: the one click — the same route with no body; the server defaults the channel to DIGIO. `id` the record's or the partner's. Behind `kyc.edit`.
+     * Phase D: after 409 `ENTITY_TYPE_REQUIRED` the click is sent again with `{ entityType }` alone.
+     */
+    requestDigio: (id: string, entityType?: KycEntityType) =>
+        entityType
+            ? live().post<WirePrintPartnerKyc & { digio: { kycId: string; validTill: string } | null }>(`/print-partner-kyc/${id}/request`, { entityType })
+            : live().post<WirePrintPartnerKyc & { digio: { kycId: string; validTill: string } | null }>(`/print-partner-kyc/${id}/request`),
 
     /** The desk records the documents on the partner's behalf — `recordedVia DESK`; answers the case. `id` the record's or the partner's. */
     recordAtDesk: async (id: string, body: KycDeskBody): Promise<PrintPartnerKycCase> =>
@@ -370,6 +395,7 @@ export const printPartnerKycService = {
         return live().post<WirePrintPartnerKyc>(`/print-partner-kyc/${id}/escalate`, { reason: trimmed });
     },
 
-    restartDigio: (id: string) =>
-        live().post<{ kycId: string; validTill: string; digioStatus: "pending"; notified: boolean }>(`/print-partner-kyc/${id}/digio/restart`, {}),
+    /** Phase D: 409 `ENTITY_TYPE_REQUIRED` while the shop's entity type is unknown — sent again with the one the picker chose. */
+    restartDigio: (id: string, entityType?: KycEntityType) =>
+        live().post<{ kycId: string; validTill: string; digioStatus: "pending"; notified: boolean }>(`/print-partner-kyc/${id}/digio/restart`, entityType ? { entityType } : {}),
 };

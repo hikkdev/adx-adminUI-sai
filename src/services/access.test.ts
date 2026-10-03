@@ -51,6 +51,28 @@ describe("shapeGrant", () => {
         expect(view.partyType).toBe("advertiser");
     });
 
+    it("names an advertiser grant by the advertiser's name", () => {
+        const view = shapeGrant(
+            grant({ publisher: null, publisherId: null, advertiserId: "adv_1", advertiser: { id: "adv_1", name: "Chai Point", userId: "usr_2" } })
+        );
+        expect(view.party).toBe("Chai Point");
+        expect(view.partyType).toBe("advertiser");
+    });
+
+    it("names the agent, keeps the AGT id beside it, and never falls back to the raw id", () => {
+        const named = shapeGrant(grant({ assignedAgent: { id: "agt_1", userId: "usr_agent", displayId: "AGT-0007", user: { name: "Ravi Kumar" } } }));
+        expect(named.agentName).toBe("Ravi Kumar");
+        expect(named.agentDisplayId).toBe("AGT-0007");
+        expect(named.agentId).toBe("agt_1");
+
+        const unnamed = shapeGrant(grant({ assignedAgent: { id: "agt_1", userId: "usr_agent", displayId: "AGT-0007", user: { name: null } } }));
+        expect(unnamed.agentName).toBe("AGT-0007");
+
+        const bare = shapeGrant(grant({ assignedAgent: { id: "agt_1", userId: "usr_agent" } }));
+        expect(bare.agentName).toBe("Agent");
+        expect(bare.agentDisplayId).toBeNull();
+    });
+
     it("can no longer be withdrawn once it ended", () => {
         expect(shapeGrant(grant({ status: "EXPIRED" })).canRevoke).toBe(false);
         expect(shapeGrant(grant({ status: "REVOKED", revokedAt: "2026-09-11T00:00:00.000Z" })).canRevoke).toBe(false);

@@ -4,6 +4,8 @@ import * as React from "react";
 import Link from "next/link";
 import { ExternalLink, List, LocateFixed, MapPinOff, Minus, Plus, Search } from "lucide-react";
 import { MapSurface, type MapPoint } from "@/components/adx/map";
+import { MapToneSwitch, mapControlButton, mapControlSurface } from "@/components/adx/map-tone-switch";
+import { useMapTone } from "@/lib/use-map-tone";
 import { cameraFor, cameraInto, stepZoom, type Camera } from "@/lib/map-geometry";
 import type { MapsClientConfig } from "@/services/maps";
 import { cn } from "@/lib/utils";
@@ -19,6 +21,7 @@ import { formatMoney, formatNumber } from "@/lib/format";
 import {
     LISTING_LIFECYCLE,
     LISTING_STATUS_TONE,
+    listingCategoryLabel,
     listingStatusLabel,
     type AdminListingsPage,
     type ListingLifecycle,
@@ -42,9 +45,8 @@ const INDIA: Camera = { latitude: 21.5, longitude: 79, zoom: 4 };
 /** The zoom a chosen pin is shown at: close enough to read its street, never further out than the operator already is. */
 const PIN_ZOOM = 15;
 
-/** The category names the API keeps, as the chips print them. */
-const categoryLabel = (category: string): string =>
-    category.charAt(0) + category.slice(1).toLowerCase().replace(/_/g, " ");
+/** The category names the API keeps, as the chips print them — the console's one label map. */
+const categoryLabel = listingCategoryLabel;
 
 /**
  * The inventory map, live — the frame's three-column layout (`5102:37531`)
@@ -100,6 +102,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
     /* The camera is the operator's: it starts on the largest city and moves
        for a chip, a rail row, a bubble or the buttons — and follows a drag. */
     const [camera, setCamera] = React.useState<Camera>(() => cameraFor(allClusters[0]?.pins ?? []) ?? INDIA);
+    const [tone, setTone] = useMapTone();
     const points = React.useMemo(() => filtered.map(toPoint), [filtered]);
 
     const showCluster = (cluster: Cluster) => {
@@ -143,7 +146,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                 actions={
                     <>
                         <Button variant="outline" className="bg-card" asChild>
-                            <Link href="/listings">
+                            <Link href="/listings/directory">
                                 <List className="mr-1.5 size-4" />
                                 List view
                             </Link>
@@ -262,6 +265,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                         <div className="absolute inset-0">
                             <MapSurface
                                 config={mapsConfig}
+                                tone={tone}
                                 points={points}
                                 camera={camera}
                                 onCameraChange={setCamera}
@@ -308,11 +312,12 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                         </div>
 
                         {/* Map controls */}
-                        <div className="absolute right-4 top-16 z-10 flex flex-col overflow-hidden rounded-md border bg-card shadow-sm">
+                        <MapToneSwitch tone={tone} onChange={setTone} className="absolute bottom-4 left-4 z-10" />
+                        <div className={cn("absolute right-4 top-16 z-10 flex flex-col overflow-hidden rounded-md", mapControlSurface(tone))}>
                             <button
                                 type="button"
                                 aria-label="Zoom in"
-                                className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted"
+                                className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))}
                                 onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, 1) }))}
                             >
                                 <Plus className="size-4" />
@@ -320,7 +325,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                             <button
                                 type="button"
                                 aria-label="Zoom out"
-                                className="flex size-8 items-center justify-center border-b transition-colors hover:bg-muted"
+                                className={cn("flex size-8 items-center justify-center border-b transition-colors", mapControlButton(tone))}
                                 onClick={() => setCamera((current) => ({ ...current, zoom: stepZoom(current.zoom, -1) }))}
                             >
                                 <Minus className="size-4" />
@@ -328,7 +333,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                             <button
                                 type="button"
                                 aria-label="Reset view"
-                                className="flex size-8 items-center justify-center transition-colors hover:bg-muted"
+                                className={cn("flex size-8 items-center justify-center transition-colors", mapControlButton(tone))}
                                 onClick={() => {
                                     setSelectedPinId(null);
                                     setCamera(cameraFor(selected?.pins ?? []) ?? INDIA);
@@ -405,7 +410,7 @@ export function InventoryMap({ page, mapsConfig }: InventoryMapProps) {
                             </ul>
                             {selected && (
                                 <Button variant="outline" className="mt-3 w-full bg-card" asChild>
-                                    <Link href="/listings">Open cluster in list</Link>
+                                    <Link href="/listings/directory">Open cluster in list</Link>
                                 </Button>
                             )}
                         </div>

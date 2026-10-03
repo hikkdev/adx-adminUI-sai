@@ -39,7 +39,7 @@ vi.mock("@/services/geo", async (importOriginal) => {
 
 import { kycMixItems } from "@/services/section-overviews";
 import { MixBar } from "./mix-bar";
-import { CountTile, MoneyTile } from "./stat-tile";
+import { CostTile, CountTile, MoneyTile } from "./stat-tile";
 import { useOverviewWindow } from "./use-overview-window";
 import { WindowPicker } from "./window-picker";
 
@@ -147,6 +147,51 @@ describe("a tile's delta", () => {
         expect(screen.getByText("₹1,250.50")).toBeInTheDocument();
         expect(screen.getByTestId("stat-delta")).toHaveTextContent("+25.1%");
         expect(screen.getByTestId("stat-delta")).toHaveAttribute("title", "₹1,000.00 in the previous window");
+    });
+});
+
+/**
+ * CP-2: the cost tile.
+ *
+ * Three behaviours are pinned here because each is a decision someone could
+ * quietly undo: there is never an arrow (nothing computes a previous cost),
+ * null never prints as ₹0 (it means "not recorded", and a zero would say the
+ * work was free), and the hint always names the self-serve half so nobody
+ * reads the figure as the cost of every account on the platform.
+ */
+describe("the cost-per-onboarding tile", () => {
+    const cost = {
+        side: "PUBLISHER" as const,
+        perOnboarding: "1400.00",
+        allInPerOnboarding: "1600.00",
+        salary: "42000.00",
+        rewards: "2800.00",
+        commission: "6400.00",
+        basis: "44800.00",
+        allIn: "51200.00",
+        onboardings: { byAgent: 32, selfServe: 8 },
+        agentsOnTerms: 4,
+    };
+
+    it("prints the figure, names both halves of the denominator, and draws no movement", () => {
+        render(<CostTile label="Cost per publisher onboarded" cost={cost} noun="publisher" />);
+        expect(screen.getByText("₹1,400.00")).toBeInTheDocument();
+        expect(screen.getByText(/32 by agents, 8 self-serve/)).toBeInTheDocument();
+        expect(screen.getByText(/₹1,600.00 with commission/)).toBeInTheDocument();
+        // No previous cost exists, so no arrow may be drawn.
+        expect(screen.queryByTestId("stat-delta")).toBeNull();
+    });
+
+    it("says nothing was onboarded rather than printing a zero", () => {
+        render(<CostTile label="Cost per publisher onboarded" cost={{ ...cost, perOnboarding: null, allInPerOnboarding: null, onboardings: { byAgent: 0, selfServe: 3 } }} noun="publisher" />);
+        expect(screen.getByText("Not recorded")).toBeInTheDocument();
+        expect(screen.getByText("No publisher was onboarded by an agent in this window")).toBeInTheDocument();
+    });
+
+    it("distinguishes onboardings with no salary on record from no onboardings at all", () => {
+        render(<CostTile label="Cost per publisher onboarded" cost={{ ...cost, perOnboarding: null, allInPerOnboarding: null, agentsOnTerms: 0 }} noun="publisher" />);
+        expect(screen.getByText("Not recorded")).toBeInTheDocument();
+        expect(screen.getByText("32 onboarded, but no agent here has a salary on record")).toBeInTheDocument();
     });
 });
 

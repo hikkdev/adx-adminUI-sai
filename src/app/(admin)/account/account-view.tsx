@@ -20,7 +20,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { ApiError } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import type { TwoFactorStatus } from "@/services/two-factor";
-import { usersService, type WireMe, type WireSession } from "@/services/users";
+import { sessionPlace, usersService, type WireMe, type WireSession } from "@/services/users";
 import { USER_ROLE_META } from "@/types";
 import { AuthenticatorCard } from "./authenticator-card";
 
@@ -134,9 +134,6 @@ export function AccountView({ me, sessions, twoFactor, onChanged }: AccountViewP
                     <div className="space-y-1.5">
                         <Label htmlFor="acc-phone">Phone</Label>
                         <Input id="acc-phone" value={me.mobile} disabled />
-                        <p className="text-xs text-muted-foreground">
-                            Changed from your own device with a code at each end, never from the desk.
-                        </p>
                     </div>
                     <div className="space-y-1.5">
                         <Label>Roles</Label>
@@ -144,6 +141,10 @@ export function AccountView({ me, sessions, twoFactor, onChanged }: AccountViewP
                             {me.roles.map((role) => USER_ROLE_META[role]?.label ?? role).join(", ")}
                         </p>
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-3 text-xs text-muted-foreground md:col-span-2">
+                        The phone is changed from your own device with a code at each end, never from the desk.
+                    </p>
                 </div>
                 {dirty && (
                     <div className="mt-5 flex justify-end gap-2 border-t pt-4">
@@ -236,7 +237,8 @@ export function AccountView({ me, sessions, twoFactor, onChanged }: AccountViewP
                                             )}
                                         </p>
                                         <p className="text-xs text-muted-foreground">
-                                            {[session.ipAddress, session.lastUsedAt ? `Last used ${formatDateTime(session.lastUsedAt)}` : `Since ${formatDateTime(session.createdAt)}`]
+                                            {/* SL-1: where it signed in from, once the lookup under Settings › Integrations has said. */}
+                                            {[session.ipAddress, sessionPlace(session), session.lastUsedAt ? `Last used ${formatDateTime(session.lastUsedAt)}` : `Since ${formatDateTime(session.createdAt)}`]
                                                 .filter(Boolean)
                                                 .join(" · ")}
                                         </p>

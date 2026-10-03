@@ -69,6 +69,7 @@ import {
     contactTakenOf,
     displayNameOf,
     filterUsers,
+    sessionPlace,
     shapeUserRow,
     userEditDiff,
     userStatusOf,
@@ -105,8 +106,8 @@ describe("status", () => {
 
 describe("display name", () => {
     it("falls back from name to the email's local part to the mobile, never blank", () => {
-        expect(displayNameOf({ name: "  Asha Rao ", email: "a@adx.co" })).toBe("Asha Rao");
-        expect(displayNameOf({ name: null, email: "kabir.m@adx.co" })).toBe("kabir.m");
+        expect(displayNameOf({ name: "  Asha Rao ", email: "a@adx.in" })).toBe("Asha Rao");
+        expect(displayNameOf({ name: null, email: "kabir.m@adx.in" })).toBe("kabir.m");
         expect(displayNameOf({ name: "  ", email: null, mobile: "+919800000000" })).toBe("+919800000000");
         expect(displayNameOf({ name: null, email: null })).toBe("ADX user");
     });
@@ -115,6 +116,12 @@ describe("display name", () => {
         const row = shapeUserRow(wire({ name: null, isActive: false }));
         expect(row.displayName).toBe("sanjay");
         expect(row.status).toBe("deactivated");
+    });
+
+    it("keeps the person's own id off the list row — the id, a null, or nothing from an older backend", () => {
+        expect(shapeUserRow(wire({ displayId: "ADX-2909-2601" })).displayId).toBe("ADX-2909-2601");
+        expect(shapeUserRow(wire({ displayId: null })).displayId).toBeNull();
+        expect(shapeUserRow(wire()).displayId).toBeUndefined();
     });
 });
 
@@ -145,7 +152,7 @@ describe("the query", () => {
     it("applies only the active/deactivated split to the answered list", () => {
         const rows = [
             shapeUserRow(wire()),
-            shapeUserRow(wire({ id: "u2", name: "Priya Rao", email: "priya.rao@adx.co", roles: ["ADMIN"] })),
+            shapeUserRow(wire({ id: "u2", name: "Priya Rao", email: "priya.rao@adx.in", roles: ["ADMIN"] })),
             shapeUserRow(wire({ id: "u3", name: null, email: null, mobile: "+919900011122", roles: ["AGENT_PUBLISHER"], isActive: false })),
         ];
         expect(filterUsers(rows, { status: ["deactivated"] }).map((r) => r.id)).toEqual(["u3"]);
@@ -195,15 +202,15 @@ describe("the wire", () => {
     });
 
     it("invites without sending an undefined role, and works the invite's own routes", async () => {
-        backend.answer = { id: "inv_1", email: "x@adx.co" };
-        await usersService.invite({ email: "x@adx.co", method: "PASSWORD" });
-        await usersService.invite({ email: "y@adx.co", method: "GOOGLE", roleConfigId: "r1" });
+        backend.answer = { id: "inv_1", email: "x@adx.in" };
+        await usersService.invite({ email: "x@adx.in", method: "PASSWORD" });
+        await usersService.invite({ email: "y@adx.in", method: "GOOGLE", roleConfigId: "r1" });
         await usersService.resendInvite("inv_1");
         await usersService.revokeInvite("inv_1");
 
-        expect(backend.calls[0].body).toEqual({ email: "x@adx.co", method: "PASSWORD" });
+        expect(backend.calls[0].body).toEqual({ email: "x@adx.in", method: "PASSWORD" });
         expect(Object.keys(backend.calls[0].body as object)).not.toContain("roleConfigId");
-        expect(backend.calls[1].body).toEqual({ email: "y@adx.co", method: "GOOGLE", roleConfigId: "r1" });
+        expect(backend.calls[1].body).toEqual({ email: "y@adx.in", method: "GOOGLE", roleConfigId: "r1" });
         expect(backend.calls.slice(2).map((c) => `${c.method} ${c.path}`)).toEqual([
             "POST /users/invites/inv_1/resend",
             "DELETE /users/invites/inv_1",
@@ -211,7 +218,7 @@ describe("the wire", () => {
     });
 
     it("reads and accepts an invitation anonymously, the token URL-encoded", async () => {
-        backend.answer = { email: "x@adx.co", method: "PASSWORD", expiresAt: null, valid: true };
+        backend.answer = { email: "x@adx.in", method: "PASSWORD", expiresAt: null, valid: true };
         await usersService.describeInvite("ab/cd+ef");
         expect(backend.calls[0]).toEqual({
             method: "GET",
@@ -222,7 +229,7 @@ describe("the wire", () => {
 
         backend.answer = { stage: "OTP_SENT", mobile: "+919845012345", expiresInSeconds: 300, resendAfterSeconds: 60, sendsRemaining: 2 };
         await usersService.acceptInvite({ token: "t", name: "Asha", mobile: "+919845012345" });
-        backend.answer = { stage: "ACCEPTED", user: { id: "u9", email: "x@adx.co", mobile: "+919845012345", name: "Asha" }, roles: ["ADMIN"] };
+        backend.answer = { stage: "ACCEPTED", user: { id: "u9", email: "x@adx.in", mobile: "+919845012345", name: "Asha" }, roles: ["ADMIN"] };
         await usersService.acceptInvite({ token: "t", name: "Asha", mobile: "+919845012345", otpCode: "123456", password: "hunter22" });
 
         expect(backend.calls[1]).toMatchObject({
@@ -269,7 +276,7 @@ describe("K-B1: the directory", () => {
         const directory = await usersService.directory({ state: "ACTIVE" });
         expect(backend.calls[0].path).toBe("/users?state=ACTIVE");
         expect(directory.rows.map((row) => row.status)).toEqual(["active", "deactivated"]);
-        expect(directory.counts).toEqual({ ACTIVE: 4, INACTIVE: 1, CLOSED: 0 });
+        expect(directory.counts).toEqual({ ACTIVE: 4, INACTIVE: 1, CLOSED: 0, ERASED: 0 });
         expect(directory.total).toBe(2);
     });
 
@@ -306,6 +313,29 @@ describe("K-B1: the editor's diff", () => {
         const taken = contactTakenOf(new ApiError(409, "CONTACT_TAKEN", "Taken.", { which: "PRIMARY", userId: "u9", kind: "EMAIL", value: "a@b.in" }));
         expect(taken && contactTakenMessage(taken)).toBe("a@b.in is already on account u9 as their sign-in email.");
         expect(contactTakenOf(new ApiError(409, "CONFLICT", "No."))).toBeNull();
+    });
+});
+
+/* SL-1: where a session signed in from, beside its address. */
+describe("SL-1: a session's place", () => {
+    it("joins whatever of city, region and country is known, and is nothing until the lookup said", () => {
+        expect(sessionPlace({ city: "Bengaluru", region: "Karnataka", country: "India" })).toBe("Bengaluru, Karnataka, India");
+        expect(sessionPlace({ city: null, region: null, country: "India" })).toBe("India");
+        expect(sessionPlace({ city: null, region: null, country: null })).toBeNull();
+        expect(sessionPlace({})).toBeNull();
+    });
+});
+
+/* ED-1: proving the account's own email — the two routes behind the console's gate. */
+describe("ED-1: the email code", () => {
+    it("sends to the normalised address and verifies with the same address and the code in capitals", async () => {
+        backend.answer = { email: "priya@adx.in", expiresInSeconds: 600, resendAfterSeconds: 60, sendsRemaining: 2 };
+        await usersService.sendMyEmailCode(" Priya@ADX.in ");
+        await usersService.verifyMyEmail("Priya@ADX.in", " sg8gfuyq ");
+        expect(backend.calls.map((call) => [`${call.method} ${call.path}`, call.body])).toEqual([
+            ["POST /users/me/email/send-code", { email: "priya@adx.in" }],
+            ["POST /users/me/email/verify", { email: "priya@adx.in", code: "SG8GFUYQ" }],
+        ]);
     });
 });
 

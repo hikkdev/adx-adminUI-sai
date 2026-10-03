@@ -55,8 +55,8 @@ export function BoardHeader({
                 <ChevronLeft className="size-4" />
                 Flow Editor
             </Link>
-            <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-                <div className="min-w-0">
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
                     <Input
                         value={label}
                         onChange={(event) => onLabel(event.target.value)}
@@ -90,7 +90,7 @@ export function BoardHeader({
                         </label>
                     </div>
                 </div>
-                <Button onClick={onSave} disabled={!dirty || busy}>
+                <Button onClick={onSave} disabled={!dirty || busy} className="shrink-0">
                     {busy ? "Saving…" : dirty ? "Save changes" : "Saved"}
                 </Button>
             </div>

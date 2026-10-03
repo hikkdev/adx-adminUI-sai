@@ -3,21 +3,25 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus, Printer, Smartphone } from "lucide-react";
+import { Plus, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
-import { DataTable, SortableHeader } from "@/components/adx/data-table";
+import { SortableHeader } from "@/components/adx/data-table";
 import { EmptyState } from "@/components/adx/empty-state";
-import { FilterChips } from "@/components/adx/filter-chips";
 import { PageHeader } from "@/components/adx/page-header";
 import { StatusBadge } from "@/components/adx/status-badge";
-import { VerifiedTick } from "@/components/adx/verified-tick";
+import { hiddenExtras, partyRosterColumns, type PartyRosterSpec, type RosterRowAction } from "@/components/adx/party-roster-columns";
+import { PartyRosterFilterBar, type PartyRosterFilterSpec, type PartyRosterFilterState, type RosterOwnFacet } from "@/components/adx/party-roster-filter-bar";
+import { SUSPEND_PERMISSION, isClosedAccount, kycReviewHref, useRosterPermission } from "@/components/adx/party-roster-row-actions";
+import { PartyRosterTable, type PartyRosterView } from "@/components/adx/party-roster-table";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { shapeKycSummary } from "@/services/kyc-state";
+import { PRINT_PARTNER_DOOR_OPTIONS, ROSTER_ANY, rosterFiltersActive } from "@/services/party-roster";
 import {
+    PRINT_PARTNER_STATUS_OPTIONS,
     SIGN_IN_STATE_META,
     lastSignInLabel,
     canActivate,
@@ -25,63 +29,224 @@ import {
     printPartnerService,
     signInState,
     type PrintPartner,
-    type PrintPartnerPage,
 } from "@/services/print-partners";
+import { onboardingLine } from "@/types";
 import { PartnerDialog } from "./partner-dialog";
-import { CityCombobox } from "@/components/adx/city-combobox";
-import { CITY_STAGES } from "@/services/geo";
-import type { CityFacet } from "@/lib/city-facet";
 
-export type ActiveFilter = "ACTIVE" | "INACTIVE" | "ALL";
-/** Lot H: the app state, cut on the page in hand — the list route has no facet for it. */
+/** Lot H: the app state, cut on the rows in hand — the list route has no facet for it. */
 export type SignInFilter = "ACTIVE" | "INVITED" | "APPLIED" | "ALL";
 
 interface PrintPartnersViewProps {
-    page: PrintPartnerPage;
-    q: string;
-    onQChange: (q: string) => void;
-    /** The city facet as typed; a catalogued pick carries the city's slug beside it, and that is what the request sends. */
-    city: CityFacet;
-    onCityChange: (city: CityFacet) => void;
-    active: ActiveFilter;
-    onActiveChange: (active: ActiveFilter) => void;
+    /** Shops that applied from the app and wait for the desk to activate them — the server's count over the whole roster. */
+    applicationsWaiting?: number;
+    view: PartyRosterView<PrintPartner>;
+    filters: PartyRosterFilterState;
     signIn: SignInFilter;
     onSignInChange: (signIn: SignInFilter) => void;
     onChanged: () => void;
 }
 
 /**
+ * The bar's print-partner half: the three doors a shop comes through, no
+ * type — a shop has none, so the app state takes Type's slot — and the
+ * shared Status select — Active, Deactivated, Closed, Everyone (a shop is
+ * never suspended by sections).
+ */
+export const PRINT_PARTNER_FILTER_SPEC: PartyRosterFilterSpec = {
+    searchPlaceholder: "Search name, ID, phone, email, city",
+    doors: PRINT_PARTNER_DOOR_OPTIONS,
+    idPrefix: "print-partners",
+    statuses: PRINT_PARTNER_STATUS_OPTIONS,
+};
+
+/** The app-state select's options, after "Any app state". */
+export const APP_STATE_OPTIONS: readonly { value: Exclude<SignInFilter, "ALL">; label: string }[] = [
+    { value: "ACTIVE", label: "Signed in" },
+    { value: "APPLIED", label: "Applied from the app" },
+    { value: "INVITED", label: "Invited, not signed in" },
+];
+
+/** The app state as the bar's own-facet select — "Any app state" is the bar's `ROSTER_ANY`. */
+export function appStateFacet(signIn: SignInFilter, onChange: (signIn: SignInFilter) => void): RosterOwnFacet {
+    return {
+        label: "App state",
+        all: "Any app state",
+        value: signIn === "ALL" ? ROSTER_ANY : signIn,
+        options: APP_STATE_OPTIONS,
+        onChange: (value) => onChange(value === ROSTER_ANY ? "ALL" : (value as SignInFilter)),
+    };
+}
+
+/**
+ * The print partner's status slot in the shared row menu: "Activate" for
+ * an application or an invite not yet switched on, then "Deactivate"
+ * (danger) or "Reactivate". Nothing without `print.suspend` — the routes'
+ * permission — and nothing on a closed account (2 Oct 2026: the roster row
+ * carries its `accountState`), as on every other desk: the server refuses
+ * to reactivate one, and a closed shop stays closed.
+ */
+export function printPartnerStatusActions(
+    row: PrintPartner,
+    options: { allowed: boolean; busy: boolean; onActivate: () => void; onDeactivate: () => void; onReactivate: () => void },
+): RosterRowAction[] {
+    if (!options.allowed || isClosedAccount(row.accountState)) return [];
+    return [
+        ...(canActivate(row) ? [{ label: "Activate", onSelect: options.onActivate, disabled: options.busy }] : []),
+        row.isActive
+            ? { label: "Deactivate", destructive: true, disabled: options.busy, onSelect: options.onDeactivate }
+            : { label: "Reactivate", onSelect: options.onReactivate, disabled: options.busy },
+    ];
+}
+
+/** "Review KYC" for a print-partner row: the case (`/kyc/print-partners/<kycId>`) when there is one, else the queue searched for it. */
+export const printPartnerKycHref = (row: PrintPartner): string =>
+    kycReviewHref("PRINT_PARTNER", { id: row.id, kycId: row.kyc?.kycId, search: row.displayId ?? row.name });
+
+/**
+ * What this desk showed beyond the shared layout — kept, hidden until the
+ * table's "Columns" menu turns them on: the legal name and the contact
+ * person, what the shop prints, its tax ids, the app state, the last
+ * sign-in, and how it takes quotes.
+ */
+export const PRINT_PARTNER_EXTRA_COLUMNS: ColumnDef<PrintPartner>[] = [
+    {
+        id: "legal-name",
+        accessorFn: (row) => row.legalName ?? "",
+        header: "Legal name",
+        cell: ({ row }) => <span className="block max-w-[14rem] truncate text-muted-foreground">{row.original.legalName ?? "—"}</span>,
+    },
+    {
+        id: "contact-person",
+        accessorFn: (row) => row.contactName ?? "",
+        header: "Contact person",
+        cell: ({ row }) => <span className="block max-w-[12rem] truncate text-muted-foreground">{row.original.contactName ?? "—"}</span>,
+    },
+    {
+        id: "prints",
+        header: "Prints",
+        cell: ({ row }) => (
+            <div className="min-w-0 max-w-[16rem]">
+                <p className="truncate text-xs text-foreground" title={capabilitiesLine(row.original)}>
+                    {capabilitiesLine(row.original)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                    {[
+                        row.original.maxWidthFt ? `up to ${row.original.maxWidthFt} ft` : null,
+                        row.original.turnaroundDays !== null ? `${row.original.turnaroundDays}-day turnaround` : null,
+                    ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                </p>
+            </div>
+        ),
+    },
+    {
+        id: "gstin-pan",
+        header: "GSTIN / PAN",
+        cell: ({ row }) => (
+            <div className="font-mono text-xs text-muted-foreground">
+                <p>{row.original.gstin ?? "—"}</p>
+                <p>{row.original.panNumber ?? "—"}</p>
+            </div>
+        ),
+    },
+    {
+        id: "app",
+        accessorFn: (row) => signInState(row),
+        header: "App",
+        cell: ({ row }) => {
+            const state = signInState(row.original);
+            return (
+                <div className="min-w-0">
+                    <StatusBadge status={SIGN_IN_STATE_META[state]} />
+                    <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                        {state === "ACTIVE" && row.original.activatedAt
+                            ? `since ${formatDate(row.original.activatedAt)}`
+                            : state === "APPLIED" && row.original.appliedAt
+                              ? `applied ${formatDate(row.original.appliedAt)} — review`
+                              : state === "INVITED"
+                                ? "account not switched on"
+                                : "sessions ended"}
+                    </p>
+                </div>
+            );
+        },
+    },
+    {
+        /* G13-B: `lastLoginAt` — when the partner last signed in to the app; "never" once activated and still unseen. */
+        id: "last-sign-in",
+        accessorFn: (row) => row.lastLoginAt ?? "",
+        header: ({ column }) => <SortableHeader column={column}>Last sign-in</SortableHeader>,
+        cell: ({ row }) => (
+            <span className={cn("whitespace-nowrap text-xs", row.original.lastLoginAt ? "text-muted-foreground" : "text-muted-foreground/70")}>
+                {lastSignInLabel(row.original, formatDateTime)}
+            </span>
+        ),
+    },
+    {
+        id: "quotes",
+        header: "Quotes",
+        cell: ({ row }) => (
+            <div className="flex flex-wrap gap-1">
+                {row.original.rateCard.hasRateCard && <StatusBadge status={{ label: "Rate card", tone: "success" }} />}
+                {row.original.acceptsQuoteRequests && <StatusBadge status={{ label: "Takes requests", tone: "info" }} />}
+                {!row.original.rateCard.hasRateCard && !row.original.acceptsQuoteRequests && <span className="text-xs text-muted-foreground">By name only</span>}
+            </div>
+        ),
+    },
+];
+
+/**
+ * The print-partner roster — 29 Sep 2026, on the shared party layout
+ * (`party-roster-columns`): Name · Contact · City · KYC status · Activity
+ * (the jobs) · Joined · Onboarded — no Type, a shop has none — and the
+ * shared filter bar. The row menu is the shared one: View details, Review
+ * KYC, then Activate and Deactivate or Reactivate in the status slot —
+ * none of them on a closed account.
+ */
+export function printPartnerRosterSpec(
+    open: (row: PrintPartner) => void,
+    reviewKyc: (row: PrintPartner) => void,
+    statusActions?: (row: PrintPartner) => RosterRowAction[],
+): PartyRosterSpec<PrintPartner> {
+    return {
+        idOwner: "PARTNER",
+        name: (row) => row.name,
+        displayId: (row) => row.displayId,
+        mobile: (row) => row.mobile,
+        email: (row) => row.email,
+        city: (row) => row.city,
+        kycState: (row) => shapeKycSummary(row.kyc, row.kycStatus).state,
+        suspensionScopes: () => undefined,
+        // 2 Oct 2026: the account-state pill every desk draws — Deactivated, Closed.
+        accountState: (row) => row.accountState,
+        // A server one release behind sends no state; the row's own switch still says "off the roster" then.
+        statusChip: (row) => (row.isActive || row.accountState ? null : <StatusBadge status={{ label: "Off the roster", tone: "neutral" }} />),
+        activity: { count: (row) => row.jobCount ?? null, noun: ["job", "jobs"], title: "Print jobs, every status" },
+        joinedAt: (row) => row.createdAt,
+        // The door the shop came through — a server one release behind sends none, and the row's own application stamp stands in.
+        onboarded: (row) => (row.onboarding ? onboardingLine(row.onboarding) : row.appliedAt ? "Self-serve" : "Desk"),
+        open,
+        reviewKyc,
+        statusActions,
+        extraColumns: PRINT_PARTNER_EXTRA_COLUMNS,
+    };
+}
+
+/**
  * The roster of shops ADX pays to print.
  *
- * Search, city and the active facet are the server's — the page arrives cut
- * and counted — so the table's own search box is not drawn: two searches
- * over one list, one of which only sees a page, is how a shop goes missing.
+ * Search, door, KYC state, city and the roster facet are the server's — the
+ * page arrives cut and counted — so the table's own search box is not
+ * drawn: two searches over one list, one of which only sees a page, is how
+ * a shop goes missing.
  */
-export function PrintPartnersView({
-    page,
-    q,
-    onQChange,
-    city,
-    onCityChange,
-    active,
-    onActiveChange,
-    signIn,
-    onSignInChange,
-    onChanged,
-}: PrintPartnersViewProps) {
+export function PrintPartnersView({ view, filters, signIn, onSignInChange, applicationsWaiting = 0, onChanged }: PrintPartnersViewProps) {
     const router = useRouter();
-    /* Lot H: counted over the page in hand, which is the whole roster up to a hundred shops. */
-    const signInCounts = React.useMemo(() => {
-        const out: Record<SignInFilter, number> = { ACTIVE: 0, INVITED: 0, APPLIED: 0, ALL: page.items.length };
-        for (const partner of page.items) {
-            const state = signInState(partner);
-            if (state === "ACTIVE" || state === "INVITED" || state === "APPLIED") out[state] += 1;
-        }
-        return out;
-    }, [page.items]);
-    const rows = React.useMemo(
-        () => (signIn === "ALL" ? page.items : page.items.filter((partner) => signInState(partner) === signIn)),
-        [page.items, signIn]
+    const allowed = useRosterPermission(SUSPEND_PERMISSION.PRINT_PARTNER);
+    const shown = React.useMemo<PartyRosterView<PrintPartner>>(
+        () => (signIn === "ALL" ? view : { ...view, rows: view.rows.filter((partner) => signInState(partner) === signIn) }),
+        [view, signIn],
     );
     const [adding, setAdding] = React.useState(false);
     const [deactivating, setDeactivating] = React.useState<PrintPartner | null>(null);
@@ -141,158 +306,29 @@ export function PrintPartnersView({
         [onChanged]
     );
 
-    const columns = React.useMemo<ColumnDef<PrintPartner>[]>(
-        () => [
-            {
-                id: "name",
-                accessorKey: "name",
-                header: ({ column }) => <SortableHeader column={column}>Shop</SortableHeader>,
-                cell: ({ row }) => (
-                    <div className="min-w-0">
-                        <p className="flex items-center gap-1.5 truncate font-medium text-foreground">
-                            {row.original.name}
-                            <VerifiedTick kycStatus={row.original.kycStatus} />
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                            {[row.original.displayId, row.original.legalName].filter(Boolean).join(" · ") || "—"}
-                        </p>
-                    </div>
+    const columns = React.useMemo(
+        () =>
+            partyRosterColumns(
+                printPartnerRosterSpec(
+                    (row) => router.push(`/print-partners/${row.id}`),
+                    (row) => router.push(printPartnerKycHref(row)),
+                    (row) =>
+                        printPartnerStatusActions(row, {
+                            allowed,
+                            busy,
+                            onActivate: () => void activate(row),
+                            onDeactivate: () => {
+                                setReason("");
+                                setDeactivating(row);
+                            },
+                            onReactivate: () => void reactivate(row),
+                        }),
                 ),
-            },
-            {
-                id: "contact",
-                accessorFn: (row) => `${row.contactName ?? ""} ${row.mobile}`,
-                header: "Contact",
-                cell: ({ row }) => (
-                    <div className="min-w-0">
-                        <p className="truncate text-foreground">{row.original.contactName ?? "—"}</p>
-                        <p className="truncate font-mono text-xs text-muted-foreground">{row.original.mobile}</p>
-                    </div>
-                ),
-            },
-            {
-                id: "city",
-                accessorKey: "city",
-                header: ({ column }) => <SortableHeader column={column}>City</SortableHeader>,
-                cell: ({ row }) => <span className="text-muted-foreground">{row.original.city ?? "—"}</span>,
-            },
-            {
-                id: "capabilities",
-                header: "Prints",
-                cell: ({ row }) => (
-                    <div className="min-w-0 max-w-[16rem]">
-                        <p className="truncate text-xs text-foreground" title={capabilitiesLine(row.original)}>
-                            {capabilitiesLine(row.original)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            {[
-                                row.original.maxWidthFt ? `up to ${row.original.maxWidthFt} ft` : null,
-                                row.original.turnaroundDays !== null ? `${row.original.turnaroundDays}-day turnaround` : null,
-                            ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                        </p>
-                    </div>
-                ),
-            },
-            {
-                id: "tax",
-                header: "GSTIN / PAN",
-                cell: ({ row }) => (
-                    <div className="font-mono text-xs text-muted-foreground">
-                        <p>{row.original.gstin ?? "—"}</p>
-                        <p>{row.original.panNumber ?? "—"}</p>
-                    </div>
-                ),
-            },
-            {
-                id: "since",
-                accessorKey: "createdAt",
-                header: ({ column }) => <SortableHeader column={column}>Since</SortableHeader>,
-                cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{formatDate(row.original.createdAt)}</span>,
-            },
-            {
-                id: "status",
-                accessorFn: (row) => signInState(row),
-                header: "App",
-                cell: ({ row }) => {
-                    const state = signInState(row.original);
-                    return (
-                        <div className="min-w-0">
-                            <StatusBadge status={SIGN_IN_STATE_META[state]} />
-                            <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
-                                {state === "ACTIVE" && row.original.activatedAt
-                                    ? `since ${formatDate(row.original.activatedAt)}`
-                                    : state === "APPLIED" && row.original.appliedAt
-                                      ? `applied ${formatDate(row.original.appliedAt)} — review`
-                                      : state === "INVITED"
-                                        ? "account not switched on"
-                                        : "sessions ended"}
-                            </p>
-                        </div>
-                    );
-                },
-            },
-            {
-                /* G13-B: `lastLoginAt` — when the partner last signed in to the app; "never" once activated and still unseen. */
-                id: "lastSignIn",
-                accessorFn: (row) => row.lastLoginAt ?? "",
-                header: ({ column }) => <SortableHeader column={column}>Last sign-in</SortableHeader>,
-                cell: ({ row }) => (
-                    <span className={cn("whitespace-nowrap text-xs", row.original.lastLoginAt ? "text-muted-foreground" : "text-muted-foreground/70")}>
-                        {lastSignInLabel(row.original, formatDateTime)}
-                    </span>
-                ),
-            },
-            {
-                id: "quotes",
-                header: "Quotes",
-                cell: ({ row }) => (
-                    <div className="flex flex-wrap gap-1">
-                        {row.original.rateCard.hasRateCard && <StatusBadge status={{ label: "Rate card", tone: "success" }} />}
-                        {row.original.acceptsQuoteRequests && <StatusBadge status={{ label: "Takes requests", tone: "info" }} />}
-                        {!row.original.rateCard.hasRateCard && !row.original.acceptsQuoteRequests && (
-                            <span className="text-xs text-muted-foreground">By name only</span>
-                        )}
-                    </div>
-                ),
-            },
-            {
-                id: "actions",
-                enableHiding: false,
-                header: "",
-                cell: ({ row }) => (
-                    <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
-                        {canActivate(row.original) && (
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void activate(row.original)}>
-                                <Smartphone className="mr-1.5 size-4" />
-                                Activate
-                            </Button>
-                        )}
-                        {row.original.isActive ? (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-danger hover:text-danger"
-                                disabled={busy}
-                                onClick={() => {
-                                    setReason("");
-                                    setDeactivating(row.original);
-                                }}
-                            >
-                                Deactivate
-                            </Button>
-                        ) : (
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void reactivate(row.original)}>
-                                Reactivate
-                            </Button>
-                        )}
-                    </div>
-                ),
-            },
-        ],
-        [activate, busy, reactivate]
+            ),
+        [activate, allowed, busy, reactivate, router]
     );
+
+    const filtered = rosterFiltersActive(filters.filters) || signIn !== "ALL";
 
     return (
         <div className="space-y-5">
@@ -307,56 +343,43 @@ export function PrintPartnersView({
                 }
             />
 
-            <div className="flex flex-wrap items-center gap-3">
-                <FilterChips<ActiveFilter>
-                    value={active}
-                    onChange={onActiveChange}
-                    chips={[
-                        { value: "ACTIVE", label: "On the roster", count: page.counts.ACTIVE },
-                        { value: "INACTIVE", label: "Off the roster", count: page.counts.INACTIVE },
-                        { value: "ALL", label: "All" },
-                    ]}
-                />
-                <FilterChips<SignInFilter>
-                    value={signIn}
-                    onChange={onSignInChange}
-                    chips={[
-                        { value: "ALL", label: "Any app state" },
-                        { value: "ACTIVE", label: "Active", count: signInCounts.ACTIVE },
-                        { value: "APPLIED", label: "Applications", count: signInCounts.APPLIED },
-                        { value: "INVITED", label: "Invited", count: signInCounts.INVITED },
-                    ]}
-                />
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <Input
-                        value={q}
-                        onChange={(event) => onQChange(event.target.value)}
-                        placeholder="Search name, PRT id, contact, mobile…"
-                        aria-label="Search"
-                        className="h-8 w-64"
-                    />
-                    <CityCombobox
-                        id="print-partners-city"
-                        value={city.text}
-                        onChange={(text, picked) => onCityChange({ text, slug: picked?.slug ?? null })}
-                        placeholder="City"
-                        aria-label="City"
-                        stages={CITY_STAGES}
-                        className="w-44"
-                    />
+            {/* New applications are work for the desk: said once, in a line, only when there are some (the owner, 1 Oct 2026 — the chip rows are gone). */}
+            {applicationsWaiting > 0 && signIn !== "APPLIED" ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-2.5 text-sm" data-testid="pp-applications-notice">
+                    <span>
+                        {applicationsWaiting === 1 ? "1 shop applied from the app" : `${applicationsWaiting} shops applied from the app`} and {applicationsWaiting === 1 ? "waits" : "wait"} for review — check its details, then Activate it on its page.
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => onSignInChange("APPLIED")}>
+                        Review
+                    </Button>
                 </div>
-            </div>
+            ) : null}
 
-            <DataTable
+            <PartyRosterTable
                 columns={columns}
-                data={rows}
-                initialPageSize={20}
+                view={shown}
+                noun="print partner"
+                filterBar={
+                    <PartyRosterFilterBar
+                        spec={PRINT_PARTNER_FILTER_SPEC}
+                        state={filters}
+                        refreshing={view.refreshing}
+                        statusCounts={view.statusCounts}
+                        facet={appStateFacet(signIn, onSignInChange)}
+                    />
+                }
                 onRowClick={(row) => router.push(`/print-partners/${row.id}`)}
+                getRowId={(row) => row.id}
+                initialColumnVisibility={hiddenExtras({ extraColumns: PRINT_PARTNER_EXTRA_COLUMNS })}
                 emptyState={
                     <EmptyState
                         icon={Printer}
-                        title="No print partner here"
-                        description="Nobody on the roster matches this. A partner is added at the desk with its GSTIN, PAN and the address the agent collects from."
+                        title={filtered ? "No print partner matches" : "No print partner here"}
+                        description={
+                            filtered
+                                ? "Nobody on the roster matches these filters."
+                                : "Nobody on the roster matches this. A partner is added at the desk with its GSTIN, PAN and the address the agent collects from."
+                        }
                         action={
                             <Button variant="outline" className="bg-card" onClick={() => setAdding(true)}>
                                 <Plus className="mr-1.5 size-4" />

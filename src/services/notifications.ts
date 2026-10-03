@@ -34,6 +34,8 @@ export const NOTIFICATION_TYPES = [
     "ANNOUNCEMENT",
     /* Lot AA: a work task assigned, due, blocked or awaiting review. */
     "WORK",
+    /* WS-1 (DR 12): the Monday digest of an advertiser's campaigns — email on by default. */
+    "WEEKLY_SUMMARY",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -47,6 +49,7 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
     DISPUTE: "Disputes",
     ANNOUNCEMENT: "Announcements",
     WORK: "Work",
+    WEEKLY_SUMMARY: "Weekly campaign summary",
 };
 
 /**
@@ -64,6 +67,7 @@ export const NOTIFICATION_TYPE_TONE: Record<NotificationType, Tone> = {
     MESSAGE: "info",
     ANNOUNCEMENT: "neutral",
     WORK: "info",
+    WEEKLY_SUMMARY: "neutral",
 };
 
 /** `NotificationChannel` — where a kind may be delivered (DR 07 wave 5, decision 5). */
@@ -155,7 +159,7 @@ export function notificationHref(
         case "LISTING":
             return `/listings/${id}`;
         case "CREATIVE":
-            return `/moderation/${id}`;
+            return `/creatives/${id}`;
         case "TICKET":
             return `/support?ticket=${id}`;
         case "DISPUTE":

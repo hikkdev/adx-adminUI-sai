@@ -1,6 +1,9 @@
+import { onlineProviderOf } from "./verification";
 import { ApiError, api as http } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { formatDateTime } from "@/lib/format";
+import type { EmploymentType } from "./employees";
+import { accountStateOf, type AccountState } from "./account-state";
 import { recordedOf, requestOf } from "./kyc";
 import { kycStateOf, shapeKycStateCounts, type KycQueueState, type KycStateCounts } from "./kyc-state";
 import type { KycRecorded, KycRequest, StatusMeta } from "@/types";
@@ -24,9 +27,27 @@ import type { KycRecorded, KycRequest, StatusMeta } from "@/types";
  * the employee slice; `?state=` is the facet, `?q=` the search box,
  * `meta.counts` the chips. The one click is
  * `POST /employee-kyc/:employeeId/request` with no body, behind `kyc.edit`.
+ *
+ * Phase D (the owner, 1 Oct 2026): an employee has no entity type — the
+ * Digio workflow is chosen by their employment type, and the desk is told
+ * which (`employeeWorkflowLabel`). The KYC reads' employee slice does not
+ * carry the employment type, so it is read off the HR roster
+ * (`GET /employees`) and joined by the HR id.
  */
 
 export type EmployeeKycStatus = "PENDING" | "VERIFIED" | "REJECTED";
+
+/**
+ * Phase D: the Digio workflow an employee is verified on, by the name the
+ * owner's Digio KYC Workflows doc gives it — full time, part time or no
+ * employment type set use "Employee: Full Time" (part time is treated as
+ * full time until the owner says otherwise); contract and intern use
+ * "Employee: Intern and Contract". The server makes the same choice when
+ * the request goes out (`EMPLOYEE.FULL_TIME` / `EMPLOYEE.INTERN_CONTRACT`).
+ */
+export function employeeWorkflowLabel(employmentType: EmploymentType | null): string {
+    return employmentType === "CONTRACT" || employmentType === "INTERN" ? "Employee: Intern and Contract" : "Employee: Full Time";
+}
 
 export interface WireEmployeeKyc {
     id: string;
@@ -62,6 +83,8 @@ export interface WireEmployeeKyc {
         department: string | null;
         designation: string | null;
         createdAt?: string | null;
+        /** Phase D: read when the server sends it; today the slice does not, and the roster stands in. */
+        employmentType?: EmploymentType | null;
         user: { name: string | null; mobile: string; email: string | null };
     };
     /** E7-3: on the case read — the age against the review SLA and the people on it by name. */
@@ -83,6 +106,8 @@ export type WireEmployeeKycQueueRow = { [K in keyof Omit<WireEmployeeKyc, "id" |
     employeeId: string;
     kycId: string | null;
     state?: string | null;
+    /** 2 Oct 2026: where the account stands — ACTIVE, SUSPENDED, DEACTIVATED, CLOSED (agents: EXITED). Absent from a server one release behind. */
+    accountState?: string | null;
     employee: WireEmployeeKyc["employee"];
 };
 
@@ -99,6 +124,9 @@ export interface WireEmployeeKycMeta {
 export interface EmployeeKycQueueRow {
     /** The record's id, else the employee's. */
     id: string;
+    /** 2 Oct 2026: where the account stands; null on a read one release behind (read as working). */
+    accountState?: AccountState | null;
+
     employeeId: string;
     kycId: string | null;
     state: KycQueueState;
@@ -115,10 +143,15 @@ export interface EmployeeKycQueueRow {
     status: EmployeeKycStatus | null;
     /** Formatted, "—" with nothing submitted. */
     submittedAt: string;
-    method: "MANUAL" | "DIGIO" | null;
+    /** Cashfree Phase 2: CASHFREE when the backup ran the online check. */
+    method: "MANUAL" | "DIGIO" | "CASHFREE" | null;
+    /** The raw provider status — PROVIDER_FAILED when Digio could not be asked (printed as words, never raw). */
+    digioStatus: string | null;
     documents: number;
     request: KycRequest | null;
     recorded: KycRecorded | null;
+    /** Phase D: what picks the employee's Digio workflow — null when none is set, undefined when no read said. */
+    employmentType?: EmploymentType | null;
 }
 
 export interface EmployeeKycQueue {
@@ -133,6 +166,8 @@ export interface EmployeeKycFilter {
     status?: EmployeeKycStatus;
     /** The employee's name, display id or mobile. */
     q?: string;
+    /** 2 Oct 2026 (the account lifecycle): true sends `include=inactive` — the suspended, deactivated and closed come back too. */
+    includeInactive?: boolean;
 }
 
 export function buildEmployeeKycQuery(filter: EmployeeKycFilter = {}): string {
@@ -140,6 +175,7 @@ export function buildEmployeeKycQuery(filter: EmployeeKycFilter = {}): string {
     if (filter.state) params.set("state", filter.state);
     if (filter.status) params.set("status", filter.status);
     if (filter.q?.trim()) params.set("q", filter.q.trim());
+    if (filter.includeInactive) params.set("include", "inactive");
     return params.toString();
 }
 
@@ -150,6 +186,8 @@ export interface WireEmployee {
     displayId: string | null;
     department: string | null;
     designation: string | null;
+    /** Lot G (Q140): how the person is employed; Phase D: what picks their Digio workflow. Absent from a server one release behind. */
+    employmentType?: EmploymentType | null;
     isActive: boolean;
     user: { id: string; name: string | null; mobile: string; email: string | null };
 }
@@ -214,8 +252,14 @@ export interface EmployeeKycCase {
     slaHours: number | null;
     /** How many of the seven slots hold a document. */
     documents: number;
+    /** Cashfree Phase 2: the online provider on the record (Digio, or Cashfree on the backup), null for documents; absent on an older read. */
+    provider?: "DIGIO" | "CASHFREE" | null;
+    /** Cashfree Phase 2: the raw provider status — PROVIDER_FAILED when Digio could not be asked. */
+    digioStatus?: string | null;
     /** Everything recorded, for the form to start from. */
     recorded: EmployeeKycDocuments;
+    /** Phase D: what picks the employee's Digio workflow — null when none is set, undefined when the read did not say. */
+    employmentType?: EmploymentType | null;
 }
 
 export interface EmployeeSummary {
@@ -228,6 +272,8 @@ export interface EmployeeSummary {
     mobile: string;
     email: string | null;
     isActive: boolean;
+    /** Phase D: what picks the employee's Digio workflow — null when none is set, undefined when the read did not say. */
+    employmentType?: EmploymentType | null;
 }
 
 export const EMPLOYEE_KYC_STATUS_META: Record<EmployeeKycStatus, StatusMeta> = {
@@ -271,6 +317,9 @@ export function shapeEmployeeKyc(row: WireEmployeeKyc): EmployeeKycCase {
         slaHours: row.slaHours ?? null,
         documents: EMPLOYEE_KYC_SLOTS.filter((slot) => Boolean(row[slot.key])).length,
         recorded,
+        provider: onlineProviderOf(row.method),
+        digioStatus: row.digioStatus ?? null,
+        employmentType: row.employee.employmentType,
     };
 }
 
@@ -292,11 +341,24 @@ export function shapeEmployeeKycQueueRow(row: WireEmployeeKycQueueRow): Employee
         createdAt: row.employee.createdAt ?? null,
         status: row.status,
         submittedAt: row.submittedAt ? formatDateTime(row.submittedAt) : "—",
-        method: row.method === "DIGIO" ? "DIGIO" : row.method === "MANUAL" ? "MANUAL" : null,
+        method: onlineProviderOf(row.method) ?? (row.method === "MANUAL" ? "MANUAL" : null),
+        digioStatus: row.digioStatus ?? null,
         documents: EMPLOYEE_KYC_SLOTS.filter((slot) => Boolean(row[slot.key])).length,
         request: requestOf(row, row),
         recorded: recordedOf(row, row),
+        employmentType: row.employee.employmentType,
+        accountState: accountStateOf(row.accountState),
     };
+}
+
+/**
+ * Phase D: the queue rows with the employment type the HR roster holds for
+ * each — a row the KYC read already answered for keeps its own; one the
+ * roster does not know stays unsaid, and the column prints "—" rather than
+ * a workflow nobody checked.
+ */
+export function withEmploymentTypes(rows: EmployeeKycQueueRow[], roster: Map<string, EmploymentType | null>): EmployeeKycQueueRow[] {
+    return rows.map((row) => (row.employmentType !== undefined || !roster.has(row.employeeId) ? row : { ...row, employmentType: roster.get(row.employeeId) ?? null }));
 }
 
 export function shapeEmployee(row: WireEmployee): EmployeeSummary {
@@ -310,6 +372,7 @@ export function shapeEmployee(row: WireEmployee): EmployeeSummary {
         mobile: row.user.mobile,
         email: row.user.email,
         isActive: row.isActive,
+        employmentType: row.employmentType,
     };
 }
 
@@ -393,4 +456,20 @@ export const employeeKycService = {
     /** One employee off the roster by their HR id, or null. */
     employee: async (employeeId: string): Promise<EmployeeSummary | null> =>
         (await employeeKycService.employees()).find((row) => row.id === employeeId) ?? null,
+
+    /**
+     * Phase D: every roster employee's employment type by HR id — what the
+     * queue and the record are joined with to say which Digio workflow an
+     * employee uses. An employee the roster read does not name, or a
+     * server that does not send the column, is simply not in the map; a
+     * failed read is an empty map, never a failed queue.
+     */
+    employmentTypes: async (): Promise<Map<string, EmploymentType | null>> => {
+        try {
+            const roster = await employeeKycService.employees();
+            return new Map(roster.filter((row) => row.employmentType !== undefined).map((row) => [row.id, row.employmentType ?? null]));
+        } catch {
+            return new Map();
+        }
+    },
 };

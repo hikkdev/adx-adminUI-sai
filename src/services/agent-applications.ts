@@ -195,6 +195,8 @@ export interface ApplicationView {
         vehicleType: AgentVehicleType | null;
         vehicleNumber: string | null;
         currentAddress: string | null;
+        /** The current address's six-digit PIN — optional on the type while an older backend answers without it. */
+        currentPostalCode?: string | null;
         currentLatitude: number | null;
         currentLongitude: number | null;
         permanentAddress: string | null;
@@ -314,6 +316,9 @@ export interface ApplicationProfilePatch {
     vehicleType?: AgentVehicleType | null;
     vehicleNumber?: string | null;
     currentAddress?: string | null;
+    /** Six digits, `^[1-9][0-9]{5}$`; null clears. */
+    currentPostalCode?: string | null;
+    /** Both or neither. Never typed: the address bar's pick sets them. */
     currentLatitude?: number | null;
     currentLongitude?: number | null;
     permanentAddress?: string | null;

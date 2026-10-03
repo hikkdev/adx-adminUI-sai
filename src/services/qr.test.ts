@@ -16,7 +16,7 @@ vi.mock("@/lib/api-config", async (importOriginal) => {
     return {
         ...actual,
         isLive: () => true,
-        apiConfig: { ...actual.apiConfig, baseUrl: "https://api.adx.test/api/v1" },
+        apiConfig: { ...actual.apiConfig, baseUrl: "https://api.adx.in/api/v1" },
     };
 });
 
@@ -117,8 +117,8 @@ describe("the writes", () => {
 
 describe("the image url and the outcome badge", () => {
     it("builds the public image route on the console's own API base", () => {
-        expect(qrImageUrl("qr_1", "png", 120)).toBe("https://api.adx.test/api/v1/qr/qr_1/image.png?size=120");
-        expect(qrImageUrl("qr_1", "svg")).toBe("https://api.adx.test/api/v1/qr/qr_1/image.svg");
+        expect(qrImageUrl("qr_1", "png", 120)).toBe("https://api.adx.in/api/v1/qr/qr_1/image.png?size=120");
+        expect(qrImageUrl("qr_1", "svg")).toBe("https://api.adx.in/api/v1/qr/qr_1/image.svg");
     });
 
     it("names the outcomes it knows and prints an unknown one as it came", () => {

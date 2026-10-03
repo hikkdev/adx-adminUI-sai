@@ -170,7 +170,6 @@ function RailForm({ finance, rails, onChanged }: RailSettingsProps & { finance: 
                             onChange={(event) => setDraft((state) => ({ ...state, payoutEtaHours: event.target.value }))}
                             aria-invalid={eta === null}
                         />
-                        <p className="text-xs text-muted-foreground">What a party is told to expect after release.</p>
                     </div>
                     <div className="space-y-1.5">
                         <Label htmlFor="rail-clearing">Clearing days</Label>
@@ -181,8 +180,11 @@ function RailForm({ finance, rails, onChanged }: RailSettingsProps & { finance: 
                             onChange={(event) => setDraft((state) => ({ ...state, clearingDays: event.target.value }))}
                             aria-invalid={clearing === null}
                         />
-                        <p className="text-xs text-muted-foreground">A daily earning's wait before it can be withdrawn.</p>
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-1 text-xs text-muted-foreground sm:col-span-3">
+                        The ETA is what a party is told to expect after release; clearing days are a daily earning&apos;s wait before it can be withdrawn.
+                    </p>
                 </div>
 
                 <div>

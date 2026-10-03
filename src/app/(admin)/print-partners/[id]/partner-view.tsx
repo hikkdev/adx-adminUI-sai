@@ -25,13 +25,17 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { AccountClosure } from "@/components/adx/account-closure";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
+import { DeleteAccountButton } from "@/components/adx/delete-account";
 import { FileDropzone } from "@/components/adx/file-dropzone";
 import { DetailShell } from "@/components/adx/detail-shell";
 import { VerifiedTick } from "@/components/adx/verified-tick";
 import { PrivateFile, openPrivateFile } from "@/components/adx/private-file";
 import { FieldList, SimpleTable } from "@/components/adx/simple-table";
 import { signingLine } from "@/services/print-partners";
+import { SignsInAs } from "@/components/adx/app-account";
+import { ID_LABEL, idLine } from "@/services/identifiers";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { useAuth } from "@/lib/auth";
 import { compareMoney, formatDate, formatDateTime, formatMoney } from "@/lib/format";
@@ -143,7 +147,7 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
                       ? `Applied from the app ${formatDate(partner.appliedAt)} — review, then activate`
                       : signIn === "INVITED"
                         ? "Account not yet switched on"
-                        : (partner.displayId ?? "No PRT id"),
+                        : (idLine("PARTNER", partner.displayId) ?? `No ${ID_LABEL.PARTNER} issued`),
         },
         // DS-2: the service agreement, beside the KYC — quotes and jobs wait on it while the policy asks.
         ...(signingLine(partner.agreement, formatDate)
@@ -211,13 +215,19 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
     }
 
     return (
+        /* 2 Oct 2026 (the account lifecycle): the closed banner above the page, Reactivate gone once the account is
+           closed for good, and Delete for a shop with no history — the account behind the shop decides. */
+        <AccountClosure userId={partner.userId} name={partner.name} onChanged={onChanged} directoryHref="/print-partners/directory">
+        {(closure) => (
         <>
             <DetailShell
-                backHref="/print-partners/roster"
+                backHref="/print-partners/directory"
                 backLabel="Print partners"
                 title={partner.name}
                 titleAdornment={<VerifiedTick kycStatus={partner.kycStatus} size={18} />}
-                subtitle={[partner.displayId, partner.legalName, partner.city].filter(Boolean).join(" · ") || undefined}
+                /* The shop's own id, named by its kind (29 Sep 2026). The person
+                   behind the account has an ADX ID of their own, in the details below. */
+                subtitle={[idLine("PARTNER", partner.displayId), partner.legalName, partner.city].filter(Boolean).join(" · ") || undefined}
                 kpis={kpis}
                 actions={
                     <div className="flex items-center gap-2">
@@ -235,11 +245,12 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
                             <Button variant="outline" className="bg-card text-danger hover:text-danger" disabled={busy} onClick={() => setDeactivating(true)}>
                                 Deactivate
                             </Button>
-                        ) : (
+                        ) : closure.closed?.closedAt ? null : (
                             <Button variant="outline" className="bg-card" disabled={busy} onClick={() => void toggleRoster()}>
                                 Reactivate
                             </Button>
                         )}
+                        <DeleteAccountButton slot={closure} />
                     </div>
                 }
                 tabs={[
@@ -258,6 +269,8 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
                                             ["PAN", <span key="pan" className="font-mono text-xs">{partner.panNumber ?? "—"}</span>],
                                             ["Contact", partner.contactName ?? "—"],
                                             ["Mobile", <span key="mobile" className="font-mono text-xs">{partner.mobile}</span>],
+                                            /* 2 Oct 2026: the shop's login, linked to their account under Users. The read names no person, so the number does. */
+                                            ["Signs in as", <SignsInAs key="signs-in-as" userId={partner.userId} name={partner.mobile} displayId={partner.userDisplayId} />],
                                             ["Email", partner.email ?? "—"],
                                             ["Address", <span key="address" className="text-right">{[partner.address, partner.city].filter(Boolean).join(", ") || "—"}</span>],
                                             ["On the roster since", formatDate(partner.createdAt)],
@@ -362,6 +375,8 @@ export function PartnerView({ ledger, methods, quotes, invoices: invoicesWithMon
                 />
             )}
         </>
+        )}
+        </AccountClosure>
     );
 }
 
@@ -467,7 +482,7 @@ function AccountCard({ partner, onActivate, busy, onChanged }: { partner: PrintP
             <FieldList
                 className="mt-4"
                 items={[
-                    ["Signs in as", <span key="mobile" className="font-mono text-xs">{partner.mobile}</span>],
+                    ["Sign-in number", <span key="mobile" className="font-mono text-xs">{partner.mobile}</span>],
                     ["Activated", partner.activatedAt ? formatDateTime(partner.activatedAt) : "Not yet"],
                     ["Activated by", partner.activatedById ? <span key="by" className="font-mono text-xs">{partner.activatedById}</span> : "—"],
                     ["Last sign-in", lastSignInLabel(partner, formatDateTime)],

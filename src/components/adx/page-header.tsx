@@ -9,7 +9,12 @@ interface PageHeaderProps {
     size?: "page" | "section";
 }
 
-/** Standard page heading row: title + optional subtitle left, actions right. */
+/**
+ * Standard page heading row: title + optional subtitle left, actions right —
+ * on every page, however long the subtitle (the owner, 1 Oct 2026: a long
+ * description had wrapped Print partners' button under it, on the left).
+ * Only a phone-width screen stacks the actions under the text.
+ */
 export function PageHeader({
     title,
     subtitle,
@@ -19,8 +24,8 @@ export function PageHeader({
 }: PageHeaderProps) {
     const Heading = size === "page" ? "h1" : "h2";
     return (
-        <div className={cn("flex flex-wrap items-start justify-between gap-4", className)}>
-            <div className="min-w-0">
+        <div className={cn("flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between", className)}>
+            <div className="min-w-0 flex-1">
                 <Heading
                     className={cn(
                         "font-semibold tracking-tight text-foreground",
@@ -29,9 +34,9 @@ export function PageHeader({
                 >
                     {title}
                 </Heading>
-                {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+                {subtitle && <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{subtitle}</p>}
             </div>
-            {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+            {actions && <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
         </div>
     );
 }

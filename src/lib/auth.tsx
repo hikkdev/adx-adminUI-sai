@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { apiConfig } from "./api-config";
 import { ApiError, api, onSessionEnded, tokens } from "./api-client";
 import { permissionsOf } from "./jwt";
+import { NoRoleYet } from "@/components/adx/no-role-yet";
+import { VerifyEmailGate } from "@/components/adx/verify-email-gate";
+import { needsEmailVerification } from "./email-gate";
 import { isChallengeResponse, twoFactorChallenge } from "./two-factor";
 
 export interface SessionUser {
@@ -13,6 +16,13 @@ export interface SessionUser {
     email: string;
     roles: string[];
     avatarUrl?: string | null;
+    /**
+     * ED-1: whether the email answered a code. Null shuts the shell behind
+     * the verify card; absent means the answer that made this user (an older
+     * login shape) did not say, and `RequireAuth` re-reads `/users/me` once
+     * to find out.
+     */
+    emailVerifiedAt?: string | null;
 }
 
 /** What a login endpoint answers: the same token pair every method returns. */
@@ -41,10 +51,17 @@ interface AuthContextValue {
     completeSignIn: (result: SessionTokens) => void;
     signOut: () => Promise<void>;
     /**
+     * ED-1: re-reads `GET /users/me` and replaces the session user with the
+     * profile — what the verify card calls once the code answered, and what
+     * `RequireAuth` calls when the login answer did not carry the stamp.
+     */
+    refreshUser: () => Promise<void>;
+    /**
      * Whether this session holds a permission id — `finance.approve`,
-     * `system.roles` — read off the `perms` claim in the access token. Nothing
-     * is gated on it yet; it exists so actions can be hidden as per-module
-     * enforcement is switched on. Against fixtures every answer is yes.
+     * `system.roles` — read off the `perms` claim in the access token, which
+     * is exactly the console role's list (RP-1: Super admin's is the whole
+     * catalogue, a role-less admin's is empty). Against fixtures every answer
+     * is yes.
      */
     can: (permissionId: string) => boolean;
 }
@@ -177,6 +194,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         [settle]
     );
 
+    const refreshUser = React.useCallback(async () => {
+        if (!apiConfig.live) return;
+        const me = await api.get<SessionUser>("/users/me");
+        setUser(normalizeSessionUser(me));
+    }, []);
+
     const signOut = React.useCallback(async () => {
         if (apiConfig.live) {
             try {
@@ -205,8 +228,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     const value = React.useMemo(
-        () => ({ user, loading, signIn, signInWithGoogle, completeSignIn, signOut, can }),
-        [user, loading, signIn, signInWithGoogle, completeSignIn, signOut, can]
+        () => ({ user, loading, signIn, signInWithGoogle, completeSignIn, signOut, refreshUser, can }),
+        [user, loading, signIn, signInWithGoogle, completeSignIn, signOut, refreshUser, can]
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -216,6 +239,16 @@ export function useAuth() {
     const context = React.useContext(AuthContext);
     if (!context) throw new Error("useAuth must be used inside <AuthProvider>");
     return context;
+}
+
+/**
+ * CF-1: the session, or null outside an `<AuthProvider>` — for a card that
+ * is mounted inside pages other tests render without one, and that only
+ * needs to know whether to draw an Edit button. Everything else keeps
+ * `useAuth`, which refuses to run outside the provider.
+ */
+export function useOptionalAuth(): AuthContextValue | null {
+    return React.useContext(AuthContext);
 }
 
 /**
@@ -229,14 +262,38 @@ export const holdsAdmin = (user: Pick<SessionUser, "roles"> | null | undefined):
     !!user?.roles?.includes("ADMIN");
 
 /**
+ * RP-1: an admin whose token carries no permission has no console role yet —
+ * only Super admin holds every permission, everyone else holds their role's
+ * list, and a role-less admin holds none. Read off the token rather than
+ * `/users/me` because the token is what every admin route judges. Never true
+ * against fixtures, which hold everything.
+ */
+export const lacksConsoleRole = (
+    user: Pick<SessionUser, "roles"> | null | undefined,
+    accessToken: string | null | undefined
+): boolean => apiConfig.live && holdsAdmin(user) && permissionsOf(accessToken).length === 0;
+
+/**
  * Wraps the admin area: no session, no admin screens — and a session without
  * the ADMIN role is sent to /access-denied rather than shown a shell it cannot
  * use. A publisher who signs in here with a valid account is not signed out;
  * the page says which account it is and offers to switch.
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
-    const { user, loading } = useAuth();
+    const { user, loading, signOut, refreshUser } = useAuth();
     const router = useRouter();
+
+    /* ED-1: a login answer from before the stamp leaves `emailVerifiedAt`
+       off the session user; the profile read always carries it. One re-read,
+       so the gate decides on the profile and never on a missing field. */
+    const askedProfile = React.useRef(false);
+    React.useEffect(() => {
+        if (!apiConfig.live || loading || !user || user.emailVerifiedAt !== undefined || askedProfile.current) return;
+        askedProfile.current = true;
+        void refreshUser().catch(() => {
+            /* A failed re-read leaves the shell open on the login answer; the next load asks again. */
+        });
+    }, [loading, user, refreshUser]);
 
     /* Is there even a stored session to validate? Knowing this separates
        "probably signed in, verifying" from "definitely signed out", which the
@@ -282,6 +339,16 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     }
 
     if (!user || !holdsAdmin(user)) return null;
+
+    /* RP-1: no console role, no shell — one card that says what to ask for. */
+    if (lacksConsoleRole(user, tokens.access)) {
+        return <NoRoleYet email={user.email} onSignOut={() => void signOut()} />;
+    }
+
+    /* ED-1: an unproved email, no shell — the verify card until a code answers ("gate them too, don't exempt anything"). */
+    if (needsEmailVerification(user, apiConfig.live)) {
+        return <VerifyEmailGate email={user.email || null} onVerified={refreshUser} onSignOut={() => void signOut()} />;
+    }
 
     return <>{children}</>;
 }

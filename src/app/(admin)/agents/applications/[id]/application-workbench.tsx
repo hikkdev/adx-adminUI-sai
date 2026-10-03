@@ -31,6 +31,7 @@ import {
     type LadderStep,
 } from "@/services/agent-applications";
 import type { EmployeeRow } from "@/services/employees";
+import { idLine } from "@/services/identifiers";
 import { AgentEngagementCard } from "../../[id]/agent-engagement-card";
 import { DecisionPanel } from "./decision-panel";
 import { EditApplicationDialog } from "./edit-application-dialog";
@@ -71,7 +72,8 @@ export function ApplicationWorkbench({ view: initial, staff, onChanged }: Applic
     const name = applicantName({ user: { name: view.person.name, mobile: view.person.mobile }, displayId: view.agent.displayId });
     const manager = view.agent.engagement.reportingManagerId ? staff.find((row) => row.id === view.agent.engagement.reportingManagerId) : null;
     const source = SOURCE_LABEL[view.agent.sourceKind as AgentSourceKind] ?? view.agent.sourceKind;
-    const subtitle = [view.agent.displayId, SIDE_ROLE_LABEL[view.agent.side], source, view.profile.city].filter(Boolean).join(" · ");
+    /* 29 Sep 2026: the profile's id under the applicant's name, named as the agent's rather than printed bare. */
+    const subtitle = [idLine("AGENT", view.agent.displayId), SIDE_ROLE_LABEL[view.agent.side], source, view.profile.city].filter(Boolean).join(" · ");
 
     const recordTerms = async () => {
         setBusy(true);

@@ -18,7 +18,7 @@
     },
     "console.bookings-calendar": {
       "paths": [
-        "bookings"
+        "orders/calendar"
       ],
       "owner": "marketplace",
       "kind": "FEATURE",
@@ -128,6 +128,11 @@
         "leads/integrity"
       ]
     },
+    "competitors.sightings": {
+      "paths": [
+        "leads/competitors"
+      ]
+    },
     "leads.invites": {
       "paths": [
         "public/j"
@@ -222,7 +227,8 @@
     },
     "kyc.advertiser": {
       "paths": [
-        "kyc/advertisers"
+        "kyc/advertisers",
+        "kyc/advertisers/[id]"
       ]
     },
     "print.partner-kyc": {
@@ -240,11 +246,6 @@
         "kyc/employees"
       ]
     },
-    "onboarding.submissions": {
-      "paths": [
-        "onboarding/submissions"
-      ]
-    },
     "onboarding.agent-assist": {
       "paths": [
         "access"
@@ -252,12 +253,32 @@
     },
     "legal.agreements": {
       "paths": [
-        "agreements"
+        "legal-documents"
       ]
     },
     "legal.documents": {
       "paths": [
-        "legal"
+        "content/policies"
+      ]
+    },
+    "content.site-pages": {
+      "paths": [
+        "content"
+      ]
+    },
+    "content.pages": {
+      "paths": [
+        "content/articles"
+      ]
+    },
+    "content.forms": {
+      "paths": [
+        "content/forms"
+      ]
+    },
+    "settings.custom-fields": {
+      "paths": [
+        "settings/custom-fields"
       ]
     },
     "payouts.withdrawals": {
@@ -375,7 +396,11 @@
     },
     "campaigns.creative-moderation": {
       "paths": [
-        "moderation"
+        "creatives",
+        "creatives/[id]",
+        "creatives/design-requests",
+        "creatives/awaiting-advertiser",
+        "creatives/print-ready"
       ]
     },
     "support.disputes": {
@@ -385,7 +410,9 @@
     },
     "safety.fraud-desk": {
       "paths": [
-        "disputes/fraud"
+        "disputes/fraud",
+        "orders/fraud-review",
+        "settings/fraud"
       ]
     },
     "support.tickets": {
@@ -437,7 +464,7 @@
     },
     "agent.leaderboard": {
       "paths": [
-        "growth/leaderboard"
+        "analytics/leaderboards"
       ]
     },
     "agent.training": {
@@ -488,7 +515,7 @@
     },
     "system.roles": {
       "paths": [
-        "roles"
+        "users/roles"
       ]
     },
     "system.platform-settings": {
@@ -522,9 +549,14 @@
         "settings/system-health"
       ]
     },
+    "settings.storage": {
+      "paths": [
+        "settings/storage"
+      ]
+    },
     "print.partners": {
       "paths": [
-        "print-partners/roster",
+        "print-partners/directory",
         "print-partners/quote-requests",
         "print-partners/[id]"
       ]
@@ -542,8 +574,7 @@
     },
     "reports.catalogue": {
       "paths": [
-        "settings/reports",
-        "settings/reports/onboarding-board"
+        "analytics/reports"
       ]
     },
     "console.import-formats": {
@@ -600,6 +631,26 @@
     "system.flow-editor": {
       "paths": [
         "flows"
+      ]
+    },
+    "promo-codes.desk": {
+      "paths": [
+        "growth/promo-codes"
+      ]
+    },
+    "content.layouts": {
+      "paths": [
+        "content/layouts"
+      ]
+    },
+    "content.media": {
+      "paths": [
+        "content/media"
+      ]
+    },
+    "promotions.desk": {
+      "paths": [
+        "ads"
       ]
     }
   }

@@ -6,27 +6,39 @@ import { EmptyState } from "@/components/adx/empty-state";
 import { PageHeader } from "@/components/adx/page-header";
 import { ResourceBoundary } from "@/components/adx/resource-boundary";
 import { useApiResource } from "@/lib/use-api-resource";
+import { useDebounced } from "@/lib/use-debounced";
 import { isLive } from "@/lib/api-config";
 import { landingPageService, type LandingPageStatus, type LandingPagesPage } from "@/services/landing-pages";
-import { LandingPagesView } from "./landing-pages-view";
+import { LANDING_EXPLAINER, LandingPagesView } from "./landing-pages-view";
+
+/** One page of the server's. */
+export const LANDING_PAGE_SIZE = 25;
 
 /**
- * The review list's data. The status facet goes to the API so the chip
- * counts come back computed over the whole table. Under `campaigns`,
- * because a page is one campaign's and the row links into it.
+ * The landing pages list's data. The status and the search go to the API
+ * so the counts come back computed over the whole table and the pager
+ * walks it. Under `campaigns`, because a page is one campaign's and the
+ * row links into it.
  */
 export function LandingPagesLoader() {
     const live = isLive("campaigns");
     const [status, setStatus] = React.useState<LandingPageStatus | "ALL">("PUBLISHED");
+    const [text, setText] = React.useState("");
+    const q = useDebounced(text.trim(), 350);
+    /* The page belongs to the filters it was turned under: a new status or search starts at the first page. */
+    const filterKey = `${status}:${q}`;
+    const [paging, setPaging] = React.useState({ key: filterKey, page: 1 });
+    const page = paging.key === filterKey ? paging.page : 1;
+    const setPage = (next: number) => setPaging({ key: filterKey, page: next });
 
-    const resource = useApiResource<LandingPagesPage>(`landing-pages:${status}:${live}`, () =>
-        landingPageService.list(status === "ALL" ? {} : { status }),
+    const resource = useApiResource<LandingPagesPage>(`landing-pages:${status}:${q}:${page}:${live}`, () =>
+        landingPageService.list({ ...(status === "ALL" ? {} : { status }), ...(q ? { q } : {}), page, pageSize: LANDING_PAGE_SIZE }),
     );
 
     if (!live) {
         return (
             <div className="space-y-6">
-                <PageHeader title="Landing pages" subtitle="The ADX pages campaign codes send people to." />
+                <PageHeader title="Landing pages" subtitle={LANDING_EXPLAINER} />
                 <EmptyState
                     icon={PlugZap}
                     title="Landing pages read the API"
@@ -38,7 +50,20 @@ export function LandingPagesLoader() {
 
     return (
         <ResourceBoundary resource={resource}>
-            {(page) => <LandingPagesView page={page} status={status} onStatusChange={setStatus} onChanged={resource.reload} />}
+            {(data) => (
+                <LandingPagesView
+                    page={data}
+                    status={status}
+                    onStatusChange={setStatus}
+                    searchText={text}
+                    onSearchText={setText}
+                    pageNumber={page}
+                    pageSize={LANDING_PAGE_SIZE}
+                    onPage={setPage}
+                    refreshing={resource.loading}
+                    onChanged={resource.reload}
+                />
+            )}
         </ResourceBoundary>
     );
 }

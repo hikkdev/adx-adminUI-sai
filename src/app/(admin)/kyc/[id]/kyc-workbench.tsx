@@ -1,9 +1,8 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, FileText, Minus, Plus, UserCheck } from "lucide-react";
+import { FileText, Minus, Plus, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,9 @@ import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { PrivateFile } from "@/components/adx/private-file";
+import { DocumentReadingPanel } from "@/components/adx/document-reading";
+import { expectedFor, kindForDocument } from "@/services/document-reading";
+import { idLine } from "@/services/identifiers";
 import { StatusBadge } from "@/components/adx/status-badge";
 import { useAuth } from "@/lib/auth";
 import { KYC_CASE_STATUS_META, type KycCase } from "@/types";
@@ -27,8 +29,10 @@ import {
     type DocumentDecision,
 } from "@/services/kyc";
 import { AccessRecord } from "./access-record";
+import { KycCaseHeader } from "../_shared/case-header";
 import { DecisionHistory } from "../_shared/decision-history";
 import { DigioCard } from "../_shared/digio-card";
+import { VerificationChecksPanel, backupStateOf, useCaseAttempts } from "../_shared/verification-checks-panel";
 import { DocumentDecisionControls } from "../_shared/document-review";
 import { EscalateButton, EscalationCard } from "../_shared/escalation";
 import { LivenessCard } from "../_shared/liveness-card";
@@ -80,6 +84,12 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
     const [reuploadOpen, setReuploadOpen] = React.useState(false);
     const [reuploadKey, setReuploadKey] = React.useState(0);
     const [manualReview, setManualReview] = React.useState(kycCase.method !== "DIGIO");
+    /* Cashfree Phase 2: every provider call for this case, and whether the backup can be sent — read once, drawn by the panel and the Digio card. */
+    const checks = useCaseAttempts("PUBLISHER_KYC", kycCase.publisherId);
+    const afterBackup = () => {
+        checks.reload();
+        onChanged();
+    };
     const [livenessRefusal, setLivenessRefusal] = React.useState<string | null>(null);
 
     const currentDoc = kycCase.documents.find((doc) => doc.id === activeDoc) ?? kycCase.documents[0];
@@ -153,7 +163,7 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
             kycCase.selfOnboarded
                 ? "Self-onboarded — nobody from ADX has met them"
                 : kycCase.agent
-                  ? [kycCase.agent.name ?? "An agent", kycCase.agent.displayId].filter(Boolean).join(" · ")
+                  ? [kycCase.agent.name ?? "An agent", idLine("AGENT", kycCase.agent.displayId)].filter(Boolean).join(" · ")
                   : "-",
         ],
         ["Method", kycCase.method === "DIGIO" ? "Digio" : "Documents uploaded"],
@@ -176,43 +186,28 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
 
     return (
         <div className="space-y-5">
-            <div>
-                <Link
-                    href="/kyc"
-                    className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                    <ChevronLeft className="size-4" />
-                    KYC queue
-                </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-primary">KYC review</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{kycCase.applicant}</h1>
-                            <StatusBadge status={KYC_CASE_STATUS_META[kycCase.status]} />
-                            {kycCase.request?.open && <StatusBadge status={{ label: "Requested · awaiting the publisher", tone: "info" }} />}
-                            {escalatedChip && <StatusBadge status={escalatedChip} />}
-                            {ageChip && <StatusBadge status={ageChip} />}
-                        </div>
-                        {kycCase.request && (
-                            <p className="mt-1 text-sm text-muted-foreground" data-testid="request-line">
-                                {requestLine(kycCase.request)}
-                            </p>
-                        )}
-                        {kycCase.kycStatus === "NEEDS_INFO" && flagged.length > 0 && (
-                            <p className="mt-1 text-sm text-muted-foreground" data-testid="needs-info-flagged">
-                                Waiting on a re-upload of {flagged.map((item) => kycFieldLabel(item.field)).join(", ")}.
-                            </p>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
+            <KycCaseHeader
+                backHref="/kyc"
+                backLabel="Publisher KYC"
+                eyebrow="KYC review · publisher"
+                title={kycCase.applicant}
+                badges={
+                    <>
+                        <StatusBadge status={KYC_CASE_STATUS_META[kycCase.status]} />
+                        {kycCase.request?.open && <StatusBadge status={{ label: "Requested · awaiting the publisher", tone: "info" }} />}
+                        {escalatedChip && <StatusBadge status={escalatedChip} />}
+                        {ageChip && <StatusBadge status={ageChip} />}
+                    </>
+                }
+                actions={
+                    <>
                         {!verified && (
                             <>
                                 <RequestKycButton
                                     party={kycCase.applicant}
                                     hasAccount={kycCase.userId !== null}
                                     verified={verified}
-                                    onRequest={(channel, text) => kycService.request(kycCase.publisherId, channel, text)}
+                                    onRequest={(channel, text, entityType) => kycService.request(kycCase.publisherId, channel, text, entityType)}
                                     onRequested={onChanged}
                                 />
                                 <RecordAtDeskButton
@@ -268,9 +263,20 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
                         >
                             Approve &amp; verify
                         </Button>
-                    </div>
-                </div>
-            </div>
+                    </>
+                }
+            >
+                {kycCase.request && (
+                    <p className="mt-1 text-sm text-muted-foreground" data-testid="request-line">
+                        {requestLine(kycCase.request)}
+                    </p>
+                )}
+                {kycCase.kycStatus === "NEEDS_INFO" && flagged.length > 0 && (
+                    <p className="mt-1 text-sm text-muted-foreground" data-testid="needs-info-flagged">
+                        Waiting on a re-upload of {flagged.map((item) => kycFieldLabel(item.field)).join(", ")}.
+                    </p>
+                )}
+            </KycCaseHeader>
 
             <Card className="rounded-lg border-border shadow-none">
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 p-4 sm:grid-cols-3 xl:grid-cols-6">
@@ -363,6 +369,20 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
                             />
                         </div>
                     )}
+                    {/* DR-1: what the model read off this document — prefill and cross-check, never a decision. */}
+                    {currentDoc && (
+                        <div className="border-t px-4 py-3">
+                            <DocumentReadingPanel
+                                url={currentDoc.url}
+                                kind={kindForDocument(currentDoc.field, { label: currentDoc.type })}
+                                expected={expectedFor(kindForDocument(currentDoc.field, { label: currentDoc.type }), {
+                                    pan: kycCase.checks.find((check) => check.label === "PAN number")?.detail,
+                                    gstin: kycCase.checks.find((check) => check.label === "GSTIN")?.detail,
+                                })}
+                                disabled={decided}
+                            />
+                        </div>
+                    )}
                 </Card>
 
                 {/* Checks + notes */}
@@ -436,11 +456,15 @@ export function KycWorkbench({ kycCase, onChanged }: KycWorkbenchProps) {
                         digio={kycCase.digio}
                         verified={kycCase.kycStatus === "VERIFIED"}
                         imagesPurgedAt={kycCase.imagesPurgedAt}
-                        onRestart={() => kycService.restartDigio(kycCase.publisherId)}
+                        onRestart={(entityType) => kycService.restartDigio(kycCase.publisherId, entityType)}
                         onReviewManually={() => setManualReview(true)}
                         manualReview={manualReview || kycCase.method !== "DIGIO"}
                         onChanged={onChanged}
+                        backup={backupStateOf("PUBLISHER_KYC", kycCase.publisherId, checks.data)}
+                        onBackupSent={afterBackup}
                     />
+
+                    <VerificationChecksPanel caseType="PUBLISHER_KYC" caseId={kycCase.publisherId} resource={checks} />
 
                     <DecisionHistory
                         record={{

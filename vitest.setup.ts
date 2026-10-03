@@ -1,6 +1,24 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+/*
+ * Testing Library's own async budget, raised for the same reason
+ * `testTimeout` is (see vitest.config.mts).
+ *
+ * `waitFor` and every `findBy*` default to one second, measured in real time
+ * while 180 jsdom environments share the machine. A screen behind a 300 ms
+ * debounce has 700 ms of headroom on an idle box and none at all under a
+ * full-suite run, so a different debounced screen fails each time — the pin
+ * picker one run, the leads board the next. That is load, not a broken test,
+ * and the honest fix is to give the assertion room rather than to reach for a
+ * fake clock: these tests are about what the user sees settle, and a fake
+ * clock would stop testing that.
+ *
+ * It stays well under `testTimeout`, so a genuinely stuck expectation still
+ * fails as itself rather than as a timeout of the whole file.
+ */
+configure({ asyncUtilTimeout: 5_000 });
 
 /**
  * One teardown for every test file.

@@ -23,7 +23,7 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
     };
 });
 
-import { canRefund, paymentTarget, paymentsQuery, paymentsService, refundProblem, type Payment } from "./payments";
+import { canRefund, filterByPurpose, paymentPurposeOf, paymentTarget, paymentsQuery, paymentsService, refundProblem, type Payment } from "./payments";
 
 const payment = (over: Partial<Payment> = {}): Payment => ({
     id: "pay_1",
@@ -77,6 +77,21 @@ describe("the refund dialog's own refusals", () => {
     it("wants a reason, then lets the refund through", () => {
         expect(refundProblem({ amount: "500.00", reason: " " }, "18400.00")).toMatch(/why/);
         expect(refundProblem({ amount: "500.00", reason: "Duplicate capture" }, "18400.00")).toBeNull();
+    });
+});
+
+/* RF-1: a reservation fee is not a booking payment; the list has no purpose facet, so the desk cuts the page in hand. */
+describe("the purpose", () => {
+    it("reads a row from before RF-1 as a settlement, and the fee as itself", () => {
+        expect(paymentPurposeOf(payment())).toBe("SETTLEMENT");
+        expect(paymentPurposeOf(payment({ purpose: "RESERVATION_FEE" }))).toBe("RESERVATION_FEE");
+    });
+
+    it("cuts the rows in hand by purpose, and leaves them alone under ALL", () => {
+        const rows = [payment(), payment({ id: "pay_2", purpose: "RESERVATION_FEE", payerUpiId: "anita@okhdfc" }), payment({ id: "pay_3", purpose: "SETTLEMENT" })];
+        expect(filterByPurpose(rows, "ALL")).toHaveLength(3);
+        expect(filterByPurpose(rows, "RESERVATION_FEE").map((row) => row.id)).toEqual(["pay_2"]);
+        expect(filterByPurpose(rows, "SETTLEMENT").map((row) => row.id)).toEqual(["pay_1", "pay_3"]);
     });
 });
 

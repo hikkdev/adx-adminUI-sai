@@ -12,6 +12,8 @@ import {
     type AudienceVendor,
     type AudienceVendorTest,
 } from "@/services/audience";
+import type { DigioWorkflow } from "@/services/kyc-provider";
+import type { SecureIdSettings, VerificationRoutingSettings } from "@/services/verification";
 
 /**
  * Third-party credentials — `GET/PUT /integrations`, the `integrations`
@@ -42,7 +44,13 @@ export type IntegrationSection =
     | "maps"
     | "audience"
     | "qrEngine"
-    | "branding";
+    | "branding"
+    | "bankTransfer"
+    | "facebook"
+    | "geoIp"
+    | "secureId"
+    | "verificationRouting"
+    | "holidayCalendar";
 
 /**
  * A rail as the server names it. The names — MSG91 and Twilio wired, `third`
@@ -573,6 +581,79 @@ export interface IntegrationsSettings {
     qrEngine?: QrEngineSettings;
     /** QR-9: the brand overrides, as stored — null is DR 11's default. */
     branding?: BrandingSettings;
+    /** BT-1: ADX's receiving account for bank transfers — shown to the payer as-is. */
+    bankTransfer?: BankTransferSettings;
+    /** FB-1: the Facebook app behind "Continue with Facebook" on the website. */
+    facebook?: FacebookSettings;
+    /** SL-1: the IP-to-place lookup that stamps where a session signed in from. */
+    geoIp?: GeoIpSettings;
+    /** Cashfree Phase 2: the Secure ID keys — the backup to Digio. Absent on a server older than Phase 1. */
+    secureId?: SecureIdSettings;
+    /** Cashfree Phase 2: who answers each check, the breaker, the steps per account type and the three switches. */
+    verificationRouting?: VerificationRoutingSettings;
+    /** The KYC section — read here for the 25 workflows' labels; the Digio card reads the rest through `kyc-provider.ts`. */
+    kyc?: { workflows?: DigioWorkflow[] };
+    /** HC-1: the public holiday calendar the Holidays page follows. Absent on an older server. */
+    holidayCalendar?: HolidayCalendarSettings;
+}
+
+/**
+ * HC-1 (1 Oct 2026): the holiday calendar — on by default, Google's
+ * "Holidays in India" unless an https address is set, public holidays only
+ * unless observances are switched on (they come in as Optional). Nothing
+ * here is a secret. The last run is read from `GET /hr/holidays/calendar`.
+ */
+export interface HolidayCalendarSettings {
+    enabled: boolean;
+    url: string;
+    includeObservances: boolean;
+}
+
+/**
+ * FB-1 (DR 12): Facebook Login on the website. The app id is public — the
+ * website's button carries it — and drawn as-is; the app secret is the one
+ * secret, masked on read and never round-tripped.
+ */
+export interface FacebookSettings {
+    appId: string | null;
+    appSecret: string | null;
+}
+
+/**
+ * SL-1: where a session signed in from. NONE looks nothing up; IPAPI is
+ * ip-api.com, which takes no key; IPINFO is ipinfo.io and needs its token,
+ * masked on read. Each session's city, region and country are stamped
+ * once at sign-in and drawn beside the address on the sessions lists.
+ */
+export type GeoIpProvider = "NONE" | "IPAPI" | "IPINFO";
+
+export const GEO_IP_PROVIDERS: readonly GeoIpProvider[] = ["NONE", "IPAPI", "IPINFO"];
+
+export const GEO_IP_PROVIDER_LABEL: Record<GeoIpProvider, string> = {
+    NONE: "Off — nothing looked up",
+    IPAPI: "ip-api.com (no key)",
+    IPINFO: "ipinfo.io (token)",
+};
+
+export interface GeoIpSettings {
+    provider: GeoIpProvider;
+    token: string | null;
+}
+
+/** SL-1: whether the lookup can run as stored — a provider chosen, and ipinfo's token on file when it is the one. */
+export function geoIpConfigured(stored: GeoIpSettings | null | undefined): boolean {
+    if (!stored || stored.provider === "NONE") return false;
+    return stored.provider === "IPAPI" || Boolean(stored.token);
+}
+
+/** BT-1: the account a bank-transfer payer is asked to pay into. Not secrets. */
+export interface BankTransferSettings {
+    beneficiary: string | null;
+    accountNumber: string | null;
+    ifsc: string | null;
+    bank: string | null;
+    branch: string | null;
+    instructions: string | null;
 }
 
 /** QR-9: what Settings › Branding stores; every field null means "DR 11". */
@@ -710,6 +791,18 @@ export const SECRET_FIELDS: Record<IntegrationSection, readonly string[]> = {
     qrEngine: ["apiKey"],
     // QR-9: nothing in the brand is secret.
     branding: [],
+    // BT-1: the payer sees the account, so nothing here is secret either.
+    bankTransfer: [],
+    // FB-1: the app id is on the website's button; the secret is the secret.
+    facebook: ["appSecret"],
+    // SL-1: ipinfo's token; ip-api takes none.
+    geoIp: ["token"],
+    // Cashfree Phase 2: the client secret and the PEM — blank keeps either.
+    secureId: ["clientSecret", "publicKey"],
+    // Nothing in the routing is secret.
+    verificationRouting: [],
+    // HC-1: a public calendar address and two switches.
+    holidayCalendar: [],
 };
 
 /** A value the server masked — never something to send back. */

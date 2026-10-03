@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { BadgeCheck, ShieldCheck, X } from "lucide-react";
+import { BadgeCheck, ScanSearch, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,15 +25,19 @@ import { FieldList } from "@/components/adx/simple-table";
 import { ApiError } from "@/lib/api-client";
 import { formatDate, formatPct } from "@/lib/format";
 import {
+    PAYOUT_CHECK_OUTCOME_META,
     PAYOUT_METHOD_STATUS_META,
     RAIL_LABEL,
     VERIFIED_VIA_LABEL,
     describeMethod,
     financeService,
+    isFlaggedCheck,
     type PayoutMethod,
+    type PayoutMethodCheck,
     type PayoutVerificationMethod,
     type RailStatus,
 } from "@/services/finance";
+import { pennyDropRefusal, upiCheckFailure } from "@/services/verification";
 
 interface PayoutMethodsViewProps {
     methods: PayoutMethod[];
@@ -54,6 +58,13 @@ interface PayoutMethodsViewProps {
  * • NAME_LOOKUP — a VPA resolved to a name.
  * • MANUAL — ops checked the papers. Always available.
  *
+ * A UPI ID has its own "Check UPI ID" (2 Oct 2026): Digio looks it up —
+ * live or not, and the name on it — through the backend's router, and a
+ * live ID whose name matches is verified there and then. The answer (the
+ * name at the bank, the match score, Verified / Not found / Name doesn't
+ * match) stays on the card; the queue flags a method whose last check said
+ * something was wrong, including the check run when the person added it.
+ *
  * The name-match percentage is asked for because it is the one number that
  * makes a verification auditable later: "we checked" and "the bank returned a
  * 96% match on the name" are different claims.
@@ -70,8 +81,13 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
     const [nameMatch, setNameMatch] = React.useState("");
     const [reason, setReason] = React.useState("");
     const [busy, setBusy] = React.useState(false);
+    /** The answers "Check UPI ID" gave in this visit, by method — newer than the queue's. */
+    const [checked, setChecked] = React.useState<Record<string, PayoutMethodCheck>>({});
+    const [checking, setChecking] = React.useState(false);
 
     const selected = methods.find((method) => method.id === selectedId) ?? methods[0] ?? null;
+    const checkOf = (method: PayoutMethod): PayoutMethodCheck | null => checked[method.id] ?? method.check ?? null;
+    const selectedCheck = selected ? checkOf(selected) : null;
 
     /* Penny drop is a capability of a rail, not a choice ops can simply make.
        No configured rail supports it today, so the option is disabled and says
@@ -110,9 +126,48 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
             setAction(null);
             onChanged();
         } catch (cause) {
-            toast.error(cause instanceof ApiError ? cause.message : "Could not record that decision.");
+            // Cashfree Phase 2: the penny drop's two refusals (a UPI id with no check, a bank method with nothing to check) in the desk's words.
+            const refusal = pennyDropRefusal(cause);
+            if (refusal) toast.error("Penny drop not run", { description: refusal });
+            else toast.error(cause instanceof ApiError ? cause.message : "Could not record that decision.");
         } finally {
             setBusy(false);
+        }
+    }
+
+    /** "Check UPI ID": verified on a live, matching ID; otherwise the answer stays on the card. */
+    async function checkUpi() {
+        if (!selected || selected.type !== "UPI") return;
+        const method = selected;
+        setChecking(true);
+        try {
+            const updated = await financeService.checkUpiMethod(method.id);
+            if (updated.check) {
+                const check = updated.check;
+                setChecked((current) => ({ ...current, [method.id]: check }));
+            }
+            toast.success(`${describeMethod(method)} verified`, {
+                description: updated.check?.nameAtBank
+                    ? `Name at the bank: ${updated.check.nameAtBank}${updated.check.nameMatchScore !== null ? ` · match ${updated.check.nameMatchScore}/100` : ""}.`
+                    : "The UPI ID is live. The party can now request a withdrawal to it.",
+            });
+            onChanged();
+        } catch (cause) {
+            const failed = upiCheckFailure(cause);
+            const refusal = failed ? null : pennyDropRefusal(cause);
+            if (failed) {
+                if (failed.check) {
+                    const check = failed.check;
+                    setChecked((current) => ({ ...current, [method.id]: check }));
+                }
+                toast.error(failed.check ? PAYOUT_CHECK_OUTCOME_META[failed.check.outcome].label : "UPI ID not checked", { description: failed.message });
+            } else if (refusal) {
+                toast.error("UPI ID not checked", { description: refusal });
+            } else {
+                toast.error(cause instanceof ApiError ? cause.message : "Could not check the UPI ID.");
+            }
+        } finally {
+            setChecking(false);
         }
     }
 
@@ -173,9 +228,14 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
                                                         {describeMethod(method)} · added{" "}
                                                         {formatDate(method.createdAt)}
                                                     </p>
-                                                    <StatusBadge
-                                                        status={PAYOUT_METHOD_STATUS_META[method.status]}
-                                                    />
+                                                    <span className="flex shrink-0 items-center gap-1">
+                                                        {isFlaggedCheck(checkOf(method)) && (
+                                                            <StatusBadge status={PAYOUT_CHECK_OUTCOME_META[checkOf(method)!.outcome]} />
+                                                        )}
+                                                        <StatusBadge
+                                                            status={PAYOUT_METHOD_STATUS_META[method.status]}
+                                                        />
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
@@ -208,6 +268,17 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
                                         <X className="mr-1.5 size-4" />
                                         Reject
                                     </Button>
+                                    {selected.type === "UPI" && (
+                                        <Button
+                                            variant="outline"
+                                            className="bg-card"
+                                            onClick={checkUpi}
+                                            disabled={checking || !selected.upiVpa}
+                                        >
+                                            <ScanSearch className="mr-1.5 size-4" />
+                                            {checking ? "Checking…" : "Check UPI ID"}
+                                        </Button>
+                                    )}
                                     <Button onClick={() => start("verify")}>
                                         <BadgeCheck className="mr-1.5 size-4" />
                                         Verify
@@ -240,6 +311,25 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
                                 }
                             />
 
+                            {selected.type === "UPI" && selectedCheck && (
+                                <div className="mt-4 border-t pt-3" data-testid="upi-check-result">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-medium text-foreground">UPI ID check</p>
+                                        <StatusBadge status={PAYOUT_CHECK_OUTCOME_META[selectedCheck.outcome]} />
+                                    </div>
+                                    <FieldList
+                                        className="mt-2"
+                                        items={[
+                                            ["Name at the bank", selectedCheck.nameAtBank ?? "Not given"],
+                                            ["Match score", selectedCheck.nameMatchScore !== null ? `${selectedCheck.nameMatchScore} / 100` : "No name to match"],
+                                            ["Checked", `${formatDate(selectedCheck.checkedAt)}${selectedCheck.providerLabel ? ` · ${selectedCheck.providerLabel}` : ""}`],
+                                        ]}
+                                    />
+                                    {selectedCheck.outcome !== "VERIFIED" && (
+                                        <p className="mt-2 text-xs text-muted-foreground">{selectedCheck.message}</p>
+                                    )}
+                                </div>
+                            )}
                             {selected.nameMatchPct !== null && (
                                 <p className="mt-4 border-t pt-3 text-sm text-muted-foreground">
                                     A previous check returned a {formatPct(selected.nameMatchPct)} name match
@@ -261,6 +351,14 @@ export function PayoutMethodsView({ methods, rails, onChanged }: PayoutMethodsVi
                                 How this can be proved
                             </h3>
                             <ul className="mt-3 space-y-3 text-sm">
+                                {selected.type === "UPI" && (
+                                    <li>
+                                        <p className="font-medium text-foreground">Check UPI ID</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Digio looks the UPI ID up: active or not, and the name on the account. No money moves. A live ID whose name matches is verified straight away.
+                                        </p>
+                                    </li>
+                                )}
                                 <li>
                                     <p className="font-medium text-foreground">Penny drop</p>
                                     <p className="text-xs text-muted-foreground">

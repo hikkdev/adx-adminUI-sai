@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { ConfirmDialog } from "@/components/adx/confirm-dialog";
 import { formatCompactINR, formatDate } from "@/lib/format";
 import { isLive } from "@/lib/api-config";
-import { orderService } from "@/services/orders";
+import { orderLabel, orderService } from "@/services/orders";
 import { OPS_REASON_MIN, ReasonField } from "../[id]/order-ops-dialogs";
 import {
     ORDER_PIPELINE_STAGES,
@@ -189,8 +189,12 @@ export function PipelineBoard({ orders, onChanged }: PipelineBoardProps) {
                                                 .filter(Boolean)
                                                 .join(" · ") || "—"}
                                         </p>
-                                        <div className="mt-2">
+                                        <div className="mt-2 flex items-center justify-between gap-2">
                                             <StatusBadge status={ORDER_STATUS_META[order.status]} />
+                                            {/* BK-1: the booking id once minted, the short id until the backfill runs. */}
+                                            <span className="font-mono text-[11px] text-muted-foreground" title={order.id}>
+                                                {orderLabel(order)}
+                                            </span>
                                         </div>
                                         <div className="mt-2.5 flex items-center justify-between gap-2 border-t pt-2.5">
                                             {order.agent ? (

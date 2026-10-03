@@ -104,8 +104,8 @@ export function InvoiceDetail({ invoice, onChanged }: InvoiceDetailProps) {
                     <ChevronLeft className="size-4" />
                     Invoices
                 </Link>
-                <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                                 {invoice.number}

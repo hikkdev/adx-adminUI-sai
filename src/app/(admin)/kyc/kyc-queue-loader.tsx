@@ -7,6 +7,7 @@ import { isLive } from "@/lib/api-config";
 import { kycService, type KycQueue } from "@/services/kyc";
 import { kycStateFilter } from "@/services/kyc-state";
 import { settingsService } from "@/services/settings";
+import { useShowInactive } from "./_shared/show-inactive";
 import { useStateChip } from "./_shared/use-state-chip";
 import { KycQueueView } from "./kyc-queue";
 
@@ -37,11 +38,13 @@ export interface LoadedQueue {
 export function KycQueueLoader() {
     const live = isLive("kyc");
     const [chip, setChip] = useStateChip();
+    /* 2 Oct 2026: working accounts only, unless the switch asks for the inactive too. */
+    const [inactive, setInactive] = useShowInactive();
 
-    const resource = useApiResource<LoadedQueue>(`kyc:queue:${chip}:${live}`, async () => {
+    const resource = useApiResource<LoadedQueue>(`kyc:queue:${chip}:${inactive}:${live}`, async () => {
         const [everything, visible, settings] = await Promise.all([
-            kycService.queue(),
-            chip === "all" ? Promise.resolve(null) : kycService.queue(kycStateFilter(chip)),
+            kycService.queue({ includeInactive: inactive }),
+            chip === "all" ? Promise.resolve(null) : kycService.queue({ ...kycStateFilter(chip), includeInactive: inactive }),
             settingsService.get().catch(() => null),
         ]);
         return {
@@ -63,7 +66,7 @@ export function KycQueueLoader() {
 
     return (
         <ResourceBoundary resource={resource}>
-            {(data) => <KycQueueView loaded={data} chip={chip} onChip={setChip} onChanged={resource.reload} />}
+            {(data) => <KycQueueView loaded={data} chip={chip} onChip={setChip} showInactive={inactive} onShowInactive={setInactive} onChanged={resource.reload} />}
         </ResourceBoundary>
     );
 }

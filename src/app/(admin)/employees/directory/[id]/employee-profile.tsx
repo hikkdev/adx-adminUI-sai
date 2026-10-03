@@ -16,11 +16,13 @@ import { StatusBadge } from "@/components/adx/status-badge";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
-import { EMPLOYEE_KYC_STATUS_META, employeeKycService, type EmployeeKycCase } from "@/services/employee-kyc";
+import { EMPLOYEE_KYC_STATUS_META, employeeKycService, employeeWorkflowLabel, type EmployeeKycCase } from "@/services/employee-kyc";
 import { requestOf } from "@/services/kyc";
 import { KYC_STATE_META } from "@/services/kyc-state";
 import { signingLine } from "@/services/print-partners";
+import { deleteBlockersOf, type DeleteBlocker } from "@/services/users";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
+import { accountStateFrom } from "@/services/account-state";
 import { AssignedTasksCard } from "@/app/(admin)/tasks/assigned-tasks-card";
 import {
     EMPLOYEE_STATUS_META,
@@ -62,6 +64,12 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
     const mayOpen = can("hr.documents.view") && !employee.documentsMasked;
     const [editing, setEditing] = React.useState(false);
     const [removing, setRemoving] = React.useState(false);
+    /**
+     * 2 Oct 2026 (the account lifecycle): the server keeps an HR record that
+     * has KYC or activity on file (409 with the blockers) — the dialog then
+     * says what is on file and offers Deactivate instead.
+     */
+    const [refused, setRefused] = React.useState<{ blockers: DeleteBlocker[]; message: string } | null>(null);
     const [busy, setBusy] = React.useState(false);
 
     const onFile = employee.documents.filter((row) => row.onFile).length;
@@ -74,7 +82,29 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
             toast.success(`${employee.name}'s HR record removed`, { description: "The console account is unchanged." });
             router.push("/employees/directory");
         } catch (caught) {
-            toast.error(message(caught, "Could not remove the record."));
+            if (caught instanceof ApiError && caught.status === 409) {
+                /* The confirm closed on the click; open it again on the refusal. */
+                setRefused({ blockers: deleteBlockersOf(caught), message: caught.message });
+                setRemoving(true);
+            } else {
+                toast.error(message(caught, "Could not remove the record."));
+            }
+            setBusy(false);
+        }
+    };
+
+    /** Deactivate instead — the record leaves the active roster and can be switched back on from Edit. */
+    const deactivate = async () => {
+        setBusy(true);
+        try {
+            await employeesService.update(employee.userId, { isActive: false });
+            toast.success(`${employee.name} is deactivated`, { description: "The HR record is kept. Switch it back on from Edit." });
+            setRemoving(false);
+            setRefused(null);
+            onChanged();
+        } catch (caught) {
+            toast.error(message(caught, "Could not deactivate the record."));
+        } finally {
             setBusy(false);
         }
     };
@@ -306,6 +336,8 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
                                             ["State", <StatusBadge key="kyc" status={KYC_STATE_META[employee.kyc.state]} />],
                                             ["Documents", kyc ? `${kyc.documents} of 7` : "—"],
                                             ["Submitted", kyc ? formatDate(kyc.submittedAt) : "—"],
+                                            /* Phase D: the Digio workflow a request uses, chosen by the employment type on the HR record. */
+                                            ["Digio workflow", employeeWorkflowLabel(employee.employmentType)],
                                         ]}
                                     />
                                     {isLive("kyc") && (
@@ -322,6 +354,8 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
                                             onRequest={(channel, note) => employeeKycService.request(employee.id, channel, note)}
                                             onRecord={() => router.push(`/kyc/employees/${employee.id}`)}
                                             onChanged={onChanged}
+                                            accountState={accountStateFrom({ active: employee.isActive })}
+                                            deactivationBlocksNew={false}
                                         />
                                     )}
                                 </SectionCard>
@@ -347,16 +381,47 @@ export function EmployeeProfile({ employee, kyc, onChanged }: EmployeeProfilePro
             />
 
             <EditEmployeeDialog employee={employee} open={editing} onOpenChange={setEditing} onSaved={onChanged} />
-            <ConfirmDialog
-                open={removing}
-                onOpenChange={(open) => !open && setRemoving(false)}
-                title={`Remove ${employee.name}'s HR record?`}
-                description="The record, its EMP id and its document links are deleted. The console account, its roles and any KYC decision are not touched."
-                confirmLabel="Remove record"
-                destructive
-                busy={busy}
-                onConfirm={() => void remove()}
-            />
+            {refused ? (
+                <ConfirmDialog
+                    open={removing}
+                    onOpenChange={(open) => {
+                        if (open) return;
+                        setRemoving(false);
+                        setRefused(null);
+                    }}
+                    title={`${employee.name}'s HR record can't be removed`}
+                    description={
+                        employee.isActive
+                            ? "It has history on file, and that has to be kept. Deactivate the record instead: it leaves the active roster and can be switched back on."
+                            : "It has history on file, and that has to be kept. The record is already deactivated, so there is nothing more to do."
+                    }
+                    confirmLabel={employee.isActive ? "Deactivate instead" : "Close"}
+                    cancelLabel={employee.isActive ? "Cancel" : "Back"}
+                    busy={busy}
+                    onConfirm={() => (employee.isActive ? void deactivate() : (setRemoving(false), setRefused(null)))}
+                >
+                    {refused.blockers.length > 0 ? (
+                        <ul className="list-disc space-y-1 pl-5 text-sm text-foreground" data-testid="employee-remove-blockers">
+                            {refused.blockers.map((blocker) => (
+                                <li key={`${blocker.kind}:${blocker.label}`}>{blocker.count > 0 ? `${blocker.count} ${blocker.label}` : blocker.label}</li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="text-sm text-foreground" data-testid="employee-remove-blockers">{refused.message}</p>
+                    )}
+                </ConfirmDialog>
+            ) : (
+                <ConfirmDialog
+                    open={removing}
+                    onOpenChange={(open) => !open && setRemoving(false)}
+                    title={`Remove ${employee.name}'s HR record?`}
+                    description="The record, its EMP id and its document links are deleted. The console account, its roles and any KYC decision are not touched. A record with KYC or activity on file is kept — deactivate it instead."
+                    confirmLabel="Remove record"
+                    destructive
+                    busy={busy}
+                    onConfirm={() => void remove()}
+                />
+            )}
         </>
     );
 }

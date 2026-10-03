@@ -34,6 +34,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/auth", () => ({
     useAuth: () => ({ user: { id: "usr_admin", name: "Priya", roles: ["ADMIN"] }, loading: false, can: () => true }),
+    useOptionalAuth: () => ({ user: { id: "usr_admin", name: "Priya", roles: ["ADMIN"] }, loading: false, can: () => true }),
 }));
 
 vi.mock("@/lib/api-config", async (importOriginal) => {
@@ -49,7 +50,10 @@ vi.mock("@/services/cities", () => ({ citiesService: { list: async () => [] } })
 
 vi.mock("@/services/supply", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/services/supply")>();
-    return { ...actual, supplyService: { ...actual.supplyService, roster: async () => [] } };
+    return {
+        ...actual,
+        supplyService: { ...actual.supplyService, roster: async () => [], rosterPage: async () => ({ rows: [], nextCursor: null, total: 0 }) },
+    };
 });
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
@@ -74,15 +78,30 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
         breakdowns: {
             /* Lot X-B: keyed by the catalogue slug, plus the one "Other (typed)" bucket with its strings. */
             byCity: list([
-                { key: "bengaluru", label: "Bengaluru", href: "/publishers?city=bengaluru", cityId: "city_blr", typed: [], count: 40, listings: 90, gmv: "125000.00" },
-                { key: "other", label: "Other (typed)", href: null, cityId: null, typed: ["Bangalore Rural", "Blore"], count: 3, listings: 4, gmv: "1200.00" },
+                { key: "bengaluru", label: "Bengaluru", href: "/publishers?city=bengaluru", cityId: "city_blr", typed: [], count: 40, listings: 90, gmv: "125000.00", cost: "1400.00", onboardings: 30 },
+                /* CP-2: a typed town with onboardings but no agent salary on
+                   record — the column prints a dash, never a free onboarding. */
+                { key: "other", label: "Other (typed)", href: null, cityId: null, typed: ["Bangalore Rural", "Blore"], count: 3, listings: 4, gmv: "1200.00", cost: null, onboardings: 2 },
             ]),
-            byCategory: list([{ key: "OUTDOOR", label: "Outdoor", href: "/listings?category=OUTDOOR", publishers: 60, listings: 120 }]),
+            byCategory: list([{ key: "OUTDOOR", label: "Outdoor", href: "/listings/directory?category=OUTDOOR", publishers: 60, listings: 120 }]),
             bySubscriptionTier: list([{ key: "PRO", label: "Pro", href: null, count: 20 }]),
             byAgent: list([{ key: "agt_1", label: "Ravi Kumar", displayId: "AGT-0001", href: "/agents/agt_1", count: 14 }]),
         },
         top: { byEarnings: list([{ key: "pub_1", label: "Sharma Hoardings", displayId: "PUB-0001", href: "/publishers/pub_1", amount: "42000.00" }]) },
         money: { earningsPaid: money("250000.00", "200000.00"), payoutsReleased: money("180000.00", "0.00") },
+        // CP-2: 44,800 of salary and rewards over the 32 publishers agents brought.
+        cost: {
+            side: "PUBLISHER",
+            perOnboarding: "1400.00",
+            allInPerOnboarding: "1600.00",
+            salary: "42000.00",
+            rewards: "2800.00",
+            commission: "6400.00",
+            basis: "44800.00",
+            allIn: "51200.00",
+            onboardings: { byAgent: 32, selfServe: 8 },
+            agentsOnTerms: 4,
+        },
     };
     return {
         ...actual,
@@ -147,13 +166,13 @@ describe("/publishers", () => {
         /* The series cards draw the chart. */
         expect(screen.getByTestId("series-new-publishers")).toBeInTheDocument();
 
-        /* The rows' links, mapped: a city narrows this overview; a category has no route and stays a label; an agent opens its page. */
+        /* The rows' links, mapped: a city narrows this overview; a category opens the listings directory; an agent opens its page. */
         expect(screen.getByRole("link", { name: "Bengaluru" })).toHaveAttribute("href", "/publishers?window=7D&city=bengaluru");
         /* The Other bucket: no link, its typed strings on hover. */
         expect(screen.queryByRole("link", { name: "Other (typed)" })).toBeNull();
         expect(screen.getByText("Other (typed)")).toHaveAttribute("title", expect.stringContaining("Typed as Bangalore Rural, Blore"));
-        expect(screen.queryByRole("link", { name: "Outdoor" })).toBeNull();
-        expect(screen.getByText("Outdoor")).toBeInTheDocument();
+        /* 2 Oct 2026: a category opens the listings directory under it. */
+        expect(screen.getByRole("link", { name: "Outdoor" })).toHaveAttribute("href", "/listings/directory?category=OUTDOOR");
         expect(screen.getByRole("link", { name: "Ravi Kumar" })).toHaveAttribute("href", "/agents/agt_1");
         expect(screen.getByRole("link", { name: "Sharma Hoardings" })).toHaveAttribute("href", "/publishers/pub_1");
     });

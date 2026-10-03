@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { CloseAccountDialog } from "@/components/adx/close-account-dialog";
+import { useDeleteAccount } from "@/components/adx/delete-account";
 import { ApiError } from "@/lib/api-client";
 import { isLive } from "@/lib/api-config";
 import { formatDate } from "@/lib/format";
@@ -51,6 +52,12 @@ export interface AccountClosureSlot {
     requestClose: (() => void) | null;
     /** The closure columns, once known. Null while loading, off, or with no account. */
     closed: ClosedFacts | null;
+    /**
+     * 2 Oct 2026: opens "Delete account" — offered only when `GET
+     * /users/:id/deletable` says the account has no history (and the page
+     * named a `directoryHref` to land on). Null otherwise; Close account stays.
+     */
+    requestDelete: (() => void) | null;
 }
 
 interface AccountClosureProps {
@@ -68,6 +75,8 @@ interface AccountClosureProps {
     closed?: AccountClosureFacts | null;
     /** After a case is opened or decided, so the page re-reads its own record. */
     onChanged?: () => void;
+    /** 2 Oct 2026: the directory the page sits under — named, it offers Delete for an account with no history and lands there after. */
+    directoryHref?: string;
     children: (slot: AccountClosureSlot) => React.ReactNode;
 }
 
@@ -86,7 +95,7 @@ interface AccountClosureProps {
  * With the users domain off there is no banner and no button: a closure is
  * an act against a real account and there is no fixture to pretend on.
  */
-export function AccountClosure({ userId, name, closed: given, onChanged, children }: AccountClosureProps) {
+export function AccountClosure({ userId, name, closed: given, onChanged, directoryHref, children }: AccountClosureProps) {
     const live = isLive("users") && !!userId;
     const [open, setOpen] = React.useState(false);
     const known = given !== undefined;
@@ -102,11 +111,13 @@ export function AccountClosure({ userId, name, closed: given, onChanged, childre
             : null
         : (state.data ?? null);
     const requestClose = live && closed && !closed.closedAt ? () => setOpen(true) : null;
+    const deletion = useDeleteAccount({ userId: directoryHref ? userId : null, name, directoryHref: directoryHref ?? "/", closed: Boolean(closed?.closedAt) });
 
     return (
         <>
             {closed?.closedAt && <ClosedBanner closed={closed} name={name} />}
-            {children({ requestClose, closed })}
+            {children({ requestClose, closed, requestDelete: deletion.requestDelete })}
+            {deletion.dialog}
             {live && userId && (
                 <CloseAccountDialog
                     userId={userId}

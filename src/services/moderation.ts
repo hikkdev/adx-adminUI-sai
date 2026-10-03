@@ -1,5 +1,6 @@
 import { api as http } from "@/lib/api-client";
 import { apiConfig } from "@/lib/api-config";
+import type { DesignQuote } from "@/services/campaigns";
 import type { StatusMeta } from "@/types";
 
 /**
@@ -43,6 +44,15 @@ export const CREATIVE_STATUSES: readonly CreativeStatus[] = [
     "PENDING_UPLOAD",
 ];
 
+/**
+ * The status row's "All" — the creatives in every status. `counts` also carries
+ * the kind row's numbers (flagged, static, video, resubmitted, analysed,
+ * unanalysed, everyKind); only the statuses are summed.
+ */
+export function allStatusesCount(counts: Readonly<Record<string, number>>): number {
+    return CREATIVE_STATUSES.reduce((sum, status) => sum + (counts[status] ?? 0), 0);
+}
+
 export const CREATIVE_STATUS_META: Record<CreativeStatus, StatusMeta> = {
     PENDING_UPLOAD: { label: "Nothing uploaded", tone: "neutral" },
     UPLOADED: { label: "Uploaded", tone: "neutral" },
@@ -64,6 +74,137 @@ export const CREATIVE_PATH_LABEL: Record<CreativePath, string> = {
 };
 
 export type CreativeDecision = "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
+
+/* ── CR-1: the brief and the print state ─────────────────────────────── */
+
+/** The three looks the booking step offers when ADX designs it. */
+export type DesignStyle = "BOLD_AND_ENERGETIC" | "CLEAN_AND_MINIMAL" | "WARM_AND_FRIENDLY";
+
+export const DESIGN_STYLE_LABEL: Record<DesignStyle, string> = {
+    BOLD_AND_ENERGETIC: "Bold and energetic",
+    CLEAN_AND_MINIMAL: "Clean and minimal",
+    WARM_AND_FRIENDLY: "Warm and friendly",
+};
+
+/** What the advertiser wrote when choosing ADX Design Agency — `briefConfig` on the backend. */
+export interface DesignBrief {
+    objective: string;
+    keyMessage: string;
+    style: DesignStyle;
+}
+
+/**
+ * The brief off a row's campaign, or null when there is none or it is not
+ * one. `creativeConfig` is a JSON column that holds a different shape per
+ * path, so it is read defensively rather than trusted.
+ */
+export function briefOf(row: Pick<CreativeReviewRow, "campaign">): DesignBrief | null {
+    if (row.campaign.creativePath !== "ADX_DESIGN_AGENCY") return null;
+    const config = row.campaign.creativeConfig;
+    if (!config || typeof config !== "object") return null;
+    const candidate = config as Partial<Record<keyof DesignBrief, unknown>>;
+    if (typeof candidate.objective !== "string" || typeof candidate.keyMessage !== "string") return null;
+    const style = candidate.style;
+    if (style !== "BOLD_AND_ENERGETIC" && style !== "CLEAN_AND_MINIMAL" && style !== "WARM_AND_FRIENDLY") return null;
+    return { objective: candidate.objective, keyMessage: candidate.keyMessage, style };
+}
+
+/** A request is overdue once the campaign's start has passed with nothing delivered. */
+export function designDueLabel(row: Pick<CreativeReviewRow, "campaign">, now: Date = new Date()): { label: string; overdue: boolean } {
+    const start = row.campaign.startDate ? new Date(row.campaign.startDate) : null;
+    if (!start) return { label: "No flight date yet", overdue: false };
+    const days = Math.ceil((start.getTime() - now.getTime()) / 86_400_000);
+    if (days < 0) return { label: `Flight started ${-days} day${days === -1 ? "" : "s"} ago`, overdue: true };
+    if (days === 0) return { label: "Flight starts today", overdue: true };
+    return { label: `Due in ${days} day${days === 1 ? "" : "s"}`, overdue: false };
+}
+
+/**
+ * CR-1: a design ADX owes — `GET /campaigns/design-requests`.
+ *
+ * Not a creative row: choosing ADX Design Agency sets the campaign's path and
+ * writes nothing else, and a creative row exists only once something is
+ * uploaded. So the request is the campaign, with its spots (what formats to
+ * design for), its brief, and the last delivery if one was sent back.
+ */
+export interface DesignRequestRow {
+    campaign: {
+        id: string;
+        reference: string;
+        name: string;
+        status: string;
+        startDate: string | null;
+        endDate: string | null;
+        creativeConfig: unknown;
+        advertiser: { id: string; name: string; companyName: string | null };
+        /** DQ-1: the quote as it stands — null until the desk names a price. Absent on a backend older than DQ-1. */
+        designQuote?: DesignQuote | null;
+    };
+    spots: {
+        id: string;
+        listing: { id: string; title: string; city: string | null; widthFt: string | null; heightFt: string | null; category: string };
+    }[];
+    /** When the ask became current: the campaign's submission, or the last time a design was sent back. */
+    owedSince: string;
+    /** The last ADX design, if one was ever delivered — present means it was sent back. */
+    lastDelivery: {
+        id: string;
+        status: CreativeStatus;
+        designedByAdx: boolean;
+        resubmissionOfId: string | null;
+        fileUrl: string | null;
+        reviewNote: string | null;
+        reviewedAt: string | null;
+        createdAt: string;
+    } | null;
+}
+
+/** The brief off a request, read with the same care as off a review row. */
+export function briefOfRequest(row: Pick<DesignRequestRow, "campaign">): DesignBrief | null {
+    return briefOf({ campaign: { creativePath: "ADX_DESIGN_AGENCY", creativeConfig: row.campaign.creativeConfig } } as Pick<CreativeReviewRow, "campaign">);
+}
+
+/** A request is overdue once the campaign's start has passed with nothing delivered. */
+export function requestDueLabel(row: Pick<DesignRequestRow, "campaign">, now: Date = new Date()): { label: string; overdue: boolean } {
+    return designDueLabel({ campaign: { startDate: row.campaign.startDate } } as Pick<CreativeReviewRow, "campaign">, now);
+}
+
+export type PrintJobStatus = "REQUESTED" | "ACCEPTED" | "PRINTING" | "READY" | "COLLECTED" | "CANCELLED";
+
+/**
+ * Where an approved artwork stands on its way to a hoarding. Reads the spot's
+ * order and job; an artwork pinned to no spot applies to the whole campaign
+ * and has no single print state.
+ */
+export type PrintReadiness =
+    | { state: "CAMPAIGN_WIDE" }
+    | { state: "NOT_BOOKED" }
+    | { state: "NO_JOB"; orderId: string }
+    | { state: "AT_SHOP"; orderId: string; jobStatus: PrintJobStatus; partner: string };
+
+export function printReadinessOf(row: Pick<CreativeReviewRow, "spot">): PrintReadiness {
+    if (!row.spot) return { state: "CAMPAIGN_WIDE" };
+    const order = row.spot.order;
+    if (!order) return { state: "NOT_BOOKED" };
+    if (!order.printJob) return { state: "NO_JOB", orderId: order.id };
+    return { state: "AT_SHOP", orderId: order.id, jobStatus: order.printJob.status, partner: order.printJob.printPartner.name };
+}
+
+export const PRINT_READINESS_META: Record<PrintReadiness["state"], StatusMeta> = {
+    CAMPAIGN_WIDE: { label: "Whole campaign", tone: "neutral" },
+    NOT_BOOKED: { label: "Spot not booked", tone: "neutral" },
+    NO_JOB: { label: "No print job yet", tone: "warning" },
+    AT_SHOP: { label: "With a shop", tone: "info" },
+};
+
+export const PRINT_JOB_STATUS_LABEL: Record<PrintJobStatus, string> = {
+    REQUESTED: "Requested",
+    ACCEPTED: "Accepted",
+    PRINTING: "Printing",
+    READY: "Ready to collect",
+    COLLECTED: "Collected",
+    CANCELLED: "Cancelled",
+};
 
 export type CreativeCheckCode = "DIMENSIONS_MATCH" | "VENUE_STANCE" | "QR_PRESENT" | "TEXT_LEGIBLE" | "BRAND_SAFE";
 export type CreativeCheckResult = "PASS" | "FAIL" | "UNKNOWN";
@@ -120,6 +261,126 @@ export const flagLabel = (flag: string): string => CREATIVE_FLAG_LABEL[flag as C
 /* Wire shapes                                                         */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* VA-1: what the vision model said                                    */
+/* ------------------------------------------------------------------ */
+
+export type AnalysisVerdict = "PASS" | "FAIL" | "UNSURE";
+export type AnalysisRating = "PG" | "REGULAR" | "ADULT";
+
+/** The flag vocabulary the model is held to; a word outside it comes back as OTHER. */
+export const ANALYSIS_FLAG_LABEL: Record<string, string> = {
+    TOBACCO: "Tobacco",
+    ALCOHOL: "Alcohol",
+    GAMBLING: "Gambling",
+    ADULT_CONTENT: "Adult content",
+    VIOLENCE: "Violence",
+    HATE_OR_DISCRIMINATION: "Hate or discrimination",
+    POLITICAL: "Political",
+    RELIGIOUS_SENSITIVITY: "Religious sensitivity",
+    MISLEADING_CLAIM: "Misleading claim",
+    HEALTH_CLAIM: "Health claim",
+    PRICE_CLAIM: "Price claim",
+    MISSING_DISCLAIMER: "Disclaimer missing",
+    COMPETITOR_MARK: "Competitor's mark",
+    CELEBRITY_LIKENESS: "Celebrity likeness",
+    CHILDREN_TARGETED: "Aimed at children",
+    LOW_LEGIBILITY: "Hard to read",
+    OFF_BRIEF: "Off the brief",
+    OTHER: "Other",
+};
+
+export const analysisFlagLabel = (flag: string): string => ANALYSIS_FLAG_LABEL[flag] ?? flag.replace(/_/g, " ");
+
+export const ANALYSIS_VERDICT_META: Record<AnalysisVerdict, StatusMeta> = {
+    PASS: { label: "Pass", tone: "success" },
+    FAIL: { label: "Fail", tone: "danger" },
+    UNSURE: { label: "Unsure", tone: "warning" },
+};
+
+export const ANALYSIS_RATING_META: Record<AnalysisRating, StatusMeta> = {
+    PG: { label: "PG", tone: "success" },
+    REGULAR: { label: "Regular", tone: "info" },
+    ADULT: { label: "Adult", tone: "danger" },
+};
+
+/**
+ * One run of the vision pass, as the desk reads it. Never a decision: the
+ * reviewer reads it first, the checklist and the buttons stay theirs.
+ * `unique` is arithmetic over the platform's other artwork, not the model.
+ */
+export interface CreativeAnalysis {
+    id: string;
+    creativeId: string;
+    provider: string;
+    model: string;
+    appropriate: { verdict: AnalysisVerdict; reason: string | null };
+    relevant: { verdict: AnalysisVerdict; reason: string | null };
+    legal: { verdict: AnalysisVerdict; reason: string | null };
+    rating: AnalysisRating;
+    ratingReason: string | null;
+    flags: string[];
+    summary: string;
+    confidence: number;
+    unique: boolean | null;
+    nearest: { creativeId: string; distance: number } | null;
+    createdAt: string;
+}
+
+/**
+ * What the analysis says about the two checklist rows a model can speak to.
+ *
+ * Brand-safe fails when the artwork is inappropriate or illegal and passes
+ * only when both are clean; legibility fails on the model's own flag. A
+ * verdict of UNSURE, or a row the model has nothing to say about, is left
+ * exactly as the reviewer had it — the desk decides, this only fills in.
+ */
+export function checksFromAnalysis(checks: CreativeCheck[], analysis: CreativeAnalysis): CreativeCheck[] {
+    return checks.map((check) => {
+        if (check.code === "BRAND_SAFE") {
+            const worst = [analysis.appropriate.verdict, analysis.legal.verdict];
+            if (worst.includes("FAIL")) return { ...check, result: "FAIL", note: analysis.appropriate.verdict === "FAIL" ? (analysis.appropriate.reason ?? undefined) : (analysis.legal.reason ?? undefined) };
+            if (worst.every((verdict) => verdict === "PASS")) return { ...check, result: "PASS", note: "AI review: nothing prohibited or unsafe seen" };
+            return check;
+        }
+        if (check.code === "TEXT_LEGIBLE" && analysis.flags.includes("LOW_LEGIBILITY")) {
+            return { ...check, result: "FAIL", note: "AI review: the text is hard to read" };
+        }
+        return check;
+    });
+}
+
+/** VA-4: what the queue's batch run did — which artworks got a reading, which the model could not be given, which it failed on. */
+export interface AnalyseBatchResult {
+    analysed: string[];
+    skipped: { creativeId: string; reason: string }[];
+    failed: { creativeId: string; reason: string }[];
+}
+
+/**
+ * The reading in one glance, for a queue card: the worst of the three
+ * verdicts as one badge (a FAIL anywhere is a fail; UNSURE anywhere is
+ * unsure; else a pass), the rating as another, and a line naming which
+ * rows fell short.
+ */
+export function analysisSummary(analysis: CreativeAnalysis): { verdict: StatusMeta; rating: StatusMeta; line: string } {
+    const rows: [string, AnalysisVerdict][] = [
+        ["appropriate", analysis.appropriate.verdict],
+        ["relevant", analysis.relevant.verdict],
+        ["legal", analysis.legal.verdict],
+    ];
+    const failing = rows.filter(([, verdict]) => verdict === "FAIL").map(([name]) => name);
+    const unsure = rows.filter(([, verdict]) => verdict === "UNSURE").map(([name]) => name);
+    const verdict: StatusMeta = failing.length
+        ? { label: "AI: fail", tone: "danger" }
+        : unsure.length
+          ? { label: "AI: unsure", tone: "warning" }
+          : { label: "AI: pass", tone: "success" };
+    const head = failing.length ? `Fails: ${failing.join(", ")}` : unsure.length ? `Unsure: ${unsure.join(", ")}` : "Passes all three";
+    const line = [head, ANALYSIS_RATING_META[analysis.rating].label, analysis.unique === false ? "near-duplicate" : null].filter(Boolean).join(" · ");
+    return { verdict, rating: ANALYSIS_RATING_META[analysis.rating], line };
+}
+
 /** A creative as the desk reads it — the row with the little it needs of its campaign and spot. */
 export interface CreativeReviewRow {
     id: string;
@@ -158,13 +419,27 @@ export interface CreativeReviewRow {
         createdByUserId: string;
         trackingMethod: string;
         contentCategoryId: string | null;
+        /** CR-1: the flight — a design request is due by the day the campaign starts. Optional so a fixture may omit it. */
+        startDate?: string | null;
+        endDate?: string | null;
+        /** CR-1: the path the advertiser chose and, for ADX Design Agency, the brief they wrote. */
+        creativePath?: CreativePath | null;
+        creativeConfig?: unknown;
         advertiser: { id: string; name: string; companyName: string | null };
     };
     spot: {
         id: string;
         listingId: string;
-        listing: { id: string; title: string; city: string | null; widthFt: string | null; heightFt: string | null };
+        listing: { id: string; title: string; city: string | null; widthFt: string | null; heightFt: string | null; category?: string };
+        /** CR-1: the spot's order and the print job on it — Print-ready. Null until the spot is booked. */
+        order?: {
+            id: string;
+            status: string;
+            printJob: { id: string; status: PrintJobStatus; printPartner: { id: string; name: string } } | null;
+        } | null;
     } | null;
+    /** VA-1: the latest vision run — on the one-creative read and, VA-4, on every queue row. Null when nobody has asked. */
+    analysis?: CreativeAnalysis | null;
 }
 
 /** The list contract: `{ items, total, page, pageSize, counts }`. */
@@ -182,6 +457,8 @@ export interface ReviewQueueQuery {
     kind?: CreativePath;
     flagged?: boolean;
     resubmitted?: boolean;
+    /** VA-4: only artworks with (true) or without (false) a reading. */
+    analysed?: boolean;
     q?: string;
     sort?: "OLDEST" | "NEWEST";
     page?: number;
@@ -273,6 +550,7 @@ export function reviewQueueQuery(query: ReviewQueueQuery): string {
     if (query.kind) params.set("kind", query.kind);
     if (query.flagged !== undefined) params.set("flagged", String(query.flagged));
     if (query.resubmitted !== undefined) params.set("resubmitted", String(query.resubmitted));
+    if (query.analysed !== undefined) params.set("analysed", String(query.analysed));
     if (query.q) params.set("q", query.q);
     if (query.sort) params.set("sort", query.sort);
     if (query.page) params.set("page", String(query.page));
@@ -290,8 +568,25 @@ export const moderationService = {
     queue: (query: ReviewQueueQuery = {}) =>
         http.get<ReviewQueuePage>(`/campaigns/creatives/review-queue${reviewQueueQuery(query)}`),
 
-    /** One artwork with its campaign, spot, checks and flags. */
+    /** One artwork with its campaign, spot, checks and flags — and, VA-1, its latest analysis. */
     get: (creativeId: string) => http.get<CreativeReviewRow>(`/campaigns/creatives/${creativeId}`),
+
+    /** CR-1: the designs ADX owes, oldest flight first. */
+    designRequests: async (): Promise<DesignRequestRow[]> => {
+        const answer = await http.get<{ items: DesignRequestRow[] }>("/campaigns/design-requests");
+        return answer.items ?? [];
+    },
+
+    /** VA-1: the desk asks the vision model. On demand; the answer is a row beside the creative, never a decision. */
+    analyse: (creativeId: string) => http.post<CreativeAnalysis>(`/campaigns/creatives/${creativeId}/analyse`, {}),
+
+    /**
+     * VA-4: the batch. With ids, those artworks; without, everything awaiting
+     * review that is a still image and has no reading yet, oldest first, up
+     * to fifty. Each one is the same on-demand run as `analyse`.
+     */
+    analysePending: (creativeIds?: string[]) =>
+        http.post<AnalyseBatchResult>("/campaigns/creatives/analyse", creativeIds?.length ? { creativeIds } : {}),
 
     /** One decision. A note is required unless approved; the reviewer's checks replace the computed ones. */
     review: (campaignId: string, creativeId: string, input: CreativeReviewInput) =>

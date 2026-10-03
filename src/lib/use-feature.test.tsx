@@ -16,7 +16,7 @@ import { FeatureGate, resetFeaturesForTests } from "./use-feature";
 
 const { backend, session } = vi.hoisted(() => ({
     backend: { calls: [] as string[], answers: {} as Record<string, { enabled: boolean; variant: string | null }>, fail: false },
-    session: { user: { id: "op-1", name: "Priya", email: "priya@adx.test", roles: ["ADMIN"] } },
+    session: { user: { id: "op-1", name: "Priya", email: "priya@adx.in", roles: ["ADMIN"] } },
 }));
 
 vi.mock("@/lib/api-config", async (importOriginal) => {

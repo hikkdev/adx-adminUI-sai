@@ -6,6 +6,7 @@ import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AccountClosure, CloseAccountButton } from "@/components/adx/account-closure";
+import { DeleteAccountButton } from "@/components/adx/delete-account";
 import { PartyBandControl } from "@/components/adx/party-band-control";
 import { ActivityTimeline } from "@/components/adx/activity-timeline";
 import { DetailShell } from "@/components/adx/detail-shell";
@@ -17,22 +18,28 @@ import { formatDate, formatINR, formatMoney, formatNumber } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { ADVERTISER_DESK_FACTS, advertiserDeskTiles, advertiserKycService } from "@/services/advertiser-kyc";
 import { recordedLine, requestLine, requestOf } from "@/services/kyc";
+import { accountTypeLine, entityTypeLabel } from "@/services/kyc-entity-types";
+import { ladderAccountType } from "@/components/adx/flow-renderer";
 import { KYC_STATE_META, shapeKycSummary } from "@/services/kyc-state";
 import { KycRowActions } from "@/app/(admin)/kyc/_shared/kyc-row-actions";
+import { accountStateFrom } from "@/services/account-state";
 import { RecordAtDeskDialog } from "@/app/(admin)/kyc/_shared/record-at-desk-dialog";
 import { lastActivityAt, type AdvertiserSummary } from "@/services/advertisers";
+import { SignsInAs, personNameOf } from "@/components/adx/app-account";
+import { idLine } from "@/services/identifiers";
 import { relativeTime } from "@/services/notifications";
 import { EditIndustryDialog } from "../industry-picker";
 import { type OrdersPage } from "@/services/orders";
 import {
     CAMPAIGN_STATUS_TONE,
     campaignStatusLabel,
-    flightLabel,
+    campaignFlightLabel,
     type CampaignRow,
 } from "@/services/campaigns";
 import { ScanForSignalsButton } from "@/components/adx/scan-for-signals";
 import { SuspensionActions } from "@/components/adx/suspend-dialog";
 import { SuspensionCard } from "@/components/adx/suspension-card";
+import { CustomFieldsCard } from "@/components/adx/custom-fields-card";
 import { countRunningCampaigns, type SuspensionView } from "@/services/suspension";
 import {
     INVOICE_KIND_META,
@@ -75,6 +82,16 @@ interface AdvertiserDetailProps {
  * Contact card's Industry row (Q119) prints the row's `industry` with an
  * Edit control over the picklist `GET /advertisers/industries` serves.
  */
+/**
+ * DR 08's account type with the entity type beside it when one is known
+ * ("Organisation · Government or education"). An agency keeps its own word,
+ * since DR 08's three have none for it.
+ */
+function advertiserTypeLine(advertiser: Pick<Advertiser, "type" | "entityType">): string {
+    if (advertiser.type === "AGENCY") return advertiser.entityType ? `${ADVERTISER_TYPE_LABELS.AGENCY} · ${entityTypeLabel(advertiser.entityType)}` : ADVERTISER_TYPE_LABELS.AGENCY;
+    return accountTypeLine(ladderAccountType("ADVERTISER", advertiser.type), advertiser.entityType);
+}
+
 export function AdvertiserDetail({
     advertiser,
     campaigns,
@@ -111,7 +128,7 @@ export function AdvertiserDetail({
         /* Lot A: the closure state of the account behind the profile — the
            banner above the header, the button in it, one read. Null `userId`
            (nobody has registered against the profile yet) offers nothing. */
-        <AccountClosure userId={advertiser.userId} name={advertiser.name} closed={advertiser.user ?? null}>
+        <AccountClosure userId={advertiser.userId} name={advertiser.name} closed={advertiser.user ?? null} directoryHref="/advertisers/directory">
         {(closure) => (
         <DetailShell
             backHref="/advertisers/directory"
@@ -123,13 +140,14 @@ export function AdvertiserDetail({
                     {/* QR-15: the desk edits everything the app collects, on the same form it onboards with. */}
                     <EditAdvertiserDrawer advertiser={advertiser} onChanged={onChanged} />
                     <Button variant="outline" className="bg-card" asChild>
-                        <Link href={`/campaigns?advertiserId=${encodeURIComponent(advertiser.id)}`}>
+                        <Link href={`/campaigns/directory?advertiserId=${encodeURIComponent(advertiser.id)}`}>
                             View campaign queue
                         </Link>
                     </Button>
                     <SuspensionActions
                         partyType="ADVERTISER"
                         partyId={advertiser.id}
+                        closed={Boolean(closure.closed?.closedAt)}
                         partyName={advertiser.name}
                         current={scopes}
                         /* The page already has the campaigns, so the dialog can
@@ -140,12 +158,15 @@ export function AdvertiserDetail({
                     {/* Lot G (Q138): the fraud signals over this advertiser, on the fraud desk. */}
                     <ScanForSignalsButton subjectType="ADVERTISER" subjectId={advertiser.id} />
                     <CloseAccountButton slot={closure} />
+                    {/* 2 Oct 2026: only for an account with no history — the server says which. */}
+                    <DeleteAccountButton slot={closure} />
                 </>
             }
             subtitle={[
-                advertiser.displayId,
+                /* The account's own id, named by its kind — the person behind it has their own ADX ID on the Person row. */
+                idLine("ADVERTISER", advertiser.displayId),
                 advertiser.industry,
-                ADVERTISER_TYPE_LABELS[advertiser.type],
+                advertiserTypeLine(advertiser),
                 advertiser.city,
                 `Joined ${formatDate(advertiser.joinedAt)}`,
             ]
@@ -208,14 +229,12 @@ export function AdvertiserDetail({
                                     items={[
                                         ["Mobile", advertiser.contact],
                                         ["Email", advertiser.email ?? "—"],
-                                        /* QR-15: the person behind the account — what the Edit details drawer edits. */
+                                        /* QR-15: the person behind the account (what the Edit details drawer edits) and their own
+                                           ADX-… id, beside the account's ADV-… in the header. 2 Oct 2026: one row, linked to their
+                                           account under Users, or the muted "No app account" when nobody signs in for it. */
                                         [
-                                            "Person",
-                                            advertiser.person
-                                                ? [advertiser.person.firstName, advertiser.person.lastName].filter(Boolean).join(" ") || "—"
-                                                : advertiser.userId
-                                                  ? "—"
-                                                  : "No app account yet",
+                                            "Signs in as",
+                                            <SignsInAs key="signs-in-as" userId={advertiser.userId} name={personNameOf(advertiser.person)} displayId={advertiser.person?.displayId} />,
                                         ],
                                         ["Registered name", advertiser.companyName ?? "—"],
                                         [
@@ -232,7 +251,9 @@ export function AdvertiserDetail({
                                                 </button>
                                             </span>,
                                         ],
-                                        ["Entity", ADVERTISER_TYPE_LABELS[advertiser.type]],
+                                        ["Account type", advertiserTypeLine(advertiser)],
+                                        /* Phase D: what the advertiser verifies as — it picks the Digio workflow; asked at the Digio start while unknown. */
+                                        ["Entity type", entityTypeLabel(advertiser.entityType)],
                                         [
                                             "KYC",
                                             <span key="kyc" className="inline-flex flex-wrap items-center justify-end gap-1.5 text-right">
@@ -248,6 +269,8 @@ export function AdvertiserDetail({
                                                 .filter(Boolean)
                                                 .join(", ") || "—",
                                         ],
+                                        /* AD-1: the PIN and the country on the billing address. */
+                                        ["PIN / country", [advertiser.postalCode, advertiser.country].filter(Boolean).join(" · ") || "—"],
                                         ["Joined", formatDate(advertiser.joinedAt)],
                                         /* QR-14/15: the door the account came through, and who opened it. */
                                         ["Onboarded", onboardingLine(advertiser.onboarding)],
@@ -273,14 +296,16 @@ export function AdvertiserDetail({
                                             hasAccount={accountUserId !== null}
                                             contact={advertiser.contact || advertiser.email}
                                             request={kycRequest}
-                                            caseHref={kycHasCase ? `/kyc/advertisers?state=${kycState.toLowerCase()}` : null}
-                                            onDigio={() => advertiserKycService.requestDigio(advertiser.id)}
-                                            onRequest={(channel, note) => advertiserKycService.request(advertiser.id, channel, note)}
+                                            caseHref={kycHasCase ? `/kyc/advertisers/${advertiser.id}` : null}
+                                            onDigio={(entityType) => advertiserKycService.requestDigio(advertiser.id, entityType)}
+                                            onRequest={(channel, note, entityType) => advertiserKycService.request(advertiser.id, channel, note, entityType)}
                                             onRecord={() => {
                                                 setRecordingKey((value) => value + 1);
                                                 setRecording(true);
                                             }}
                                             onChanged={onChanged}
+                                            accountState={accountStateFrom({ closedAt: advertiser.user?.closedAt, scopes })}
+                                            suspensionScopes={scopes}
                                         />
                                         <RecordAtDeskDialog
                                             key={recordingKey}
@@ -304,7 +329,7 @@ export function AdvertiserDetail({
                                             onSubmit={async (body) => {
                                                 // N3-B: the desk records over the PROFILE id; with no record yet the PUT opens one, typed by the profile's entity type.
                                                 await advertiserKycService.recordAtDesk(advertiser.id, kycCase?.kycId ? body : { ...body, kycType: advertiser.type });
-                                                return { caseHref: "/kyc/advertisers" };
+                                                return { caseHref: `/kyc/advertisers/${advertiser.id}` };
                                             }}
                                             onRecorded={() => {
                                                 setRecording(false);
@@ -317,6 +342,8 @@ export function AdvertiserDetail({
 
                             <RecentBookingsCard bookings={bookings} />
                             <SuspensionCard view={suspension} className="lg:col-span-2" />
+                            {/* CF-1 (27 Sep 2026): the extra questions Settings › Custom fields asks of an advertiser; draws nothing when there are none. */}
+                            <CustomFieldsCard entity="ADVERTISER" entityId={advertiser.id} className="lg:col-span-2" />
                             <EditIndustryDialog
                                 key={`${advertiser.industry ?? ""}:${editingIndustry}`}
                                 advertiserId={advertiser.id}
@@ -376,7 +403,7 @@ export function AdvertiserDetail({
                                 {
                                     key: "flight",
                                     label: "Flight",
-                                    render: (campaign) => flightLabel(campaign),
+                                    render: (campaign) => campaignFlightLabel(campaign),
                                 },
                                 {
                                     key: "status",
@@ -485,7 +512,7 @@ function RecentBookingsCard({ bookings }: { bookings: OrdersPage | null }) {
             <div className="flex items-baseline justify-between gap-3">
                 <h3 className="text-base font-semibold text-foreground">Recent bookings</h3>
                 {bookings && bookings.total > bookings.items.length && (
-                    <Link href="/bookings" className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+                    <Link href="/orders" className="text-xs font-medium text-primary underline-offset-4 hover:underline">
                         All {formatNumber(bookings.total)} on the board
                     </Link>
                 )}

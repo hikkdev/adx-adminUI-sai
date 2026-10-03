@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ListingsNav } from "../listings-nav";
 import { VerificationLoader } from "./verification-loader";
 
-export const metadata: Metadata = { title: "Verification queue" };
+export const metadata: Metadata = { title: "Spot re-checks" };
 
 export default function VerificationQueuePage() {
     return (

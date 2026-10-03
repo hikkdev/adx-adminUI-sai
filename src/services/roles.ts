@@ -10,7 +10,7 @@ import { isLive } from "@/lib/api-config";
  * given one, and the membership route lives with the person, under `/users`.
  *
  * The catalogue comes from `GET /roles-config/capabilities` — the module
- * groups (fourteen since Lot AA added `work`), each with the tiers it has
+ * groups (eighteen since RP-3 split out pricing, print partners and agents), each with the tiers it has
  * (view / edit / approve) plus a handful of named capabilities; the matrix
  * draws whatever the backend lists, so a new group needs no change here. Ids are `<group>.<tier>` or `<group>.<name>`.
  *
@@ -31,13 +31,6 @@ export type PermissionTier = "view" | "edit" | "approve";
 
 /** In ascending order. `approve` implies the two below it. */
 export const PERMISSION_TIERS: readonly PermissionTier[] = ["view", "edit", "approve"];
-
-export const TIER_LABEL: Record<PermissionTier | "none", string> = {
-    none: "None",
-    view: "View",
-    edit: "Edit",
-    approve: "Approve",
-};
 
 export interface PermissionEntry {
     id: string;
@@ -133,6 +126,37 @@ export function withTier(
 /** The permissions with one named capability toggled. */
 export function toggled(permissions: readonly string[], id: string): string[] {
     return permissions.includes(id) ? permissions.filter((p) => p !== id) : [...permissions, id];
+}
+
+/**
+ * The permissions with one entry ticked or unticked, the tiers kept nested:
+ * ticking Approve grants view and edit beneath it, unticking View drops edit
+ * and approve above it. A named capability is on its own either way.
+ */
+export function withEntryToggled(
+    permissions: readonly string[],
+    group: PermissionGroup,
+    entry: PermissionEntry,
+): string[] {
+    if (entry.kind === "capability") return toggled(permissions, entry.id);
+    if (!permissions.includes(entry.id)) return withTier(permissions, group, entry.kind);
+    const rank = PERMISSION_TIERS.indexOf(entry.kind);
+    const below = tiersOf(group).filter((tier) => PERMISSION_TIERS.indexOf(tier) < rank).pop();
+    return withTier(permissions, group, below ?? "none");
+}
+
+/**
+ * How one entry reads in the matrix. A tier's catalogue label is the bare
+ * word ("View"), which says nothing in a grid of eighteen groups, so it is
+ * joined with its group the way the DR 10 frame phrases its rows ("View
+ * publishers and advertisers"): "View finance", "Approve supply". An
+ * acronym keeps its case ("View KYC"); a named capability is already a
+ * sentence.
+ */
+export function entryLabel(group: PermissionGroup, entry: PermissionEntry): string {
+    if (entry.kind === "capability") return entry.label;
+    const noun = group.label === group.label.toUpperCase() ? group.label : group.label.toLowerCase();
+    return `${entry.label} ${noun}`;
 }
 
 /** "8 of 33" on the role list: how many of the catalogue the role holds. */

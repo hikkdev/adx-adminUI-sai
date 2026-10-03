@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { navigation, type NavItem } from "@/config/navigation";
+import { activeRailHref, navigation, type NavItem } from "@/config/navigation";
 import { useAuth } from "@/lib/auth";
 
 interface SidebarProps {
@@ -23,7 +23,9 @@ function NavLink({
     onNavigate: () => void;
 }) {
     const pathname = usePathname();
-    const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    /* The most specific row wins. Some rail hrefs are ancestors of others —
+       `/listings` and `/listings/review` — and a plain prefix test lit both. */
+    const active = activeRailHref(pathname) === item.href;
 
     return (
         <Link

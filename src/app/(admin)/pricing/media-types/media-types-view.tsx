@@ -282,10 +282,11 @@ function NewMediaType({
                                 ))}
                             </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                            A hard gate on matching — a transit panel never matches a mall panel.
-                        </p>
                     </div>
+                    {/* One line under the whole row, never a hint under one cell (the form symmetry policy). */}
+                    <p className="-mt-2 text-xs text-muted-foreground sm:col-span-2">
+                        The category is a hard gate on matching — a transit panel never matches a mall panel.
+                    </p>
                 </div>
 
                 <div className="grid gap-5 lg:grid-cols-2">

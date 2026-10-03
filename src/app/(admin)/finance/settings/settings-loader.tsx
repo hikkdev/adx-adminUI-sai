@@ -12,7 +12,7 @@ import {
     type TaxRate,
     type WithdrawalLimit,
 } from "@/services/finance";
-import { settingsService, type FinanceSettings, type InstallationCommissionMode } from "@/services/settings";
+import { settingsService, type AgentPayDefaults, type FinanceSettings, type InstallationCommissionMode } from "@/services/settings";
 import { invoicesService, type LegalEntity } from "@/services/invoices";
 import { FinanceNav } from "../finance-nav";
 import { FinanceOffline } from "../finance-offline";
@@ -34,6 +34,8 @@ interface Loaded {
     rails: RailStatus[];
     /** Lot G (Q124): the weekly draft's next instant and last batch. Null when that read failed. */
     schedule: PayoutSchedule | null;
+    /** CP-1: the pay defaults per grade, off the same platform row. Null when that read failed or the server predates them. */
+    agentPay: AgentPayDefaults | null;
 }
 
 /**
@@ -63,6 +65,7 @@ export function SettingsLoader() {
                 financeSettings: null,
                 rails: [],
                 schedule: null,
+                agentPay: null,
             };
         }
         const [limits, taxRates, incentiveRates, legalEntity, platform, bankAccounts, rails, schedule] = await Promise.all([
@@ -88,6 +91,7 @@ export function SettingsLoader() {
             financeSettings: platform?.finance ?? null,
             rails,
             schedule,
+            agentPay: platform?.agents?.compensation ?? null,
         };
     });
 
@@ -107,6 +111,7 @@ export function SettingsLoader() {
                             financeSettings={data.financeSettings}
                             rails={data.rails}
                             schedule={data.schedule}
+                            agentPay={data.agentPay}
                             onChanged={resource.reload}
                         />
                     )}

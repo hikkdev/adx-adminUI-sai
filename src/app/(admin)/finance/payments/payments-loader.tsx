@@ -50,7 +50,7 @@ export function PaymentsLoader() {
             <FinanceNav />
             <PageHeader
                 title="Payments"
-                subtitle="Money arriving from advertisers through Razorpay, Cashfree and CCAvenue. A capture tops up the wallet and the campaign or sale is settled out of it; a refund goes back to the card or UPI it came from."
+                subtitle="Money arriving from advertisers through Razorpay, Cashfree and CCAvenue, or sent to ADX's account by bank transfer and confirmed here against the statement. A capture tops up the wallet and the campaign or sale is settled out of it; a refund goes back to the card or UPI it came from."
             />
             {live ? (
                 <ResourceBoundary resource={resource}>
